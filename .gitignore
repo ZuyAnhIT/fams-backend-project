@@ -1,0 +1,18 @@
+# Java
+api-server/target/
+
+# Python
+ai-service/venv/
+__pycache__/
+*.pyc
+
+# Env
+.env
+*.env
+
+# IDE
+.idea/
+.vscode/
+
+# Logs
+*.log
