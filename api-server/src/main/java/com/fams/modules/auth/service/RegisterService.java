@@ -1,26 +1,25 @@
 package com.fams.modules.auth.service;
 
-import com.fams.modules.auth.dto.request.LoginRequest;
+import com.fams.modules.auth.dto.request.RegisterRequest;
 import com.fams.modules.auth.dto.response.LoginResponse;
 import com.fams.modules.auth.entity.RefreshToken;
 import com.fams.modules.auth.entity.User;
 import com.fams.modules.auth.repository.RefreshTokenRepository;
 import com.fams.modules.auth.repository.UserRepository;
-import com.fams.shared.constants.AppConstants;
-import com.fams.shared.exception.AccountLockedException;
-import com.fams.shared.exception.InvalidCredentialsException;
+import com.fams.shared.exception.DuplicateResourceException;
 import com.fams.shared.security.JwtProvider;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 import java.time.OffsetDateTime;
 
 @Slf4j
 @Service
-public class AuthService {
+public class RegisterService {
 
     private final UserRepository userRepository;
     private final RefreshTokenRepository refreshTokenRepository;
@@ -29,7 +28,7 @@ public class AuthService {
     private final int accessTtlMinutes;
     private final int refreshTtlDays;
 
-    public AuthService(
+    public RegisterService(
             UserRepository userRepository,
             RefreshTokenRepository refreshTokenRepository,
             JwtProvider jwtProvider,
@@ -45,48 +44,39 @@ public class AuthService {
     }
 
     @Transactional
-    public LoginResponse login(LoginRequest request) {
-        // 1. Find user by email
-        User user = userRepository.findByEmailAndDeletedAtIsNull(request.getEmail())
-                .orElseThrow(() -> new InvalidCredentialsException("Invalid email or password"));
+    public LoginResponse register(RegisterRequest request) {
+        String email = StringUtils.hasText(request.getEmail()) ? request.getEmail().trim() : null;
+        String phone = StringUtils.hasText(request.getPhone()) ? request.getPhone().trim() : null;
 
-        // 2. Check if account is locked
-        if (user.getLockedUntil() != null && user.getLockedUntil().isAfter(OffsetDateTime.now())) {
-            throw new AccountLockedException(user.getLockedUntil());
+        if (email == null && phone == null) {
+            throw new IllegalArgumentException("At least one of email or phone is required");
         }
 
-        // 3. Verify password
-        if (!passwordEncoder.matches(request.getPassword(), user.getPasswordHash())) {
-            int attempts = user.getFailedLoginAttempts() + 1;
-            user.setFailedLoginAttempts(attempts);
-
-            if (attempts >= AppConstants.MAX_FAILED_ATTEMPTS) {
-                OffsetDateTime lockUntil = OffsetDateTime.now()
-                        .plusMinutes(AppConstants.LOCK_DURATION_MINUTES);
-                user.setLockedUntil(lockUntil);
-                userRepository.save(user);
-                log.warn("Account locked for user {} until {}", user.getEmail(), lockUntil);
-                throw new AccountLockedException(lockUntil);
-            }
-
-            userRepository.save(user);
-            throw new InvalidCredentialsException("Invalid email or password");
+        if (email != null && userRepository.findByEmailAndDeletedAtIsNull(email).isPresent()) {
+            throw new DuplicateResourceException("Email is already registered");
         }
 
-        // 4. Success: reset failed attempts
-        user.setFailedLoginAttempts(0);
-        user.setLockedUntil(null);
+        if (phone != null && userRepository.findByPhoneAndDeletedAtIsNull(phone).isPresent()) {
+            throw new DuplicateResourceException("Phone number is already registered");
+        }
+
+        User user = User.builder()
+                .email(email)
+                .phone(phone)
+                .passwordHash(passwordEncoder.encode(request.getPassword()))
+                .displayName(request.getDisplayName())
+                .isActive(true)
+                .failedLoginAttempts(0)
+                .build();
         userRepository.save(user);
+        log.info("New user registered: id={}", user.getId());
 
-        // 5. Generate access token
-        String deviceId = (request.getDeviceId() != null) ? request.getDeviceId() : "unknown";
-        String accessToken = jwtProvider.generateAccessToken(user.getId(), user.getEmail(), deviceId);
+        String deviceId = StringUtils.hasText(request.getDeviceId()) ? request.getDeviceId() : "unknown";
+        String accessToken = jwtProvider.generateAccessToken(user.getId(), email, deviceId);
 
-        // 6. Generate refresh token
-        String rawRefreshToken = jwtProvider.generateRefreshTokenRaw();
-        String tokenHash = jwtProvider.hashToken(rawRefreshToken);
+        String rawRefresh = jwtProvider.generateRefreshTokenRaw();
+        String tokenHash = jwtProvider.hashToken(rawRefresh);
 
-        // 7. Save refresh token
         RefreshToken refreshToken = RefreshToken.builder()
                 .user(user)
                 .tokenHash(tokenHash)
@@ -95,10 +85,9 @@ public class AuthService {
                 .build();
         refreshTokenRepository.save(refreshToken);
 
-        // 8. Return response
         return LoginResponse.builder()
                 .accessToken(accessToken)
-                .refreshToken(rawRefreshToken)
+                .refreshToken(rawRefresh)
                 .tokenType("Bearer")
                 .expiresIn((long) accessTtlMinutes * 60)
                 .build();

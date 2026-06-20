@@ -1,18 +1,39 @@
-# Java
-api-server/target/
-
-# Python
-ai-service/venv/
-__pycache__/
-*.pyc
-
-# Env
+# ── Secrets ───────────────────────────────────────────────────────
 .env
 *.env
+!.env.example
 
-# IDE
+# ── Java build ────────────────────────────────────────────────────
+api-server/target/
+api-server/.mvn/wrapper/maven-wrapper.jar
+*.class
+*.jar
+*.war
+
+# ── Python (ai-service — frozen but still in repo) ───────────────
+ai-service/venv/
+ai-service/__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+
+# ── Docker volumes / local data ───────────────────────────────────
+docker/postgres/data/
+docker/redis/data/
+
+# ── IDE ───────────────────────────────────────────────────────────
 .idea/
+*.iml
 .vscode/
+*.code-workspace
 
-# Logs
+# ── OS ────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── Logs ──────────────────────────────────────────────────────────
 *.log
+logs/
+
+# ── Maven cache (if accidentally created locally) ─────────────────
+.m2/

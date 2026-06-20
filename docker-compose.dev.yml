@@ -1,0 +1,22 @@
+# Dev overrides — use with:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+#
+# The api container uses the maven image directly so you can
+# edit source on the host and restart the container to pick up
+# changes without rebuilding the image.
+
+services:
+
+  fams-api:
+    image: maven:3.9-eclipse-temurin-21
+    container_name: fams-api
+    working_dir: /workspace
+    volumes:
+      - ./api-server:/workspace          # host source → container
+      - maven_cache:/root/.m2            # persist downloaded deps
+    command: mvn spring-boot:run -Dspring-boot.run.jvmArguments="-Xms256m -Xmx512m"
+    environment:
+      SPRING_PROFILES_ACTIVE: dev
+
+volumes:
+  maven_cache:
