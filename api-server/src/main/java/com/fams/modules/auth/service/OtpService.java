@@ -103,7 +103,7 @@ public class OtpService {
                 .orElseThrow(InvalidOtpException::new);
 
         String deviceId = (request.getDeviceId() != null) ? request.getDeviceId() : "unknown";
-        String accessToken = jwtProvider.generateAccessToken(user.getId(), user.getEmail(), deviceId);
+        String accessToken = jwtProvider.generateAccessToken(user.getId(), user.getEmail(), deviceId, user.isPlatformAdmin());
 
         String rawRefresh = jwtProvider.generateRefreshTokenRaw();
         String tokenHash = jwtProvider.hashToken(rawRefresh);

@@ -1,0 +1,20 @@
+-- Reference copy of permission seed data.
+-- Authoritative version: Flyway migration V13__seed_roles_and_permissions.sql
+-- Format: resource:action
+
+-- users: create, read, update, delete, list
+-- employees: create, read, update, delete, list
+-- sites: create, read, update, delete, list
+-- shifts: create, read, update, delete, list
+-- assignments: create, read, update, delete, list
+-- checkins: create, read, list
+-- attendance: read, list, export
+-- randomchecks: create, read, list, configure
+-- violations: create, read, update, list
+-- reports: read, list, export
+-- notifications: read, list
+-- audit: read, list
+-- tenants: create, read, update, list  (platform-only)
+-- plans: create, read, update, list    (platform-only)
+-- roles: create, read, update, delete, list
+-- permissions: read, list

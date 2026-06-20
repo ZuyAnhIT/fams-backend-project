@@ -80,7 +80,7 @@ public class AuthService {
 
         // 5. Generate access token
         String deviceId = (request.getDeviceId() != null) ? request.getDeviceId() : "unknown";
-        String accessToken = jwtProvider.generateAccessToken(user.getId(), user.getEmail(), deviceId);
+        String accessToken = jwtProvider.generateAccessToken(user.getId(), user.getEmail(), deviceId, user.isPlatformAdmin());
 
         // 6. Generate refresh token
         String rawRefreshToken = jwtProvider.generateRefreshTokenRaw();

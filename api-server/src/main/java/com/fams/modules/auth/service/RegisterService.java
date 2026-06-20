@@ -72,7 +72,7 @@ public class RegisterService {
         log.info("New user registered: id={}", user.getId());
 
         String deviceId = StringUtils.hasText(request.getDeviceId()) ? request.getDeviceId() : "unknown";
-        String accessToken = jwtProvider.generateAccessToken(user.getId(), email, deviceId);
+        String accessToken = jwtProvider.generateAccessToken(user.getId(), email, deviceId, false);
 
         String rawRefresh = jwtProvider.generateRefreshTokenRaw();
         String tokenHash = jwtProvider.hashToken(rawRefresh);

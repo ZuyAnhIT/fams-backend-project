@@ -2,10 +2,13 @@ package com.fams.shared.security;
 
 import com.fams.modules.auth.entity.User;
 import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;
 
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.UUID;
 
 public class FamsUserDetails implements UserDetails {
@@ -13,11 +16,25 @@ public class FamsUserDetails implements UserDetails {
     private final UUID userId;
     private final String email;
     private final String passwordHash;
+    private final boolean platformAdmin;
+    private final Set<GrantedAuthority> authorities;
 
     public FamsUserDetails(User user) {
+        this(user, Collections.emptySet());
+    }
+
+    public FamsUserDetails(User user, Set<String> permissionNames) {
         this.userId = user.getId();
         this.email = user.getEmail();
         this.passwordHash = user.getPasswordHash();
+        this.platformAdmin = user.isPlatformAdmin();
+
+        Set<GrantedAuthority> auths = new HashSet<>();
+        if (user.isPlatformAdmin()) {
+            auths.add(new SimpleGrantedAuthority("ROLE_PLATFORM_ADMIN"));
+        }
+        permissionNames.forEach(p -> auths.add(new SimpleGrantedAuthority(p)));
+        this.authorities = Collections.unmodifiableSet(auths);
     }
 
     public UUID getUserId() {
@@ -28,9 +45,13 @@ public class FamsUserDetails implements UserDetails {
         return email;
     }
 
+    public boolean isPlatformAdmin() {
+        return platformAdmin;
+    }
+
     @Override
     public Collection<? extends GrantedAuthority> getAuthorities() {
-        return Collections.emptyList();
+        return authorities;
     }
 
     @Override

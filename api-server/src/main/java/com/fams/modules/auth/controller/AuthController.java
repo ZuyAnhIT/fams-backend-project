@@ -1,6 +1,9 @@
 package com.fams.modules.auth.controller;
 
+import com.fams.modules.auth.dto.request.ChangePasswordRequest;
 import com.fams.modules.auth.dto.request.LoginRequest;
+import com.fams.modules.auth.dto.request.UpdateProfileRequest;
+import com.fams.modules.auth.dto.response.UserProfileResponse;
 import com.fams.modules.auth.dto.request.LogoutRequest;
 import com.fams.modules.auth.dto.request.RegisterRequest;
 import com.fams.modules.auth.dto.request.SendOtpRequest;
@@ -8,9 +11,11 @@ import com.fams.modules.auth.dto.request.VerifyOtpRequest;
 import com.fams.modules.auth.dto.response.LoginResponse;
 import com.fams.modules.auth.repository.HealthCheckRepository;
 import com.fams.modules.auth.service.AuthService;
+import com.fams.modules.auth.service.ChangePasswordService;
 import com.fams.modules.auth.service.LogoutService;
 import com.fams.modules.auth.service.OtpService;
 import com.fams.modules.auth.service.RegisterService;
+import com.fams.modules.auth.service.UserProfileService;
 import com.fams.shared.response.ApiResponse;
 import com.fams.shared.security.FamsUserDetails;
 import jakarta.servlet.http.HttpServletRequest;
@@ -31,17 +36,23 @@ public class AuthController {
     private final OtpService otpService;
     private final LogoutService logoutService;
     private final RegisterService registerService;
+    private final ChangePasswordService changePasswordService;
+    private final UserProfileService userProfileService;
 
     public AuthController(HealthCheckRepository healthCheckRepository,
                           AuthService authService,
                           OtpService otpService,
                           LogoutService logoutService,
-                          RegisterService registerService) {
+                          RegisterService registerService,
+                          ChangePasswordService changePasswordService,
+                          UserProfileService userProfileService) {
         this.healthCheckRepository = healthCheckRepository;
         this.authService = authService;
         this.otpService = otpService;
         this.logoutService = logoutService;
         this.registerService = registerService;
+        this.changePasswordService = changePasswordService;
+        this.userProfileService = userProfileService;
     }
 
     @GetMapping("/health")
@@ -90,6 +101,32 @@ public class AuthController {
                 ? authHeader.substring(7) : "";
         log.info("Logout requested");
         logoutService.logout(rawAccessToken, request.getRefreshToken());
+        return ResponseEntity.ok(ApiResponse.success(null));
+    }
+
+    @GetMapping("/me")
+    public ResponseEntity<ApiResponse<UserProfileResponse>> getProfile(
+            @AuthenticationPrincipal FamsUserDetails userDetails) {
+        log.info("Profile fetch for user {}", userDetails.getUserId());
+        UserProfileResponse profile = userProfileService.getProfile(userDetails.getUserId());
+        return ResponseEntity.ok(ApiResponse.success(profile));
+    }
+
+    @PatchMapping("/me")
+    public ResponseEntity<ApiResponse<UserProfileResponse>> updateProfile(
+            @Valid @RequestBody UpdateProfileRequest request,
+            @AuthenticationPrincipal FamsUserDetails userDetails) {
+        log.info("Profile update for user {}", userDetails.getUserId());
+        UserProfileResponse profile = userProfileService.updateProfile(userDetails.getUserId(), request);
+        return ResponseEntity.ok(ApiResponse.success(profile));
+    }
+
+    @PostMapping("/change-password")
+    public ResponseEntity<ApiResponse<Void>> changePassword(
+            @Valid @RequestBody ChangePasswordRequest request,
+            @AuthenticationPrincipal FamsUserDetails userDetails) {
+        log.info("Change password requested by user {}", userDetails.getUserId());
+        changePasswordService.changePassword(userDetails.getUserId(), request);
         return ResponseEntity.ok(ApiResponse.success(null));
     }
 

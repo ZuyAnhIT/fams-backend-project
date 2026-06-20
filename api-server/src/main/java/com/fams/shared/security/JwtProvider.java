@@ -34,7 +34,7 @@ public class JwtProvider {
         this.refreshTtlDays = refreshTtlDays;
     }
 
-    public String generateAccessToken(UUID userId, String email, String deviceId) {
+    public String generateAccessToken(UUID userId, String email, String deviceId, boolean isPlatformAdmin) {
         Date now = new Date();
         Date expiry = new Date(now.getTime() + (long) accessTtlMinutes * 60 * 1000);
 
@@ -42,6 +42,7 @@ public class JwtProvider {
                 .subject(userId.toString())
                 .claim("email", email)
                 .claim("deviceId", deviceId)
+                .claim("isPlatformAdmin", isPlatformAdmin)
                 .issuedAt(now)
                 .expiration(expiry)
                 .signWith(signingKey)

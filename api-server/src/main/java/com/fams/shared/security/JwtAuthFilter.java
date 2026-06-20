@@ -16,7 +16,6 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
-import java.util.Collections;
 import java.util.UUID;
 
 @Slf4j
@@ -62,6 +61,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
                 }
 
                 String email = claims.get("email", String.class);
+                Boolean isPlatformAdmin = claims.get("isPlatformAdmin", Boolean.class);
 
                 FamsUserDetails userDetails = new FamsUserDetails(
                         com.fams.modules.auth.entity.User.builder()
@@ -69,6 +69,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
                                 .email(email)
                                 .passwordHash("")
                                 .displayName("")
+                                .isPlatformAdmin(Boolean.TRUE.equals(isPlatformAdmin))
                                 .build()
                 );
 
@@ -76,7 +77,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
                         new UsernamePasswordAuthenticationToken(
                                 userDetails,
                                 null,
-                                Collections.emptyList()
+                                userDetails.getAuthorities()
                         );
                 authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
                 SecurityContextHolder.getContext().setAuthentication(authentication);
