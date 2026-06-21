@@ -35,6 +35,22 @@ public class EmailService {
         log.info("Password reset email sent to {}", to);
     }
 
+    public void sendInvitationEmail(String to, String acceptUrl, int expiryDays) {
+        SimpleMailMessage msg = new SimpleMailMessage();
+        msg.setFrom(from);
+        msg.setTo(to);
+        msg.setSubject("FAMS - You have been invited to join");
+        msg.setText(
+                "You have been invited to join a company on FAMS (Field Attendance Management System).\n\n" +
+                "Click the link below to accept your invitation and set up your account:\n\n" +
+                acceptUrl + "\n\n" +
+                "This invitation will expire in " + expiryDays + " days.\n\n" +
+                "If you did not expect this invitation, please ignore this email."
+        );
+        mailSender.send(msg);
+        log.info("Invitation email sent to {}", to);
+    }
+
     public void sendVerificationEmail(String to, String verificationUrl) {
         SimpleMailMessage msg = new SimpleMailMessage();
         msg.setFrom(from);

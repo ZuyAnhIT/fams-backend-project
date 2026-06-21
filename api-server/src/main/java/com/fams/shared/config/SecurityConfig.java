@@ -62,6 +62,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/reset-password").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/login/totp").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/login/google").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/invitations/accept").permitAll()
                         .requestMatchers(HttpMethod.GET, "/google-login-test.html").permitAll()
                         .requestMatchers("/actuator/health", "/actuator/info").permitAll()
                         .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()

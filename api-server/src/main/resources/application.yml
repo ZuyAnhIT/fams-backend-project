@@ -63,6 +63,8 @@ app:
     verification-ttl-hours: ${EMAIL_VERIFICATION_TTL_HOURS:24}
   password-reset:
     rate-limit-max: ${PASSWORD_RESET_RATE_LIMIT_MAX:3}
+  invitation:
+    expiry-days: ${INVITATION_EXPIRY_DAYS:7}
   google:
     client-id: ${GOOGLE_CLIENT_ID}
 
