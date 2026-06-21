@@ -43,6 +43,18 @@ public class User {
     @Column(name = "is_active", nullable = false)
     private boolean isActive;
 
+    @Column(name = "email_verified", nullable = false)
+    private boolean emailVerified;
+
+    @Column(name = "totp_secret")
+    private String totpSecret;
+
+    @Column(name = "totp_enabled", nullable = false)
+    private boolean totpEnabled;
+
+    @Column(name = "google_id", unique = true)
+    private String googleId;
+
     @Column(name = "is_platform_admin", nullable = false)
     private boolean isPlatformAdmin;
 

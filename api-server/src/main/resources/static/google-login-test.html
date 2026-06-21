@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>FAMS — Google Login Test</title>
+  <style>
+    body { font-family: sans-serif; max-width: 600px; margin: 60px auto; padding: 0 20px; }
+    pre  { background: #f4f4f4; padding: 16px; border-radius: 6px; overflow-x: auto; white-space: pre-wrap; }
+    h2   { color: #333; }
+    #status { margin-top: 16px; font-weight: bold; }
+    .ok  { color: green; }
+    .err { color: red; }
+  </style>
+</head>
+<body>
+  <h2>FAMS Google Login — Manual Test</h2>
+  <p>Click the button below, sign in with your Google account, and the FAMS JWT tokens will appear below.</p>
+
+  <div id="g_id_onload"
+       data-client_id="916014457180-rbphgfddff7th4utprmoike2ks2s0uh4.apps.googleusercontent.com"
+       data-callback="handleGoogleCredential"
+       data-auto_prompt="false">
+  </div>
+  <div class="g_id_signin" data-type="standard"></div>
+
+  <div id="status"></div>
+  <pre id="result" style="display:none"></pre>
+
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <script>
+    function handleGoogleCredential(response) {
+      const statusEl = document.getElementById('status');
+      const resultEl = document.getElementById('result');
+      statusEl.textContent = 'Sending token to FAMS backend…';
+      statusEl.className = '';
+
+      fetch('/api/v1/auth/login/google', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken: response.credential, deviceId: 'browser-test' })
+      })
+      .then(res => res.json().then(data => ({ status: res.status, data })))
+      .then(({ status, data }) => {
+        resultEl.style.display = 'block';
+        resultEl.textContent = JSON.stringify(data, null, 2);
+        if (status === 200 && data.data && data.data.accessToken) {
+          statusEl.textContent = '✓ Login successful — FAMS JWT tokens received';
+          statusEl.className = 'ok';
+        } else {
+          statusEl.textContent = '✗ Login failed (HTTP ' + status + ')';
+          statusEl.className = 'err';
+        }
+      })
+      .catch(err => {
+        statusEl.textContent = '✗ Network error: ' + err.message;
+        statusEl.className = 'err';
+        resultEl.style.display = 'block';
+        resultEl.textContent = err.toString();
+      });
+    }
+  </script>
+</body>
+</html>

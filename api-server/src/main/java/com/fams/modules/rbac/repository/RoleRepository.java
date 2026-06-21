@@ -18,4 +18,10 @@ public interface RoleRepository extends JpaRepository<Role, UUID>, JpaSpecificat
 
     @Query("SELECT r FROM Role r JOIN FETCH r.permissions WHERE r.id = :id")
     Optional<Role> findByIdWithPermissions(@Param("id") UUID id);
+
+    boolean existsByTenantIdAndNameAndDeletedAtIsNull(UUID tenantId, String name);
+
+    Optional<Role> findByIdAndDeletedAtIsNull(UUID id);
+
+    boolean existsByTenantIdAndNameAndDeletedAtIsNullAndIdNot(UUID tenantId, String name, UUID id);
 }

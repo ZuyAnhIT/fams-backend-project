@@ -34,4 +34,21 @@ public interface UserRoleRepository extends JpaRepository<UserRole, UUID> {
     List<UserRole> findActiveByUserIdAndTenantId(
             @Param("userId") UUID userId,
             @Param("tenantId") UUID tenantId);
+
+    boolean existsByRoleIdAndDeletedAtIsNull(UUID roleId);
+
+    @Query("SELECT ur FROM UserRole ur JOIN FETCH ur.role WHERE ur.id = :id AND ur.deletedAt IS NULL")
+    java.util.Optional<UserRole> findActiveById(@Param("id") UUID id);
+
+    @Query("""
+            SELECT ur FROM UserRole ur
+            WHERE ur.userId = :userId
+              AND ur.role.id = :roleId
+              AND ur.tenantId = :tenantId
+            ORDER BY ur.createdAt DESC
+            """)
+    List<UserRole> findByUserIdAndRoleIdAndTenantId(
+            @Param("userId") UUID userId,
+            @Param("roleId") UUID roleId,
+            @Param("tenantId") UUID tenantId);
 }

@@ -8,6 +8,8 @@ BASE_URL="${BASE_URL:-http://localhost:8080}"
 PASS=0
 FAIL=0
 
+TS=$(date +%s)
+
 run_test() {
     local name="$1"
     local expected_status="$2"
@@ -29,6 +31,7 @@ echo "Target: $BASE_URL"
 echo ""
 
 # Test 1: Happy path — correct credentials should return 200 with tokens
+# (admin@fams.com was seeded with email_verified=true via migration)
 echo "--- Test 1: Happy path (correct credentials) ---"
 response=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/auth/login" \
@@ -78,6 +81,20 @@ run_test "Non-existent email" 401 \
     -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
     -d '{"email":"nobody@fams.com","password":"Admin@1234"}'
+
+# Test 5: Unverified email user cannot login → 403
+echo ""
+echo "--- Test 5: Unverified email user cannot login ---"
+UNVERIFIED_EMAIL="unverified_${TS}@fams.com"
+# Register a new user (email not yet verified)
+curl -s -o /dev/null -X POST "$BASE_URL/api/v1/auth/register" \
+    -H "Content-Type: application/json" \
+    -d "{\"email\":\"$UNVERIFIED_EMAIL\",\"password\":\"TestPass1\",\"displayName\":\"Unverified User\"}"
+
+run_test "Unverified email login blocked" 403 \
+    -X POST "$BASE_URL/api/v1/auth/login" \
+    -H "Content-Type: application/json" \
+    -d "{\"email\":\"$UNVERIFIED_EMAIL\",\"password\":\"TestPass1\"}"
 
 echo ""
 echo "=== Results ==="

@@ -52,11 +52,17 @@ public class SecurityConfig {
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers(HttpMethod.GET, "/api/v1/auth/health", "/api/v1/auth/db-health").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/auth/health", "/api/v1/auth/db-health",
+                                "/api/v1/auth/verify-email", "/api/v1/auth/totp/qr").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/login").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/register").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/otp/send").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/otp/verify").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/forgot-password").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/reset-password").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/login/totp").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/login/google").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/google-login-test.html").permitAll()
                         .requestMatchers("/actuator/health", "/actuator/info").permitAll()
                         .anyRequest().authenticated())
                 .exceptionHandling(ex -> ex

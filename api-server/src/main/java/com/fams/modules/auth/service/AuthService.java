@@ -8,24 +8,32 @@ import com.fams.modules.auth.repository.RefreshTokenRepository;
 import com.fams.modules.auth.repository.UserRepository;
 import com.fams.shared.constants.AppConstants;
 import com.fams.shared.exception.AccountLockedException;
+import com.fams.shared.exception.EmailNotVerifiedException;
 import com.fams.shared.exception.InvalidCredentialsException;
 import com.fams.shared.security.JwtProvider;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
+import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 @Slf4j
 @Service
 public class AuthService {
 
+    static final String TOTP_PENDING_PREFIX  = "login:totp:pending:";
+    static final int    TOTP_PENDING_TTL_MIN = 5;
+
     private final UserRepository userRepository;
     private final RefreshTokenRepository refreshTokenRepository;
     private final JwtProvider jwtProvider;
     private final BCryptPasswordEncoder passwordEncoder;
+    private final StringRedisTemplate redis;
     private final int accessTtlMinutes;
     private final int refreshTtlDays;
 
@@ -34,12 +42,14 @@ public class AuthService {
             RefreshTokenRepository refreshTokenRepository,
             JwtProvider jwtProvider,
             BCryptPasswordEncoder passwordEncoder,
+            StringRedisTemplate redis,
             @Value("${app.jwt.access-ttl-minutes}") int accessTtlMinutes,
             @Value("${app.jwt.refresh-ttl-days}") int refreshTtlDays) {
         this.userRepository = userRepository;
         this.refreshTokenRepository = refreshTokenRepository;
         this.jwtProvider = jwtProvider;
         this.passwordEncoder = passwordEncoder;
+        this.redis = redis;
         this.accessTtlMinutes = accessTtlMinutes;
         this.refreshTtlDays = refreshTtlDays;
     }
@@ -73,20 +83,36 @@ public class AuthService {
             throw new InvalidCredentialsException("Invalid email or password");
         }
 
-        // 4. Success: reset failed attempts
+        // 4. Check email verification (only for email-based accounts)
+        if (user.getEmail() != null && !user.isEmailVerified()) {
+            throw new EmailNotVerifiedException();
+        }
+
+        // 5. Reset failed attempts
         user.setFailedLoginAttempts(0);
         user.setLockedUntil(null);
         userRepository.save(user);
 
-        // 5. Generate access token
+        // 6. If TOTP is enabled, issue a pending token instead of real tokens
         String deviceId = (request.getDeviceId() != null) ? request.getDeviceId() : "unknown";
+        if (user.isTotpEnabled()) {
+            String pendingToken = UUID.randomUUID().toString();
+            // Store: userId|email|deviceId|isPlatformAdmin
+            String value = user.getId() + "|" + user.getEmail() + "|" + deviceId + "|" + user.isPlatformAdmin();
+            redis.opsForValue().set(TOTP_PENDING_PREFIX + pendingToken, value, TOTP_PENDING_TTL_MIN, TimeUnit.MINUTES);
+            log.info("TOTP required for user {} — pending token issued", user.getEmail());
+            return LoginResponse.builder()
+                    .totpRequired(true)
+                    .pendingToken(pendingToken)
+                    .build();
+        }
+
+        // 7. Generate access token
         String accessToken = jwtProvider.generateAccessToken(user.getId(), user.getEmail(), deviceId, user.isPlatformAdmin());
 
-        // 6. Generate refresh token
+        // 8. Generate and save refresh token
         String rawRefreshToken = jwtProvider.generateRefreshTokenRaw();
         String tokenHash = jwtProvider.hashToken(rawRefreshToken);
-
-        // 7. Save refresh token
         RefreshToken refreshToken = RefreshToken.builder()
                 .user(user)
                 .tokenHash(tokenHash)
@@ -95,7 +121,6 @@ public class AuthService {
                 .build();
         refreshTokenRepository.save(refreshToken);
 
-        // 8. Return response
         return LoginResponse.builder()
                 .accessToken(accessToken)
                 .refreshToken(rawRefreshToken)

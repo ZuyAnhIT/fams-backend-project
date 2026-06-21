@@ -15,6 +15,7 @@ services:
       - ./api-server:/workspace          # host source → container
       - maven_cache:/root/.m2            # persist downloaded deps
     command: mvn spring-boot:run -Dspring-boot.run.jvmArguments="-Xms256m -Xmx512m"
+    env_file: .env
     environment:
       SPRING_PROFILES_ACTIVE: dev
 

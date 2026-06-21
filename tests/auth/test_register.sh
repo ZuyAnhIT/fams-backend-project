@@ -34,7 +34,7 @@ echo "=== Auth Register Tests ==="
 echo "Target: $BASE_URL"
 echo ""
 
-# Test 1: Happy path — register with email → 201 with tokens
+# Test 1: Happy path — register with email → 201 with emailVerificationRequired=true, no tokens
 echo "--- Test 1: Register with email ---"
 response=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/auth/register" \
@@ -43,13 +43,13 @@ response=$(curl -s -w "\n%{http_code}" \
 body=$(echo "$response" | head -n -1)
 status=$(echo "$response" | tail -n 1)
 if [ "$status" -eq 201 ]; then
-    access_token=$(echo "$body" | grep -o '"accessToken":"[^"]*"' | head -1)
-    refresh_token=$(echo "$body" | grep -o '"refreshToken":"[^"]*"' | head -1)
-    if [ -n "$access_token" ] && [ -n "$refresh_token" ]; then
-        echo "PASS: Register with email (HTTP 201, tokens present)"
+    email_verification_required=$(echo "$body" | grep -o '"emailVerificationRequired":true' | head -1)
+    has_no_tokens=$(echo "$body" | grep -c '"accessToken":null\|"accessToken":""' || true)
+    if [ -n "$email_verification_required" ]; then
+        echo "PASS: Register with email (HTTP 201, emailVerificationRequired=true)"
         PASS=$((PASS + 1))
     else
-        echo "FAIL: Register with email — HTTP 201 but tokens missing"
+        echo "FAIL: Register with email — HTTP 201 but emailVerificationRequired not true"
         echo "Body: $body"
         FAIL=$((FAIL + 1))
     fi
@@ -75,7 +75,7 @@ run_test "Register - existing admin email" 409 \
     -H "Content-Type: application/json" \
     -d '{"email":"admin@fams.com","password":"TestPass1","displayName":"Admin Copy"}'
 
-# Test 4: Happy path — register with phone only → 201
+# Test 4: Happy path — register with phone only → 201 with tokens (no email verification needed)
 echo ""
 echo "--- Test 4: Register with phone only ---"
 response=$(curl -s -w "\n%{http_code}" \
@@ -86,11 +86,13 @@ body=$(echo "$response" | head -n -1)
 status=$(echo "$response" | tail -n 1)
 if [ "$status" -eq 201 ]; then
     access_token=$(echo "$body" | grep -o '"accessToken":"[^"]*"' | head -1)
-    if [ -n "$access_token" ]; then
-        echo "PASS: Register with phone (HTTP 201, token present)"
+    email_not_required=$(echo "$body" | grep -o '"emailVerificationRequired":false' | head -1)
+    if [ -n "$access_token" ] && [ -n "$email_not_required" ]; then
+        echo "PASS: Register with phone (HTTP 201, token present, no email verification required)"
         PASS=$((PASS + 1))
     else
-        echo "FAIL: Register with phone — HTTP 201 but token missing"
+        echo "FAIL: Register with phone — HTTP 201 but token missing or emailVerificationRequired not false"
+        echo "Body: $body"
         FAIL=$((FAIL + 1))
     fi
 else
@@ -146,6 +148,14 @@ run_test "Register - missing displayName" 400 \
     -X POST "$BASE_URL/api/v1/auth/register" \
     -H "Content-Type: application/json" \
     -d "{\"email\":\"other3_${TS}@fams.com\",\"password\":\"$TEST_PASS\"}"
+
+# Test 11: Login attempt with unverified email → 403
+echo ""
+echo "--- Test 11: Login with unverified email → 403 ---"
+run_test "Login - unverified email blocked" 403 \
+    -X POST "$BASE_URL/api/v1/auth/login" \
+    -H "Content-Type: application/json" \
+    -d "{\"email\":\"$TEST_EMAIL\",\"password\":\"$TEST_PASS\"}"
 
 echo ""
 echo "=== Results ==="
