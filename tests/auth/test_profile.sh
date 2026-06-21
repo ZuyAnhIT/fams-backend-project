@@ -28,16 +28,17 @@ echo "=== Auth Profile Tests ==="
 echo "Target: $BASE_URL"
 echo ""
 
-# ── Setup: register a test user and obtain a token ──────────────────────────
-UNIQUE_EMAIL="profile_$(date +%s)@test.com"
+# ── Setup: register a test user (phone-only) and obtain a token ──────────────
+TS=$(date +%s)
+TEST_PHONE="+849$(printf '%07d' $(( (TS + $$) % 10000000 )))"
 PASSWORD="Profile@123"
 DISPLAY_NAME="Test Profile User"
 
-echo "--- Setup: registering test user ($UNIQUE_EMAIL) ---"
+echo "--- Setup: registering test user (phone=$TEST_PHONE) ---"
 register_response=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/auth/register" \
     -H "Content-Type: application/json" \
-    -d "{\"email\":\"$UNIQUE_EMAIL\",\"password\":\"$PASSWORD\",\"displayName\":\"$DISPLAY_NAME\"}")
+    -d "{\"phone\":\"$TEST_PHONE\",\"password\":\"$PASSWORD\",\"displayName\":\"$DISPLAY_NAME\"}")
 
 register_body=$(echo "$register_response" | head -n -1)
 register_status=$(echo "$register_response" | tail -n 1)
@@ -77,15 +78,15 @@ if [ "$profile_status" -ne 200 ]; then
 else
     # Verify key fields are present and correct
     has_id=$(echo "$profile_body" | grep -c '"id"' || true)
-    has_email=$(echo "$profile_body" | grep -c "\"$UNIQUE_EMAIL\"" || true)
+    has_phone=$(echo "$profile_body" | grep -c "\"$TEST_PHONE\"" || true)
     has_display=$(echo "$profile_body" | grep -c "\"$DISPLAY_NAME\"" || true)
     no_password=$(echo "$profile_body" | grep -c '"passwordHash"' || true)
 
-    if [ "$has_id" -gt 0 ] && [ "$has_email" -gt 0 ] && [ "$has_display" -gt 0 ] && [ "$no_password" -eq 0 ]; then
+    if [ "$has_id" -gt 0 ] && [ "$has_phone" -gt 0 ] && [ "$has_display" -gt 0 ] && [ "$no_password" -eq 0 ]; then
         echo "PASS: Happy path (HTTP 200, fields correct, no passwordHash exposed)"
         PASS=$((PASS + 1))
     else
-        echo "FAIL: Happy path — field check failed (id=$has_id email=$has_email display=$has_display noPassword=$no_password)"
+        echo "FAIL: Happy path — field check failed (id=$has_id phone=$has_phone display=$has_display noPassword=$no_password)"
         echo "Body: $profile_body"
         FAIL=$((FAIL + 1))
     fi

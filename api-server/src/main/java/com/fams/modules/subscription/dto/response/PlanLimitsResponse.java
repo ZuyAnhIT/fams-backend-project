@@ -1,5 +1,6 @@
 package com.fams.modules.subscription.dto.response;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Builder;
 import lombok.Data;
 
@@ -8,16 +9,27 @@ import java.util.UUID;
 
 @Data
 @Builder
+@Schema(description = "Resource limits configured for a subscription plan")
 public class PlanLimitsResponse {
+
+    @Schema(description = "Limits record UUID")
     private UUID id;
+
+    @Schema(description = "UUID of the plan these limits belong to")
     private UUID planId;
-    /** null means unlimited */
+
+    @Schema(description = "Maximum number of employees (null = unlimited)", example = "500")
     private Integer maxEmployees;
-    /** null means unlimited */
+
+    @Schema(description = "Maximum number of sites (null = unlimited)", example = "10")
     private Integer maxSites;
-    /** null means unlimited (GB) */
+
+    @Schema(description = "Maximum storage in GB (null = unlimited)", example = "100")
     private Integer maxStorageGb;
-    /** null means unlimited */
+
+    @Schema(description = "Maximum random checks per month (null = unlimited)", example = "50")
     private Integer maxRandomChecksPerMonth;
+
+    @Schema(description = "Last update timestamp (UTC)")
     private OffsetDateTime updatedAt;
 }

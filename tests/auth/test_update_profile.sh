@@ -28,31 +28,23 @@ echo "=== Auth Update Profile Tests ==="
 echo "Target: $BASE_URL"
 echo ""
 
-# ── Setup: register two test users ──────────────────────────────────────────
+# ── Setup: register two test users (phone-only) ──────────────────────────────
 TS=$(date +%s)
-EMAIL_A="updateprofile_a_${TS}@test.com"
-EMAIL_B="updateprofile_b_${TS}@test.com"
-PHONE_B="+1800000${TS: -4}"
+PHONE_A="+849$(printf '%07d' $(( (TS + $$) % 10000000 )))"
+PHONE_B="+849$(printf '%07d' $(( (TS + $$ + 1) % 10000000 )))"
 PASSWORD="Profile@123"
 
 register_user() {
-    local email="$1"
-    local phone="${2:-}"
-    local body
-    if [ -n "$phone" ]; then
-        body="{\"email\":\"$email\",\"password\":\"$PASSWORD\",\"displayName\":\"User\",\"phone\":\"$phone\"}"
-    else
-        body="{\"email\":\"$email\",\"password\":\"$PASSWORD\",\"displayName\":\"User\"}"
-    fi
+    local phone="$1"
     curl -s -X POST "$BASE_URL/api/v1/auth/register" \
         -H "Content-Type: application/json" \
-        -d "$body" 2>/dev/null \
+        -d "{\"phone\":\"$phone\",\"password\":\"$PASSWORD\",\"displayName\":\"User\"}" 2>/dev/null \
         | grep -o '"accessToken":"[^"]*"' | sed 's/"accessToken":"//;s/"//'
 }
 
 echo "--- Setup: registering test users ---"
-TOKEN_A=$(register_user "$EMAIL_A")
-TOKEN_B=$(register_user "$EMAIL_B" "$PHONE_B")
+TOKEN_A=$(register_user "$PHONE_A")
+TOKEN_B=$(register_user "$PHONE_B")
 
 if [ -z "$TOKEN_A" ] || [ -z "$TOKEN_B" ]; then
     echo "FAIL: Setup — could not register test users"
@@ -112,7 +104,7 @@ run_test "Update avatarUrl" 200 \
 # Test 5: Update phone to a new unique number
 echo ""
 echo "--- Test 5: Update phone to new number ---"
-NEW_PHONE="+1900000${TS: -4}"
+NEW_PHONE="+849$(printf '%07d' $(( (TS + $$ + 2) % 10000000 )))"
 run_test "Update phone" 200 \
     -X PATCH "$BASE_URL/api/v1/auth/me" \
     -H "Content-Type: application/json" \

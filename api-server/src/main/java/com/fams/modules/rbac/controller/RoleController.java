@@ -8,6 +8,12 @@ import com.fams.modules.rbac.service.RoleService;
 import com.fams.shared.pagination.PageResponse;
 import com.fams.shared.response.ApiResponse;
 import com.fams.shared.security.FamsUserDetails;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -21,6 +27,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.UUID;
 
 @Slf4j
+@Tag(name = "Roles", description = "RBAC role management — create, list, update, and delete tenant roles")
 @RestController
 @RequestMapping("/api/v1/roles")
 public class RoleController {
@@ -31,16 +38,23 @@ public class RoleController {
         this.roleService = roleService;
     }
 
+    @Operation(summary = "List roles",
+        description = "Returns a paginated list of roles. Platform Admins see all roles; tenant users see only their tenant's roles. Supports search, isSystem filter, and sorting.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Roles returned",
+            content = @Content(schema = @Schema(implementation = RoleResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Unauthorized")
+    })
     @GetMapping
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<ApiResponse<PageResponse<RoleResponse>>> listRoles(
-            @RequestParam(required = false) UUID tenantId,
-            @RequestParam(required = false) String search,
-            @RequestParam(required = false) Boolean isSystem,
-            @RequestParam(defaultValue = "isSystem") String sortBy,
-            @RequestParam(defaultValue = "desc") String sortDir,
-            @RequestParam(defaultValue = "0") @Min(0) int page,
-            @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size,
+            @Parameter(description = "Filter by tenant ID (Platform Admin only)") @RequestParam(required = false) UUID tenantId,
+            @Parameter(description = "Search by role name") @RequestParam(required = false) String search,
+            @Parameter(description = "Filter system roles (true/false)") @RequestParam(required = false) Boolean isSystem,
+            @Parameter(description = "Sort field") @RequestParam(defaultValue = "isSystem") String sortBy,
+            @Parameter(description = "Sort direction: asc or desc") @RequestParam(defaultValue = "desc") String sortDir,
+            @Parameter(description = "Zero-based page index") @RequestParam(defaultValue = "0") @Min(0) int page,
+            @Parameter(description = "Page size (1–100)") @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size,
             @AuthenticationPrincipal FamsUserDetails userDetails) {
 
         log.info("List roles: tenantId={} search={} isSystem={} page={} size={} by userId={}",
@@ -53,6 +67,16 @@ public class RoleController {
         return ResponseEntity.ok(ApiResponse.success(result));
     }
 
+    @Operation(summary = "Create a custom role",
+        description = "Creates a new role for a tenant and optionally assigns a set of permissions. Callable by Company Admins and Platform Admins.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "201", description = "Role created",
+            content = @Content(schema = @Schema(implementation = RoleDetailResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Validation error"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Unauthorized"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "Insufficient permissions"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "409", description = "Role name already exists in this tenant")
+    })
     @PostMapping
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<ApiResponse<RoleDetailResponse>> createRole(
@@ -68,10 +92,20 @@ public class RoleController {
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success(result));
     }
 
+    @Operation(summary = "Update a role",
+        description = "Updates the name, description and/or permission list of a custom (non-system) role. Only the owning tenant's admin or a Platform Admin may update a role.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Role updated",
+            content = @Content(schema = @Schema(implementation = RoleDetailResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Validation error"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Unauthorized"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "Insufficient permissions or attempt to modify a system role"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "Role not found")
+    })
     @PutMapping("/{id}")
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<ApiResponse<RoleDetailResponse>> updateRole(
-            @PathVariable UUID id,
+            @Parameter(description = "Role UUID") @PathVariable UUID id,
             @Valid @RequestBody UpdateRoleRequest request,
             @AuthenticationPrincipal FamsUserDetails userDetails) {
 
@@ -83,10 +117,18 @@ public class RoleController {
         return ResponseEntity.ok(ApiResponse.success(result));
     }
 
+    @Operation(summary = "Delete or deactivate a role",
+        description = "Soft-deletes a custom role. System roles cannot be deleted. Only the owning tenant's admin or a Platform Admin may call this endpoint.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Role deleted"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Unauthorized"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "Insufficient permissions or attempt to delete a system role"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "Role not found")
+    })
     @DeleteMapping("/{id}")
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<ApiResponse<Void>> deleteRole(
-            @PathVariable UUID id,
+            @Parameter(description = "Role UUID") @PathVariable UUID id,
             @AuthenticationPrincipal FamsUserDetails userDetails) {
 
         log.info("Delete role: id={} by userId={}", id, userDetails.getUserId());

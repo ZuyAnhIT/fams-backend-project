@@ -20,6 +20,12 @@ import java.util.List;
 import com.fams.shared.pagination.PageResponse;
 import com.fams.shared.response.ApiResponse;
 import com.fams.shared.security.FamsUserDetails;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -32,6 +38,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 @Slf4j
+@Tag(name = "Tenants", description = "Tenant management, settings, IP whitelist, and subscription assignment")
 @RestController
 @RequestMapping("/api/v1/tenants")
 public class TenantController {
@@ -50,23 +57,41 @@ public class TenantController {
         this.subscriptionService = subscriptionService;
     }
 
+    @Operation(summary = "List tenants",
+        description = "Returns a paginated, searchable, filterable list of tenants. Restricted to Platform Admins.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Tenants returned",
+            content = @Content(schema = @Schema(implementation = TenantResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Unauthorized"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "Platform Admin role required")
+    })
     @GetMapping
     @PreAuthorize("hasRole('PLATFORM_ADMIN')")
     public ResponseEntity<ApiResponse<PageResponse<TenantResponse>>> listTenants(
-            @RequestParam(required = false) String search,
-            @RequestParam(required = false) String status,
-            @RequestParam(required = false) String industry,
-            @RequestParam(required = false) String countryCode,
-            @RequestParam(defaultValue = "createdAt") String sortBy,
-            @RequestParam(defaultValue = "desc") String sortDir,
-            @RequestParam(defaultValue = "0") @Min(0) int page,
-            @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
+            @Parameter(description = "Search by name or slug") @RequestParam(required = false) String search,
+            @Parameter(description = "Filter by status") @RequestParam(required = false) String status,
+            @Parameter(description = "Filter by industry") @RequestParam(required = false) String industry,
+            @Parameter(description = "Filter by ISO-3166-1 alpha-2 country code") @RequestParam(required = false) String countryCode,
+            @Parameter(description = "Sort field") @RequestParam(defaultValue = "createdAt") String sortBy,
+            @Parameter(description = "Sort direction: asc or desc") @RequestParam(defaultValue = "desc") String sortDir,
+            @Parameter(description = "Zero-based page index") @RequestParam(defaultValue = "0") @Min(0) int page,
+            @Parameter(description = "Page size (1–100)") @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
         log.info("List tenants: search={} status={} page={} size={}", search, status, page, size);
         PageResponse<TenantResponse> result = tenantService.listTenants(
                 search, status, industry, countryCode, sortBy, sortDir, page, size);
         return ResponseEntity.ok(ApiResponse.success(result));
     }
 
+    @Operation(summary = "Create a tenant",
+        description = "Provisions a new company workspace. Restricted to Platform Admins.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "201", description = "Tenant created",
+            content = @Content(schema = @Schema(implementation = TenantResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Validation error"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Unauthorized"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "Platform Admin role required"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "409", description = "Slug already taken")
+    })
     @PostMapping
     @PreAuthorize("hasRole('PLATFORM_ADMIN')")
     public ResponseEntity<ApiResponse<TenantResponse>> createTenant(
@@ -77,9 +102,19 @@ public class TenantController {
         return ResponseEntity.status(201).body(ApiResponse.success(response));
     }
 
+    @Operation(summary = "Update tenant profile",
+        description = "Updates name, domain, logo, industry, timezone, locale, and currency for a tenant. Callable by the tenant's Company Admin or a Platform Admin.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Tenant updated",
+            content = @Content(schema = @Schema(implementation = TenantResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Validation error"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Unauthorized"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "Insufficient permissions"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "Tenant not found")
+    })
     @PatchMapping("/{id}")
     public ResponseEntity<ApiResponse<TenantResponse>> updateTenant(
-            @PathVariable UUID id,
+            @Parameter(description = "Tenant UUID") @PathVariable UUID id,
             @Valid @RequestBody UpdateTenantRequest request,
             @AuthenticationPrincipal FamsUserDetails userDetails) {
         log.info("Update tenant id={} by userId={}", id, userDetails.getUserId());
@@ -87,18 +122,37 @@ public class TenantController {
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 
+    @Operation(summary = "Get tenant UI settings",
+        description = "Returns display/branding settings (date format, time format, brand colors) for the tenant. Callable by the tenant's admin or a Platform Admin.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Settings returned",
+            content = @Content(schema = @Schema(implementation = TenantSettingsResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Unauthorized"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "Insufficient permissions"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "Tenant not found")
+    })
     @GetMapping("/{id}/settings")
     public ResponseEntity<ApiResponse<TenantSettingsResponse>> getSettings(
-            @PathVariable UUID id,
+            @Parameter(description = "Tenant UUID") @PathVariable UUID id,
             @AuthenticationPrincipal FamsUserDetails userDetails) {
         log.info("Get settings tenantId={} by userId={}", id, userDetails.getUserId());
         TenantSettingsResponse response = tenantSettingsService.getSettings(id, userDetails.getUserId(), userDetails.isPlatformAdmin());
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 
+    @Operation(summary = "Update tenant UI settings",
+        description = "Updates date format, time format, and brand colors for the tenant. Callable by the tenant's admin or a Platform Admin.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Settings updated",
+            content = @Content(schema = @Schema(implementation = TenantSettingsResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Validation error"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Unauthorized"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "Insufficient permissions"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "Tenant not found")
+    })
     @PatchMapping("/{id}/settings")
     public ResponseEntity<ApiResponse<TenantSettingsResponse>> updateSettings(
-            @PathVariable UUID id,
+            @Parameter(description = "Tenant UUID") @PathVariable UUID id,
             @Valid @RequestBody UpdateTenantSettingsRequest request,
             @AuthenticationPrincipal FamsUserDetails userDetails) {
         log.info("Update settings tenantId={} by userId={}", id, userDetails.getUserId());
@@ -106,18 +160,38 @@ public class TenantController {
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 
+    @Operation(summary = "List IP whitelist entries",
+        description = "Returns all IP whitelist entries for a tenant. Callable by the tenant's admin or a Platform Admin.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "IP whitelist returned",
+            content = @Content(schema = @Schema(implementation = IpWhitelistResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Unauthorized"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "Insufficient permissions"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "Tenant not found")
+    })
     @GetMapping("/{id}/ip-whitelists")
     public ResponseEntity<ApiResponse<List<IpWhitelistResponse>>> listIpWhitelists(
-            @PathVariable UUID id,
+            @Parameter(description = "Tenant UUID") @PathVariable UUID id,
             @AuthenticationPrincipal FamsUserDetails userDetails) {
         log.info("List IP whitelists tenantId={} by userId={}", id, userDetails.getUserId());
         List<IpWhitelistResponse> result = ipWhitelistService.listEntries(id, userDetails.getUserId(), userDetails.isPlatformAdmin());
         return ResponseEntity.ok(ApiResponse.success(result));
     }
 
+    @Operation(summary = "Add an IP whitelist entry",
+        description = "Adds an IPv4/IPv6/CIDR entry to the tenant's IP whitelist. Callable by the tenant's admin or a Platform Admin.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "201", description = "Entry added",
+            content = @Content(schema = @Schema(implementation = IpWhitelistResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Validation error"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Unauthorized"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "Insufficient permissions"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "Tenant not found"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "409", description = "IP/CIDR already exists for this tenant")
+    })
     @PostMapping("/{id}/ip-whitelists")
     public ResponseEntity<ApiResponse<IpWhitelistResponse>> addIpWhitelist(
-            @PathVariable UUID id,
+            @Parameter(description = "Tenant UUID") @PathVariable UUID id,
             @Valid @RequestBody CreateIpWhitelistRequest request,
             @AuthenticationPrincipal FamsUserDetails userDetails) {
         log.info("Add IP whitelist tenantId={} ip={} by userId={}", id, request.getIpAddress(), userDetails.getUserId());
@@ -125,10 +199,20 @@ public class TenantController {
         return ResponseEntity.status(201).body(ApiResponse.success(response));
     }
 
+    @Operation(summary = "Update an IP whitelist entry",
+        description = "Updates the label, scope, or active status of an existing IP whitelist entry. Callable by the tenant's admin or a Platform Admin.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Entry updated",
+            content = @Content(schema = @Schema(implementation = IpWhitelistResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Validation error"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Unauthorized"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "Insufficient permissions"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "Tenant or entry not found")
+    })
     @PatchMapping("/{id}/ip-whitelists/{entryId}")
     public ResponseEntity<ApiResponse<IpWhitelistResponse>> updateIpWhitelist(
-            @PathVariable UUID id,
-            @PathVariable UUID entryId,
+            @Parameter(description = "Tenant UUID") @PathVariable UUID id,
+            @Parameter(description = "IP whitelist entry UUID") @PathVariable UUID entryId,
             @Valid @RequestBody UpdateIpWhitelistRequest request,
             @AuthenticationPrincipal FamsUserDetails userDetails) {
         log.info("Update IP whitelist entryId={} tenantId={} by userId={}", entryId, id, userDetails.getUserId());
@@ -136,39 +220,77 @@ public class TenantController {
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 
+    @Operation(summary = "Delete an IP whitelist entry",
+        description = "Permanently removes an IP whitelist entry from the tenant. Callable by the tenant's admin or a Platform Admin.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Entry deleted"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Unauthorized"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "Insufficient permissions"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "Tenant or entry not found")
+    })
     @DeleteMapping("/{id}/ip-whitelists/{entryId}")
     public ResponseEntity<ApiResponse<Void>> deleteIpWhitelist(
-            @PathVariable UUID id,
-            @PathVariable UUID entryId,
+            @Parameter(description = "Tenant UUID") @PathVariable UUID id,
+            @Parameter(description = "IP whitelist entry UUID") @PathVariable UUID entryId,
             @AuthenticationPrincipal FamsUserDetails userDetails) {
         log.info("Delete IP whitelist entryId={} tenantId={} by userId={}", entryId, id, userDetails.getUserId());
         ipWhitelistService.deleteEntry(id, entryId, userDetails.getUserId(), userDetails.isPlatformAdmin());
         return ResponseEntity.ok(ApiResponse.success(null));
     }
 
+    @Operation(summary = "Get tenant subscription",
+        description = "Returns the active subscription for the tenant including plan name, billing cycle, and expiry. Callable by the tenant's admin or a Platform Admin.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Subscription returned",
+            content = @Content(schema = @Schema(implementation = SubscriptionResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Unauthorized"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "Insufficient permissions"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "Tenant or subscription not found")
+    })
     @GetMapping("/{id}/subscription")
     public ResponseEntity<ApiResponse<SubscriptionResponse>> getSubscription(
-            @PathVariable UUID id,
+            @Parameter(description = "Tenant UUID") @PathVariable UUID id,
             @AuthenticationPrincipal FamsUserDetails userDetails) {
         log.info("Get subscription tenantId={} by userId={}", id, userDetails.getUserId());
         SubscriptionResponse response = subscriptionService.getSubscription(id, userDetails.getUserId(), userDetails.isPlatformAdmin());
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 
+    @Operation(summary = "Assign subscription to tenant",
+        description = "Creates a new subscription entry linking the tenant to a plan. Restricted to Platform Admins.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "201", description = "Subscription assigned",
+            content = @Content(schema = @Schema(implementation = SubscriptionResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Validation error"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Unauthorized"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "Platform Admin role required"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "Tenant or plan not found"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "409", description = "Tenant already has an active subscription")
+    })
     @PostMapping("/{id}/subscription")
     @PreAuthorize("hasRole('PLATFORM_ADMIN')")
     public ResponseEntity<ApiResponse<SubscriptionResponse>> assignSubscription(
-            @PathVariable UUID id,
+            @Parameter(description = "Tenant UUID") @PathVariable UUID id,
             @Valid @RequestBody AssignSubscriptionRequest request) {
         log.info("Assign subscription tenantId={} planId={}", id, request.getPlanId());
         SubscriptionResponse response = subscriptionService.assignSubscription(id, request);
         return ResponseEntity.status(201).body(ApiResponse.success(response));
     }
 
+    @Operation(summary = "Update tenant subscription",
+        description = "Changes the plan, billing cycle, status, or expiry of an existing subscription. Restricted to Platform Admins.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Subscription updated",
+            content = @Content(schema = @Schema(implementation = SubscriptionResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Validation error"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Unauthorized"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "Platform Admin role required"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "Tenant or subscription not found")
+    })
     @PatchMapping("/{id}/subscription")
     @PreAuthorize("hasRole('PLATFORM_ADMIN')")
     public ResponseEntity<ApiResponse<SubscriptionResponse>> updateSubscription(
-            @PathVariable UUID id,
+            @Parameter(description = "Tenant UUID") @PathVariable UUID id,
             @Valid @RequestBody UpdateSubscriptionRequest request) {
         log.info("Update subscription tenantId={}", id);
         SubscriptionResponse response = subscriptionService.updateSubscription(id, request);

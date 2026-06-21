@@ -54,7 +54,7 @@ public class AuthService {
         this.refreshTtlDays = refreshTtlDays;
     }
 
-    @Transactional
+    @Transactional(noRollbackFor = {InvalidCredentialsException.class, AccountLockedException.class})
     public LoginResponse login(LoginRequest request) {
         // 1. Find user by email
         User user = userRepository.findByEmailAndDeletedAtIsNull(request.getEmail())

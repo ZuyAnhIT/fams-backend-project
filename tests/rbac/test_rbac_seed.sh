@@ -71,26 +71,22 @@ else
     fail "Unauthenticated request — expected HTTP 401, got HTTP $status"
 fi
 
-# ─── 4. Register a regular user and confirm they cannot reach platform endpoints
+# ─── 4. Register a regular user (phone-only) and confirm they cannot reach platform endpoints
 echo ""
 echo "--- Test 4: Regular user cannot access PLATFORM_ADMIN endpoint ---"
-REG_EMAIL="rbac_test_$(date +%s)@example.com"
-reg_status=$(curl -s -o /dev/null -w "%{http_code}" \
+REG_TS=$(date +%s)
+REG_PHONE="+849$(printf '%07d' $(( (REG_TS + $$) % 10000000 )))"
+reg_response=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/auth/register" \
     -H "Content-Type: application/json" \
-    -d "{\"email\":\"$REG_EMAIL\",\"password\":\"Test@12345\",\"displayName\":\"RBAC Tester\"}")
+    -d "{\"phone\":\"$REG_PHONE\",\"password\":\"Test@12345\",\"displayName\":\"RBAC Tester\"}")
+
+reg_body=$(echo "$reg_response" | head -n -1)
+reg_status=$(echo "$reg_response" | tail -n 1)
 
 if [ "$reg_status" -eq 201 ]; then
-    user_login=$(curl -s -w "\n%{http_code}" \
-        -X POST "$BASE_URL/api/v1/auth/login" \
-        -H "Content-Type: application/json" \
-        -d "{\"email\":\"$REG_EMAIL\",\"password\":\"Test@12345\"}")
-
-    user_body=$(echo "$user_login" | head -n -1)
-    user_status=$(echo "$user_login" | tail -n 1)
-
-    if [ "$user_status" -eq 200 ]; then
-        USER_TOKEN=$(echo "$user_body" | grep -o '"accessToken":"[^"]*"' | sed 's/"accessToken":"//;s/"//')
+    USER_TOKEN=$(echo "$reg_body" | grep -o '"accessToken":"[^"]*"' | sed 's/"accessToken":"//;s/"//')
+    if [ -n "$USER_TOKEN" ]; then
         forbidden_status=$(curl -s -o /dev/null -w "%{http_code}" \
             -X GET "$BASE_URL/api/v1/tenants" \
             -H "Authorization: Bearer $USER_TOKEN")
@@ -100,7 +96,7 @@ if [ "$reg_status" -eq 201 ]; then
             fail "Regular user platform endpoint — expected HTTP 403, got HTTP $forbidden_status"
         fi
     else
-        fail "Regular user login — expected HTTP 200, got HTTP $user_status"
+        fail "Register regular user — no accessToken in registration response"
     fi
 else
     fail "Register regular user — expected HTTP 201, got HTTP $reg_status"

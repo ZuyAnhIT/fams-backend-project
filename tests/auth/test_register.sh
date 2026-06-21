@@ -11,7 +11,7 @@ FAIL=0
 # Unique credentials per run to avoid conflicts between test runs
 TS=$(date +%s)
 TEST_EMAIL="testuser_${TS}@fams.com"
-TEST_PHONE="+8492$(echo "$TS" | tail -c 7)"
+TEST_PHONE="+8492$(printf '%06d' $(( (TS + $$) % 1000000 )))"
 TEST_NAME="Test User ${TS}"
 TEST_PASS="TestPass1"
 

@@ -36,9 +36,10 @@ ADMIN_TOKEN=$(echo "$login_body" | grep -o '"accessToken":"[^"]*"' | head -1 | c
 echo "Admin token obtained."
 
 TS=$(date +%s)
+REGULAR_PHONE="+849$(printf '%07d' $(( (TS + $$) % 10000000 )))"
 reg_body=$(curl -s -X POST "$BASE_URL/api/v1/auth/register" \
     -H "Content-Type: application/json" \
-    -d "{\"email\":\"sub_regular_$TS@fams.com\",\"password\":\"Regular@1234\",\"displayName\":\"R\"}")
+    -d "{\"phone\":\"$REGULAR_PHONE\",\"password\":\"Regular@1234\",\"displayName\":\"R\"}")
 REGULAR_TOKEN=$(echo "$reg_body" | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4)
 echo "Regular user token obtained."
 

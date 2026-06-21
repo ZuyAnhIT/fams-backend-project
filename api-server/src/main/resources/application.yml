@@ -66,6 +66,14 @@ app:
   google:
     client-id: ${GOOGLE_CLIENT_ID}
 
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    enabled: ${SWAGGER_ENABLED:true}
+  default-produces-media-type: application/json
+
 ---
 spring:
   config:

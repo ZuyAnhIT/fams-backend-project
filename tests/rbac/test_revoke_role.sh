@@ -52,15 +52,18 @@ fi
 echo "Using EMPLOYEE roleId: $EMPLOYEE_ROLE_ID"
 
 UNIQUE_SUFFIX="$$"
+TS_REG=$(date +%s)
 
-# Helper: register a test user and return their UUID (decoded from JWT)
+# Helper: register a test user (phone-only) and return their UUID (decoded from JWT)
+# Pass a numeric index (1, 2, 3...) to generate unique phone numbers per run
 register_user() {
-    local suffix="$1"
+    local idx="$1"
+    local phone="+849$(printf '%07d' $(( (TS_REG * 10 + idx) % 10000000 )))"
     local resp
     resp=$(curl -s \
         -X POST "$BASE_URL/api/v1/auth/register" \
         -H "Content-Type: application/json" \
-        -d "{\"email\":\"revoketest${suffix}@fams.com\",\"password\":\"Test@1234\",\"displayName\":\"Revoke Test $suffix\"}")
+        -d "{\"phone\":\"$phone\",\"password\":\"Test@1234\",\"displayName\":\"Revoke Test $idx\"}")
     local token
     token=$(echo "$resp" | grep -o '"accessToken":"[^"]*"' | sed 's/"accessToken":"//;s/"//')
     local payload
@@ -86,7 +89,7 @@ assign_role() {
 
 # ─── Setup: create a test user and assign a role ──────────────────────────────
 echo "Setting up test user..."
-TARGET_USER_ID=$(register_user "${UNIQUE_SUFFIX}a")
+TARGET_USER_ID=$(register_user 1)
 if [ -z "$TARGET_USER_ID" ]; then
     echo "FATAL: could not register test user — aborting"
     exit 1
@@ -157,7 +160,7 @@ fi
 echo ""
 echo "--- Test 5: Unauthenticated → 401 ---"
 # Create a fresh assignment to attempt to revoke
-TARGET_USER_ID2=$(register_user "${UNIQUE_SUFFIX}b")
+TARGET_USER_ID2=$(register_user 2)
 FRESH_ID=$(assign_role "$TARGET_USER_ID2" "$EMPLOYEE_ROLE_ID" "$TENANT_ID")
 status=$(curl -s -o /dev/null -w "%{http_code}" \
     -X DELETE "$BASE_URL/api/v1/user-roles/$FRESH_ID")
@@ -173,7 +176,7 @@ curl -s -o /dev/null -X DELETE "$BASE_URL/api/v1/user-roles/$FRESH_ID" \
 # ─── 6. After revoke, role no longer blocks role deletion ────────────────────
 echo ""
 echo "--- Test 6: Revoke unblocks role deletion ---"
-TARGET_USER_ID3=$(register_user "${UNIQUE_SUFFIX}c")
+TARGET_USER_ID3=$(register_user 3)
 create_resp=$(curl -s \
     -X POST "$BASE_URL/api/v1/roles" \
     -H "Authorization: Bearer $ADMIN_TOKEN" \

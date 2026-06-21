@@ -62,11 +62,12 @@ if [ -z "$TENANT_ID" ]; then
 fi
 echo "Test tenant created: id=$TENANT_ID"
 
-# Register a regular (non-admin) user
+# Register a regular (non-admin) user (phone-only to get immediate token)
+REGULAR_PHONE="+849$(printf '%07d' $(( (TS + $$) % 10000000 )))"
 reg_body=$(curl -s \
     -X POST "$BASE_URL/api/v1/auth/register" \
     -H "Content-Type: application/json" \
-    -d "{\"email\":\"regular_update_test_$TS@fams.com\",\"password\":\"Regular@1234\",\"displayName\":\"Regular\"}")
+    -d "{\"phone\":\"$REGULAR_PHONE\",\"password\":\"Regular@1234\",\"displayName\":\"Regular\"}")
 REGULAR_TOKEN=$(echo "$reg_body" | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4)
 echo "Regular user token obtained."
 echo ""

@@ -52,12 +52,14 @@ if [ -z "$EMPLOYEE_ROLE_ID" ]; then
 fi
 echo "Using EMPLOYEE roleId: $EMPLOYEE_ROLE_ID"
 
-# ─── Register a fresh test user ───────────────────────────────────────────────
+# ─── Register a fresh test user (phone-only to get immediate token) ───────────
 UNIQUE_SUFFIX="$$"
+TS_REG=$(date +%s)
+TEST_PHONE="+849$(printf '%07d' $(( (TS_REG + UNIQUE_SUFFIX) % 10000000 )))"
 reg_resp=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/auth/register" \
     -H "Content-Type: application/json" \
-    -d "{\"email\":\"testuser${UNIQUE_SUFFIX}@fams.com\",\"password\":\"Test@1234\",\"displayName\":\"Test User $UNIQUE_SUFFIX\"}")
+    -d "{\"phone\":\"$TEST_PHONE\",\"password\":\"Test@1234\",\"displayName\":\"Test User $UNIQUE_SUFFIX\"}")
 reg_body=$(echo "$reg_resp" | head -n -1)
 reg_status=$(echo "$reg_resp" | tail -n 1)
 

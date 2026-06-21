@@ -28,16 +28,18 @@ echo "=== Auth Change Password Tests ==="
 echo "Target: $BASE_URL"
 echo ""
 
-# ── Setup: register a test user and obtain a token ──────────────────────────
-UNIQUE_EMAIL="changepw_$(date +%s)@test.com"
+# ── Setup: register a test user (phone-only) and obtain a token ──────────────
+TS=$(date +%s)
+TEST_PHONE="+849$(printf '%07d' $(( (TS + $$) % 10000000 )))"
 ORIGINAL_PASSWORD="Original@123"
 NEW_PASSWORD="NewPass@456"
+SECOND_NEW_PASSWORD="SecondNew@789"
 
-echo "--- Setup: registering test user ($UNIQUE_EMAIL) ---"
+echo "--- Setup: registering test user (phone=$TEST_PHONE) ---"
 register_response=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/auth/register" \
     -H "Content-Type: application/json" \
-    -d "{\"email\":\"$UNIQUE_EMAIL\",\"password\":\"$ORIGINAL_PASSWORD\",\"displayName\":\"Test User\"}")
+    -d "{\"phone\":\"$TEST_PHONE\",\"password\":\"$ORIGINAL_PASSWORD\",\"displayName\":\"Test User\"}")
 
 register_body=$(echo "$register_response" | head -n -1)
 register_status=$(echo "$register_response" | tail -n 1)
@@ -108,30 +110,23 @@ run_test "Happy path" 200 \
     -H "Authorization: Bearer $ACCESS_TOKEN" \
     -d "{\"currentPassword\":\"$ORIGINAL_PASSWORD\",\"newPassword\":\"$NEW_PASSWORD\"}"
 
-# Test 7: Login with new password → 200 (verify change took effect)
+# Test 7: Use new password as currentPassword to change again → 200 (verifies new password was persisted)
 echo ""
-echo "--- Test 7: Login with new password (verify change persisted) ---"
-login_response=$(curl -s -w "\n%{http_code}" \
-    -X POST "$BASE_URL/api/v1/auth/login" \
+echo "--- Test 7: New password accepted as currentPassword (verify change persisted) ---"
+run_test "New password accepted as currentPassword" 200 \
+    -X POST "$BASE_URL/api/v1/auth/change-password" \
     -H "Content-Type: application/json" \
-    -d "{\"email\":\"$UNIQUE_EMAIL\",\"password\":\"$NEW_PASSWORD\"}")
+    -H "Authorization: Bearer $ACCESS_TOKEN" \
+    -d "{\"currentPassword\":\"$NEW_PASSWORD\",\"newPassword\":\"$SECOND_NEW_PASSWORD\"}"
 
-login_status=$(echo "$login_response" | tail -n 1)
-if [ "$login_status" -eq 200 ]; then
-    echo "PASS: Login with new password (HTTP 200)"
-    PASS=$((PASS + 1))
-else
-    echo "FAIL: Login with new password — expected HTTP 200, got HTTP $login_status"
-    FAIL=$((FAIL + 1))
-fi
-
-# Test 8: Login with old password → 401 (verify old password rejected)
+# Test 8: Use original password as currentPassword → 401 (old password no longer valid)
 echo ""
-echo "--- Test 8: Login with old password (must be rejected) ---"
-run_test "Old password rejected" 401 \
-    -X POST "$BASE_URL/api/v1/auth/login" \
+echo "--- Test 8: Original password rejected as currentPassword ---"
+run_test "Original password rejected" 401 \
+    -X POST "$BASE_URL/api/v1/auth/change-password" \
     -H "Content-Type: application/json" \
-    -d "{\"email\":\"$UNIQUE_EMAIL\",\"password\":\"$ORIGINAL_PASSWORD\"}"
+    -H "Authorization: Bearer $ACCESS_TOKEN" \
+    -d "{\"currentPassword\":\"$ORIGINAL_PASSWORD\",\"newPassword\":\"AnyNew@999\"}"
 
 echo ""
 echo "=== Results ==="
