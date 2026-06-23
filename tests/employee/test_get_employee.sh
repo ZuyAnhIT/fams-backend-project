@@ -60,13 +60,18 @@ TENANT_ID=$(echo "$t_body" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 echo "Tenant created: id=$TENANT_ID"
 echo ""
 
-# Setup: seed one employee (no linked user)
-echo "--- Setup: Seed employee via DB ---"
-EMP_ID=$(docker exec fams-postgres psql -U fams_user -d fams_db -t -c \
-    "INSERT INTO employees (tenant_id, first_name, last_name, email, employee_code, position, department, status)
-     VALUES ('$TENANT_ID','Diana','Prince','diana@corp.com','EMP-D01','Field Engineer','Engineering','active')
-     RETURNING id;" | grep -oE '[0-9a-f-]{36}' | head -1)
-echo "Employee seeded: id=$EMP_ID"
+# Setup: create one employee (no linked user)
+echo "--- Setup: Create employee via API ---"
+emp_resp=$(curl -s -X POST "$BASE_URL/api/v1/tenants/$TENANT_ID/employees" \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer $ADMIN_TOKEN" \
+    -d '{"firstName":"Diana","lastName":"Prince","email":"diana@corp.com","employeeCode":"EMP-D01","position":"Field Engineer","department":"Engineering"}')
+EMP_ID=$(echo "$emp_resp" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+if [ -z "$EMP_ID" ]; then
+    echo "SETUP FAILED: Could not create employee"
+    exit 1
+fi
+echo "Employee created: id=$EMP_ID"
 echo ""
 
 # Setup: seed an employee whose user has accepted an invitation (linked user with role)
@@ -89,15 +94,17 @@ else
         -X POST "$BASE_URL/api/v1/invitations/accept" \
         -H "Content-Type: application/json" \
         -d "{\"token\":\"$INV_TOKEN\",\"password\":\"Pass@linked1\",\"displayName\":\"Linked Emp\"}")
+    accept_body=$(echo "$accept_resp" | head -n -1)
     accept_status=$(echo "$accept_resp" | tail -n 1)
     if [ "$accept_status" -eq 200 ]; then
-        USER_ID=$(docker exec fams-postgres psql -U fams_user -d fams_db -t -c \
-            "SELECT id FROM users WHERE email='$INV_EMAIL' LIMIT 1;" \
-            | grep -oE '[0-9a-f-]{36}' | head -1)
-        LINKED_EMP_ID=$(docker exec fams-postgres psql -U fams_user -d fams_db -t -c \
+        # Decode the JWT sub claim to get user_id — avoids a direct DB query
+        accept_token=$(echo "$accept_body" | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4)
+        jwt_payload=$(echo "$accept_token" | cut -d'.' -f2 | base64 -d 2>/dev/null || true)
+        USER_ID=$(echo "$jwt_payload" | grep -o '"sub":"[^"]*"' | cut -d'"' -f4 || true)
+        LINKED_EMP_ID=$(docker exec fams-postgres psql -U "${DB_USER:-fams_user}" -d "${DB_NAME:-fams_db}" -t -c \
             "INSERT INTO employees (tenant_id, user_id, first_name, last_name, email, status)
              VALUES ('$TENANT_ID','$USER_ID','Linked','Emp','$INV_EMAIL','active')
-             RETURNING id;" | grep -oE '[0-9a-f-]{36}' | head -1)
+             RETURNING id;" 2>/dev/null | grep -oE '[0-9a-f-]{36}' | head -1 || true)
         echo "Linked employee seeded: id=$LINKED_EMP_ID userId=$USER_ID"
     else
         LINKED_EMP_ID=""

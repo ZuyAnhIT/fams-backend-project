@@ -42,18 +42,24 @@ Open `.env` and fill in every field marked **REQUIRED** or **RANDOM**:
 
 All other fields have safe defaults and can be left as-is for local development.
 
-### 3. Start the backend (dev mode)
+### 3. Start the backend and seed demo data
+
+**First-time setup (recommended):**
 
 ```bash
-make dev-d
+make setup
 ```
 
-This command:
-- Builds and starts PostgreSQL, Redis, and the API server
-- Mounts source code into the container and runs the app via Maven
-- Flyway migrations run automatically on startup
+This command starts all services in the background, waits for the API to be ready, then seeds demo tenants and employees automatically.
 
-The first start downloads Docker images and Maven dependencies — this may take a few minutes.
+**Or step by step:**
+
+```bash
+make dev-d          # start services in background
+bash scripts/dev-start.sh   # wait for ready + seed demo data
+```
+
+The first start downloads Docker images and Maven dependencies — this may take a few minutes. Flyway migrations run automatically on startup.
 
 ### 4. Verify the system is live
 
@@ -65,6 +71,33 @@ Expected response:
 
 ```json
 {"status":"UP"}
+```
+
+---
+
+## Default Accounts & Demo Data
+
+After seeding, the following data is available:
+
+**Platform admin**
+
+| Field | Value |
+|---|---|
+| Email | `admin@fams.com` |
+| Password | `Admin@1234` |
+
+**Demo tenants**
+
+| Tenant | Slug | Employees |
+|---|---|---|
+| Acme Corp | `acme-corp` | Alice Walker, Bob Smith, Charlie Jones (inactive), Diana Prince |
+| Beta Industries | `beta-industries` | Eve Taylor, Frank Wilson |
+
+To reset and re-seed from scratch:
+
+```bash
+make stop-v   # wipe all data
+make setup    # start fresh + seed
 ```
 
 ---
@@ -104,8 +137,10 @@ Ports can be changed via `DB_EXPOSE_PORT`, `REDIS_EXPOSE_PORT`, and `API_EXPOSE_
 ## Common Commands
 
 ```bash
+make setup         # First-time setup: start services + seed demo data
 make dev-d         # Start all services in background (dev mode)
 make dev           # Start all services in foreground (dev mode)
+make seed          # Seed demo tenants and employees (curl-only, no DB access needed)
 make prod          # Build production image and start
 make stop          # Stop all services
 make stop-v        # Stop and remove all data volumes (destructive)

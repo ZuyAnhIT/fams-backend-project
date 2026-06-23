@@ -15,6 +15,15 @@ dev-d:
 prod:
 	$(COMPOSE) up --build -d
 
+## ── First-time setup (start + seed) ─────────────────────────────
+setup:
+	$(COMPOSE_DEV) up --build -d
+	bash scripts/dev-start.sh
+
+## ── Seed demo data ───────────────────────────────────────────────
+seed:
+	bash scripts/seed.sh
+
 ## ── Stop everything ──────────────────────────────────────────────
 stop:
 	$(COMPOSE_DEV) down
@@ -64,8 +73,10 @@ clean:
 ## ── Help ─────────────────────────────────────────────────────────
 help:
 	@echo ""
+	@echo "  make setup         First-time setup: start services + seed demo data"
 	@echo "  make dev           Start all services in dev mode (foreground)"
 	@echo "  make dev-d         Start all services in dev mode (background)"
+	@echo "  make seed          Seed demo tenants and employees"
 	@echo "  make prod          Build and start with production image"
 	@echo "  make stop          Stop all services"
 	@echo "  make stop-v        Stop and remove volumes"

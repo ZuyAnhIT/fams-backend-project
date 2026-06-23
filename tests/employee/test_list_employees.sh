@@ -61,16 +61,29 @@ TENANT_ID=$(echo "$t_body" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 echo "Tenant created: id=$TENANT_ID"
 echo ""
 
-# Setup: seed two employees directly into DB for filtering/search tests
-echo "--- Setup: Seed employees via DB ---"
-docker exec fams-postgres psql -U fams_user -d fams_db -c \
-    "INSERT INTO employees (tenant_id, first_name, last_name, email, employee_code, position, department, status)
-     VALUES
-       ('$TENANT_ID','Alice','Walker','alice.walker@corp.com','EMP-001','Engineer','Construction','active'),
-       ('$TENANT_ID','Bob','Smith','bob.smith@corp.com','EMP-002','Supervisor','Operations','active'),
-       ('$TENANT_ID','Charlie','Jones','charlie.jones@corp.com','EMP-003','Technician','Construction','inactive');" \
-    > /dev/null
-echo "Seeded 3 employees."
+# Setup: create three employees via API for filtering/search tests
+echo "--- Setup: Create test employees ---"
+curl -s -o /dev/null -X POST "$BASE_URL/api/v1/tenants/$TENANT_ID/employees" \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer $ADMIN_TOKEN" \
+    -d '{"firstName":"Alice","lastName":"Walker","email":"alice.walker@corp.com","employeeCode":"EMP-001","position":"Engineer","department":"Construction"}'
+curl -s -o /dev/null -X POST "$BASE_URL/api/v1/tenants/$TENANT_ID/employees" \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer $ADMIN_TOKEN" \
+    -d '{"firstName":"Bob","lastName":"Smith","email":"bob.smith@corp.com","employeeCode":"EMP-002","position":"Supervisor","department":"Operations"}'
+charlie_resp=$(curl -s -X POST "$BASE_URL/api/v1/tenants/$TENANT_ID/employees" \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer $ADMIN_TOKEN" \
+    -d '{"firstName":"Charlie","lastName":"Jones","email":"charlie.jones@corp.com","employeeCode":"EMP-003","position":"Technician","department":"Construction"}')
+CHARLIE_ID=$(echo "$charlie_resp" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+if [ -n "$CHARLIE_ID" ]; then
+    curl -s -o /dev/null \
+        -X PATCH "$BASE_URL/api/v1/tenants/$TENANT_ID/employees/$CHARLIE_ID/status" \
+        -H "Content-Type: application/json" \
+        -H "Authorization: Bearer $ADMIN_TOKEN" \
+        -d '{"status":"inactive"}'
+fi
+echo "Created 3 employees (Alice active, Bob active, Charlie inactive)."
 echo ""
 
 LIST_URL="$BASE_URL/api/v1/tenants/$TENANT_ID/employees"
