@@ -1,0 +1,174 @@
+name: Bug Report
+description: Report a bug in the FAMS backend
+title: "[BUG] <short description>"
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Fill out **every section**. Incomplete reports will be closed without investigation.
+
+  # ── Sprint ─────────────────────────────────────────────────────────────────
+  - type: input
+    id: sprint
+    attributes:
+      label: Sprint
+      description: "Sprint number this bug was found in (e.g. Sprint 3)"
+      placeholder: "Sprint X"
+    validations:
+      required: true
+
+  - type: textarea
+    id: sprint_description
+    attributes:
+      label: Sprint Goal / Context
+      description: "Briefly describe what this sprint is working on so reviewers understand the scope."
+      placeholder: "e.g. Sprint 3 — implementing employee invitation flow and RBAC role assignment"
+    validations:
+      required: true
+
+  # ── Affected Service ────────────────────────────────────────────────────────
+  - type: dropdown
+    id: service
+    attributes:
+      label: Affected Service
+      options:
+        - api-server (Spring Boot)
+        - ai-service (Python/FastAPI)
+        - Both
+    validations:
+      required: true
+
+  # ── API Details ─────────────────────────────────────────────────────────────
+  - type: input
+    id: api_route
+    attributes:
+      label: API Route
+      description: "Full path including method (e.g. POST /api/v1/tenants/{tenantId}/employees)"
+      placeholder: "METHOD /api/v1/..."
+    validations:
+      required: true
+
+  - type: dropdown
+    id: http_method
+    attributes:
+      label: HTTP Method
+      options:
+        - GET
+        - POST
+        - PUT
+        - PATCH
+        - DELETE
+    validations:
+      required: true
+
+  - type: textarea
+    id: request_details
+    attributes:
+      label: Request Details
+      description: "Headers, path/query params, and request body that reproduce the bug. Redact real credentials."
+      value: |
+        **Headers:**
+        ```
+        Authorization: Bearer <token>
+        Content-Type: application/json
+        ```
+
+        **Path / Query Params:**
+        ```
+        tenantId: <value>
+        ```
+
+        **Request Body:**
+        ```json
+        {
+        }
+        ```
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual_response
+    attributes:
+      label: Actual Response
+      description: "Status code + full response body you received."
+      value: |
+        **Status:**
+        ```json
+        {
+        }
+        ```
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected_response
+    attributes:
+      label: Expected Response
+      description: "What you expected to get back."
+      value: |
+        **Status:**
+        ```json
+        {
+        }
+        ```
+    validations:
+      required: true
+
+  # ── Reproduction ────────────────────────────────────────────────────────────
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: "Numbered steps to reliably trigger this bug."
+      placeholder: |
+        1. Authenticate as tenant admin
+        2. POST /api/v1/tenants/{tenantId}/invitations with body {...}
+        3. Observe 500 error
+    validations:
+      required: true
+
+  - type: dropdown
+    id: reproducibility
+    attributes:
+      label: Reproducibility
+      options:
+        - Always
+        - Sometimes
+        - Rarely / one-off
+    validations:
+      required: true
+
+  # ── Environment ─────────────────────────────────────────────────────────────
+  - type: dropdown
+    id: environment
+    attributes:
+      label: Environment
+      options:
+        - Local (Docker)
+        - Dev / Staging
+        - Production
+    validations:
+      required: true
+
+  - type: input
+    id: module
+    attributes:
+      label: Module / Package
+      description: "Java module or Python package where the bug likely lives (e.g. com.fams.modules.employee, app.api.v1)"
+      placeholder: "com.fams.modules...."
+
+  # ── Logs ────────────────────────────────────────────────────────────────────
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant Logs / Stack Trace
+      description: "Paste the relevant portion of container logs. Run: `docker compose logs api-server --tail=100`"
+      render: shell
+
+  # ── Additional Context ──────────────────────────────────────────────────────
+  - type: textarea
+    id: additional_context
+    attributes:
+      label: Additional Context
+      description: "Anything else — related issues, recent commits that may have introduced this, DB state assumptions, etc."

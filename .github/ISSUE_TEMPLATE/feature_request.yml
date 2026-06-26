@@ -1,0 +1,114 @@
+name: Feature Request
+description: Propose a new feature or API endpoint
+title: "[FEAT] <short description>"
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Fill out **every section**. Vague requests will be deprioritised.
+
+  # ── Sprint ─────────────────────────────────────────────────────────────────
+  - type: input
+    id: sprint
+    attributes:
+      label: Sprint
+      description: "Sprint this feature is targeted for (e.g. Sprint 4)"
+      placeholder: "Sprint X"
+    validations:
+      required: true
+
+  - type: textarea
+    id: sprint_description
+    attributes:
+      label: Sprint Goal / Context
+      description: "What is this sprint trying to accomplish? How does this feature fit?"
+      placeholder: "e.g. Sprint 4 — subscription management; this feature adds plan upgrade endpoint"
+    validations:
+      required: true
+
+  # ── Affected Service ────────────────────────────────────────────────────────
+  - type: dropdown
+    id: service
+    attributes:
+      label: Affected Service
+      options:
+        - api-server (Spring Boot)
+        - ai-service (Python/FastAPI)
+        - Both
+    validations:
+      required: true
+
+  # ── Proposed API ────────────────────────────────────────────────────────────
+  - type: input
+    id: proposed_route
+    attributes:
+      label: Proposed API Route
+      description: "If this involves a new or changed endpoint (e.g. PATCH /api/v1/tenants/{tenantId}/plan)"
+      placeholder: "METHOD /api/v1/..."
+
+  - type: textarea
+    id: request_contract
+    attributes:
+      label: Request / Response Contract
+      description: "Describe the expected request body, path params, and response shape."
+      value: |
+        **Request Body:**
+        ```json
+        {
+        }
+        ```
+
+        **Success Response (2xx):**
+        ```json
+        {
+        }
+        ```
+
+        **Error Cases:**
+        - 400 — ...
+        - 403 — ...
+        - 404 — ...
+
+  # ── Motivation ──────────────────────────────────────────────────────────────
+  - type: textarea
+    id: motivation
+    attributes:
+      label: Problem / Motivation
+      description: "What problem does this solve? Who is blocked without it?"
+      placeholder: "Currently there is no way to upgrade a tenant's plan without direct DB changes..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed_solution
+    attributes:
+      label: Proposed Solution
+      description: "Describe the behaviour you want, including any business rules or constraints."
+    validations:
+      required: true
+
+  - type: textarea
+    id: module
+    attributes:
+      label: Module / Layer
+      description: "Which module or layer needs to change? (e.g. com.fams.modules.subscription — PlanController, PlanService)"
+      placeholder: "com.fams.modules...."
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      options:
+        - Critical (sprint blocker)
+        - High
+        - Medium
+        - Low (nice to have)
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional_context
+    attributes:
+      label: Additional Context
+      description: "Related issues, design docs, external dependencies, DB schema changes needed, etc."
