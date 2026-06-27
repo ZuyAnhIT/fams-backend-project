@@ -15,5 +15,7 @@ public interface EmployeeRepository extends JpaRepository<Employee, UUID>, JpaSp
 
     boolean existsByTenantIdAndUserIdAndDeletedAtIsNull(UUID tenantId, UUID userId);
 
+    Optional<Employee> findByUserIdAndTenantIdAndDeletedAtIsNull(UUID userId, UUID tenantId);
+
     boolean existsByTenantIdAndEmployeeCodeAndDeletedAtIsNullAndIdNot(UUID tenantId, String employeeCode, UUID id);
 }

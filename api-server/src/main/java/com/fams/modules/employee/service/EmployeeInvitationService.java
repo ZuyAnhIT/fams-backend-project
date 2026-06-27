@@ -9,8 +9,10 @@ import com.fams.modules.auth.service.EmailService;
 import com.fams.modules.employee.dto.request.AcceptInvitationRequest;
 import com.fams.modules.employee.dto.request.InviteEmployeeRequest;
 import com.fams.modules.employee.dto.response.InvitationResponse;
+import com.fams.modules.employee.entity.Employee;
 import com.fams.modules.employee.entity.EmployeeInvitation;
 import com.fams.modules.employee.repository.EmployeeInvitationRepository;
+import com.fams.modules.employee.repository.EmployeeRepository;
 import com.fams.modules.rbac.entity.Role;
 import com.fams.modules.rbac.entity.UserRole;
 import com.fams.modules.rbac.repository.RoleRepository;
@@ -38,6 +40,7 @@ import java.util.UUID;
 public class EmployeeInvitationService {
 
     private final EmployeeInvitationRepository invitationRepository;
+    private final EmployeeRepository employeeRepository;
     private final UserRoleRepository userRoleRepository;
     private final UserRepository userRepository;
     private final RoleRepository roleRepository;
@@ -53,6 +56,7 @@ public class EmployeeInvitationService {
 
     public EmployeeInvitationService(
             EmployeeInvitationRepository invitationRepository,
+            EmployeeRepository employeeRepository,
             UserRoleRepository userRoleRepository,
             UserRepository userRepository,
             RoleRepository roleRepository,
@@ -66,6 +70,7 @@ public class EmployeeInvitationService {
             @Value("${app.jwt.access-ttl-minutes}") int accessTtlMinutes,
             @Value("${app.jwt.refresh-ttl-days}") int refreshTtlDays) {
         this.invitationRepository = invitationRepository;
+        this.employeeRepository = employeeRepository;
         this.userRoleRepository = userRoleRepository;
         this.userRepository = userRepository;
         this.roleRepository = roleRepository;
@@ -207,6 +212,23 @@ public class EmployeeInvitationService {
 
         invitation.setStatus("accepted");
         invitationRepository.save(invitation);
+
+        // Create employee profile if not already linked for this user+tenant
+        boolean hasProfile = employeeRepository
+                .existsByTenantIdAndUserIdAndDeletedAtIsNull(invitation.getTenantId(), user.getId());
+        if (!hasProfile) {
+            Employee employee = Employee.builder()
+                    .tenantId(invitation.getTenantId())
+                    .userId(user.getId())
+                    .firstName(StringUtils.hasText(invitation.getFirstName()) ? invitation.getFirstName() : "Unknown")
+                    .lastName(StringUtils.hasText(invitation.getLastName()) ? invitation.getLastName() : "")
+                    .email(invitation.getEmail())
+                    .status("active")
+                    .build();
+            employeeRepository.save(employee);
+            log.info("Employee profile created via invitation: employeeId={} userId={} tenantId={}",
+                    employee.getId(), user.getId(), invitation.getTenantId());
+        }
 
         log.info("Invitation accepted: invitationId={} userId={} tenantId={}",
                 invitation.getId(), user.getId(), invitation.getTenantId());
