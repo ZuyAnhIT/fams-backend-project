@@ -34,7 +34,7 @@ run_suite() {
 }
 
 # Discover and run all test scripts
-for suite in "$SCRIPT_DIR"/auth/test_*.sh "$SCRIPT_DIR"/tenant/test_*.sh "$SCRIPT_DIR"/subscription/test_*.sh "$SCRIPT_DIR"/rbac/test_*.sh "$SCRIPT_DIR"/employee/test_*.sh; do
+for suite in "$SCRIPT_DIR"/auth/test_*.sh "$SCRIPT_DIR"/tenant/test_*.sh "$SCRIPT_DIR"/subscription/test_*.sh "$SCRIPT_DIR"/rbac/test_*.sh "$SCRIPT_DIR"/employee/test_*.sh "$SCRIPT_DIR"/workspace/test_*.sh; do
     if [ -f "$suite" ]; then
         [[ "$(basename "$suite")" == *manual* ]] && continue
         run_suite "$suite"
