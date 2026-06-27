@@ -1,5 +1,6 @@
 package com.fams.modules.site.service;
 
+import com.fams.modules.geofence.service.GeofenceService;
 import com.fams.modules.rbac.repository.UserRoleRepository;
 import com.fams.modules.site.dto.request.CreateSiteRequest;
 import com.fams.modules.site.dto.request.UpdateSiteRequest;
@@ -37,13 +38,16 @@ public class SiteService {
     private final SiteRepository siteRepository;
     private final TenantRepository tenantRepository;
     private final UserRoleRepository userRoleRepository;
+    private final GeofenceService geofenceService;
 
     public SiteService(SiteRepository siteRepository,
                        TenantRepository tenantRepository,
-                       UserRoleRepository userRoleRepository) {
+                       UserRoleRepository userRoleRepository,
+                       GeofenceService geofenceService) {
         this.siteRepository = siteRepository;
         this.tenantRepository = tenantRepository;
         this.userRoleRepository = userRoleRepository;
+        this.geofenceService = geofenceService;
     }
 
     @Transactional
@@ -209,7 +213,7 @@ public class SiteService {
                 .timezone(site.getTimezone())
                 .status(site.getStatus())
                 .createdBy(site.getCreatedBy())
-                .geofence(null)
+                .geofence(geofenceService.findActiveGeofenceForSite(site.getId()).orElse(null))
                 .shifts(Collections.emptyList())
                 .activeAssignmentCount(0)
                 .createdAt(site.getCreatedAt())
