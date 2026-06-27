@@ -7,17 +7,24 @@ import com.fams.modules.subscription.entity.Plan;
 import com.fams.modules.subscription.repository.PlanRepository;
 import com.fams.shared.exception.DuplicateResourceException;
 import com.fams.shared.exception.ResourceNotFoundException;
+import com.fams.shared.pagination.PageResponse;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
-import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 @Slf4j
 @Service
 public class PlanService {
+
+    private static final Set<String> SORTABLE_FIELDS = Set.of("sortOrder", "name", "displayName", "priceMonthly", "priceYearly", "createdAt", "updatedAt");
 
     private final PlanRepository planRepository;
 
@@ -26,11 +33,16 @@ public class PlanService {
     }
 
     @Transactional(readOnly = true)
-    public List<PlanResponse> listPlans(boolean activeOnly) {
-        List<Plan> plans = activeOnly
-                ? planRepository.findByIsActiveTrueAndDeletedAtIsNullOrderBySortOrderAsc()
-                : planRepository.findByDeletedAtIsNullOrderBySortOrderAsc();
-        return plans.stream().map(this::toResponse).toList();
+    public PageResponse<PlanResponse> listPlans(boolean activeOnly, String sortBy, String sortDir, int page, int size) {
+        String resolvedSortBy = SORTABLE_FIELDS.contains(sortBy) ? sortBy : "sortOrder";
+        Sort sort = "desc".equalsIgnoreCase(sortDir)
+                ? Sort.by(resolvedSortBy).descending()
+                : Sort.by(resolvedSortBy).ascending();
+        Pageable pageable = PageRequest.of(page, size, sort);
+        Page<Plan> plans = activeOnly
+                ? planRepository.findByIsActiveTrueAndDeletedAtIsNull(pageable)
+                : planRepository.findByDeletedAtIsNull(pageable);
+        return PageResponse.from(plans.map(this::toResponse));
     }
 
     @Transactional(readOnly = true)

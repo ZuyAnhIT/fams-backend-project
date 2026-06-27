@@ -8,7 +8,10 @@
 services:
 
   fams-api:
-    image: maven:3.9-eclipse-temurin-21
+    build:
+      context: ./api-server
+      dockerfile: Dockerfile.dev
+    image: fams-api-dev
     container_name: fams-api
     working_dir: /workspace
     volumes:

@@ -7,14 +7,18 @@ import com.fams.modules.tenant.entity.TenantIpWhitelist;
 import com.fams.modules.tenant.repository.TenantIpWhitelistRepository;
 import com.fams.modules.tenant.repository.TenantRepository;
 import com.fams.shared.exception.ResourceNotFoundException;
+import com.fams.shared.pagination.PageResponse;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.time.OffsetDateTime;
-import java.util.List;
 import java.util.UUID;
 
 @Slf4j
@@ -31,13 +35,11 @@ public class IpWhitelistService {
     }
 
     @Transactional(readOnly = true)
-    public List<IpWhitelistResponse> listEntries(UUID tenantId, UUID userId, boolean isPlatformAdmin) {
+    public PageResponse<IpWhitelistResponse> listEntries(UUID tenantId, UUID userId, boolean isPlatformAdmin, int page, int size) {
         assertAccess(tenantId, userId, isPlatformAdmin);
-        return whitelistRepository
-                .findByTenantIdAndDeletedAtIsNullOrderByCreatedAtDesc(tenantId)
-                .stream()
-                .map(this::toResponse)
-                .toList();
+        Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Order.desc("createdAt")));
+        Page<TenantIpWhitelist> entries = whitelistRepository.findByTenantIdAndDeletedAtIsNull(tenantId, pageable);
+        return PageResponse.from(entries.map(this::toResponse));
     }
 
     @Transactional

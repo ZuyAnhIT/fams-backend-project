@@ -67,6 +67,28 @@ public class RoleController {
         return ResponseEntity.ok(ApiResponse.success(result));
     }
 
+    @Operation(summary = "Get role details",
+        description = "Returns full details of a role including its complete permissions list. Any authenticated user may view system roles. For custom (tenant) roles, the caller must belong to the same tenant and hold roles:read or roles:update permission — Platform Admins may view any role.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Role details returned",
+            content = @Content(schema = @Schema(implementation = RoleDetailResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Unauthorized"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "Insufficient permissions"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "Role not found")
+    })
+    @GetMapping("/{id}")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<ApiResponse<RoleDetailResponse>> getRole(
+            @Parameter(description = "Role UUID") @PathVariable UUID id,
+            @AuthenticationPrincipal FamsUserDetails userDetails) {
+
+        log.info("Get role: id={} by userId={}", id, userDetails.getUserId());
+
+        RoleDetailResponse result = roleService.getRoleById(id, userDetails.getUserId(), userDetails.isPlatformAdmin());
+
+        return ResponseEntity.ok(ApiResponse.success(result));
+    }
+
     @Operation(summary = "Create a custom role",
         description = "Creates a new role for a tenant and optionally assigns a set of permissions. Callable by Company Admins and Platform Admins.")
     @ApiResponses({

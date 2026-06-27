@@ -90,6 +90,24 @@ public class RoleService {
         return PageResponse.from(result);
     }
 
+    @Transactional(readOnly = true)
+    public RoleDetailResponse getRoleById(UUID roleId, UUID callerUserId, boolean callerIsPlatformAdmin) {
+        Role role = roleRepository.findByIdAndDeletedAtIsNull(roleId)
+                .orElseThrow(() -> new ResourceNotFoundException("Role not found: " + roleId));
+
+        if (!role.isSystem() && role.getTenantId() != null) {
+            if (!callerIsPlatformAdmin) {
+                UUID tenantId = role.getTenantId();
+                Set<String> callerPermissions = userRoleRepository.findPermissionNamesByUserIdAndTenantId(callerUserId, tenantId);
+                if (!callerPermissions.contains("roles:read") && !callerPermissions.contains("roles:update")) {
+                    throw new AccessDeniedException("You do not have permission to view roles in this tenant");
+                }
+            }
+        }
+
+        return toDetailResponse(role);
+    }
+
     @Transactional
     public RoleDetailResponse createRole(UUID callerUserId, boolean callerIsPlatformAdmin, CreateRoleRequest request) {
         UUID tenantId = request.getTenantId();

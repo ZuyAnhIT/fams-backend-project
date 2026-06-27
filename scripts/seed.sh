@@ -52,8 +52,18 @@ mk_tenant() {
         TENANT_ID=$(echo "$b" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
         echo "  Created: $name (id=$TENANT_ID)"
     elif [ "$s" -eq 409 ]; then
-        TENANT_ID=""
-        echo "  Skipped: $name already exists — run 'make stop-v && make dev-d' to reset"
+        local lr ls lb
+        lr=$(curl -s -w "\n%{http_code}" "$BASE_URL/api/v1/tenants?search=$slug&size=1" \
+            -H "Authorization: Bearer $TOKEN")
+        ls=$(echo "$lr" | tail -n 1)
+        lb=$(echo "$lr" | head -n -1)
+        if [ "$ls" -eq 200 ]; then
+            TENANT_ID=$(echo "$lb" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+            echo "  Exists: $name (id=$TENANT_ID) — seeding employees"
+        else
+            TENANT_ID=""
+            echo "  Skipped: $name already exists but could not fetch its ID (HTTP $ls)"
+        fi
     else
         TENANT_ID=""
         echo "  Error: $name — HTTP $s"

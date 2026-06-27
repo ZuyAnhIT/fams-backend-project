@@ -7,6 +7,7 @@ import com.fams.modules.subscription.dto.response.PlanLimitsResponse;
 import com.fams.modules.subscription.dto.response.PlanResponse;
 import com.fams.modules.subscription.service.PlanLimitsService;
 import com.fams.modules.subscription.service.PlanService;
+import com.fams.shared.pagination.PageResponse;
 import com.fams.shared.response.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -15,12 +16,13 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.List;
 import java.util.UUID;
 
 @Slf4j
@@ -38,16 +40,20 @@ public class PlanController {
     }
 
     @Operation(summary = "List subscription plans",
-        description = "Returns all plans. Pass activeOnly=true to filter out inactive plans. Accessible without authentication.")
+        description = "Returns a paginated list of plans. Pass activeOnly=true to filter out inactive plans. Accessible without authentication.")
     @ApiResponses({
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Plans returned",
             content = @Content(schema = @Schema(implementation = PlanResponse.class)))
     })
     @GetMapping
-    public ResponseEntity<ApiResponse<List<PlanResponse>>> listPlans(
-            @Parameter(description = "When true, only active plans are returned") @RequestParam(defaultValue = "false") boolean activeOnly) {
-        log.info("List plans activeOnly={}", activeOnly);
-        return ResponseEntity.ok(ApiResponse.success(planService.listPlans(activeOnly)));
+    public ResponseEntity<ApiResponse<PageResponse<PlanResponse>>> listPlans(
+            @Parameter(description = "When true, only active plans are returned") @RequestParam(defaultValue = "false") boolean activeOnly,
+            @Parameter(description = "Sort field (sortOrder, name, displayName, priceMonthly, priceYearly, createdAt, updatedAt)") @RequestParam(defaultValue = "sortOrder") String sortBy,
+            @Parameter(description = "Sort direction: asc or desc") @RequestParam(defaultValue = "asc") String sortDir,
+            @Parameter(description = "Zero-based page index") @RequestParam(defaultValue = "0") @Min(0) int page,
+            @Parameter(description = "Page size (1–100)") @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
+        log.info("List plans activeOnly={} page={} size={}", activeOnly, page, size);
+        return ResponseEntity.ok(ApiResponse.success(planService.listPlans(activeOnly, sortBy, sortDir, page, size)));
     }
 
     @Operation(summary = "Get a plan by ID",

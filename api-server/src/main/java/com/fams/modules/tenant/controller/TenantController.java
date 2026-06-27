@@ -16,7 +16,6 @@ import com.fams.modules.tenant.service.IpWhitelistService;
 import com.fams.modules.tenant.service.TenantService;
 import com.fams.modules.tenant.service.TenantSettingsService;
 
-import java.util.List;
 import com.fams.shared.pagination.PageResponse;
 import com.fams.shared.response.ApiResponse;
 import com.fams.shared.security.FamsUserDetails;
@@ -161,7 +160,7 @@ public class TenantController {
     }
 
     @Operation(summary = "List IP whitelist entries",
-        description = "Returns all IP whitelist entries for a tenant. Callable by the tenant's admin or a Platform Admin.")
+        description = "Returns a paginated list of IP whitelist entries for a tenant. Callable by the tenant's admin or a Platform Admin.")
     @ApiResponses({
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "IP whitelist returned",
             content = @Content(schema = @Schema(implementation = IpWhitelistResponse.class))),
@@ -170,11 +169,13 @@ public class TenantController {
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "Tenant not found")
     })
     @GetMapping("/{id}/ip-whitelists")
-    public ResponseEntity<ApiResponse<List<IpWhitelistResponse>>> listIpWhitelists(
+    public ResponseEntity<ApiResponse<PageResponse<IpWhitelistResponse>>> listIpWhitelists(
             @Parameter(description = "Tenant UUID") @PathVariable UUID id,
+            @Parameter(description = "Zero-based page index") @RequestParam(defaultValue = "0") @Min(0) int page,
+            @Parameter(description = "Page size (1–100)") @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size,
             @AuthenticationPrincipal FamsUserDetails userDetails) {
-        log.info("List IP whitelists tenantId={} by userId={}", id, userDetails.getUserId());
-        List<IpWhitelistResponse> result = ipWhitelistService.listEntries(id, userDetails.getUserId(), userDetails.isPlatformAdmin());
+        log.info("List IP whitelists tenantId={} page={} size={} by userId={}", id, page, size, userDetails.getUserId());
+        PageResponse<IpWhitelistResponse> result = ipWhitelistService.listEntries(id, userDetails.getUserId(), userDetails.isPlatformAdmin(), page, size);
         return ResponseEntity.ok(ApiResponse.success(result));
     }
 
