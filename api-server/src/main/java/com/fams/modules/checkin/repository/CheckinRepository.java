@@ -6,6 +6,8 @@ import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -22,6 +24,21 @@ public interface CheckinRepository extends JpaRepository<CheckinRecord, UUID>, J
      * polygonWkt must be a valid WKT POLYGON string, e.g. POLYGON((lon1 lat1, lon2 lat2, ...)).
      * bufferMeters is applied as a geodetic buffer (ST_Buffer on geography) for accurate metre-based expansion.
      */
+    /** All sessions for a given employee/site within a UTC time range, ordered by check-in time. */
+    @Query("SELECT c FROM CheckinRecord c WHERE c.tenantId = :tenantId AND c.employeeId = :employeeId " +
+           "AND c.siteId = :siteId AND c.deletedAt IS NULL " +
+           "AND c.checkInAt >= :from AND c.checkInAt < :to ORDER BY c.checkInAt ASC")
+    List<CheckinRecord> findSessionsForDateRange(@Param("tenantId") UUID tenantId,
+                                                  @Param("employeeId") UUID employeeId,
+                                                  @Param("siteId") UUID siteId,
+                                                  @Param("from") OffsetDateTime from,
+                                                  @Param("to") OffsetDateTime to);
+
+    /** All non-deleted checkins whose check_in_at falls within the given UTC range. Used by the daily summary job. */
+    @Query("SELECT c FROM CheckinRecord c WHERE c.deletedAt IS NULL " +
+           "AND c.checkInAt >= :from AND c.checkInAt < :to")
+    List<CheckinRecord> findCheckinsBetween(@Param("from") OffsetDateTime from, @Param("to") OffsetDateTime to);
+
     @Query(value = """
             SELECT ST_Within(
                 ST_SetSRID(ST_MakePoint(:lon, :lat), 4326),

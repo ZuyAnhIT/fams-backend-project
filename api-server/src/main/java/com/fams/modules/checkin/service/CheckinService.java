@@ -2,6 +2,7 @@ package com.fams.modules.checkin.service;
 
 import com.fams.modules.assignment.entity.Assignment;
 import com.fams.modules.assignment.repository.AssignmentRepository;
+import com.fams.modules.attendance.service.AttendanceSummaryService;
 import com.fams.modules.checkin.dto.request.SubmitCheckinRequest;
 import com.fams.modules.checkin.dto.request.SubmitCheckoutRequest;
 import com.fams.modules.checkin.specification.CheckinSpecification;
@@ -59,6 +60,7 @@ public class CheckinService {
     private final GeofenceRepository geofenceRepository;
     private final CheckinRepository checkinRepository;
     private final UserRoleRepository userRoleRepository;
+    private final AttendanceSummaryService attendanceSummaryService;
 
     public CheckinService(EmployeeRepository employeeRepository,
                           AssignmentRepository assignmentRepository,
@@ -66,7 +68,8 @@ public class CheckinService {
                           ShiftRepository shiftRepository,
                           GeofenceRepository geofenceRepository,
                           CheckinRepository checkinRepository,
-                          UserRoleRepository userRoleRepository) {
+                          UserRoleRepository userRoleRepository,
+                          AttendanceSummaryService attendanceSummaryService) {
         this.employeeRepository = employeeRepository;
         this.assignmentRepository = assignmentRepository;
         this.siteRepository = siteRepository;
@@ -74,6 +77,7 @@ public class CheckinService {
         this.geofenceRepository = geofenceRepository;
         this.checkinRepository = checkinRepository;
         this.userRoleRepository = userRoleRepository;
+        this.attendanceSummaryService = attendanceSummaryService;
     }
 
     // ── Task 67: Available sites ──────────────────────────────────────────────
@@ -164,6 +168,13 @@ public class CheckinService {
         log.info("Check-in recorded: id={} employeeId={} siteId={} status={} insideGeofence={} riskScore={}",
                 record.getId(), employee.getId(), request.getSiteId(), status, insideGeofence, riskScore);
 
+        // Task 80: update daily attendance summary on check-in (marks any prior summary as incomplete)
+        try {
+            attendanceSummaryService.recomputeForCheckin(record);
+        } catch (Exception e) {
+            log.warn("Failed to update attendance summary for checkin {}: {}", record.getId(), e.getMessage());
+        }
+
         return toCheckinResponse(record);
     }
 
@@ -235,6 +246,13 @@ public class CheckinService {
         checkinRepository.save(record);
         log.info("Check-out recorded: id={} employeeId={} siteId={} workMinutes={} insideGeofence={}",
                 record.getId(), employee.getId(), record.getSiteId(), workMinutes, insideGeofence);
+
+        // Task 80: update daily attendance summary after every checkout
+        try {
+            attendanceSummaryService.recomputeForCheckin(record);
+        } catch (Exception e) {
+            log.warn("Failed to update attendance summary for checkin {}: {}", record.getId(), e.getMessage());
+        }
 
         return toCheckinResponse(record);
     }
