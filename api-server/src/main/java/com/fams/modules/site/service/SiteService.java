@@ -1,5 +1,6 @@
 package com.fams.modules.site.service;
 
+import com.fams.modules.assignment.service.AssignmentService;
 import com.fams.modules.geofence.service.GeofenceService;
 import com.fams.modules.rbac.repository.UserRoleRepository;
 import com.fams.modules.shift.service.ShiftService;
@@ -40,17 +41,20 @@ public class SiteService {
     private final UserRoleRepository userRoleRepository;
     private final GeofenceService geofenceService;
     private final ShiftService shiftService;
+    private final AssignmentService assignmentService;
 
     public SiteService(SiteRepository siteRepository,
                        TenantRepository tenantRepository,
                        UserRoleRepository userRoleRepository,
                        GeofenceService geofenceService,
-                       ShiftService shiftService) {
+                       ShiftService shiftService,
+                       AssignmentService assignmentService) {
         this.siteRepository = siteRepository;
         this.tenantRepository = tenantRepository;
         this.userRoleRepository = userRoleRepository;
         this.geofenceService = geofenceService;
         this.shiftService = shiftService;
+        this.assignmentService = assignmentService;
     }
 
     @Transactional
@@ -218,7 +222,7 @@ public class SiteService {
                 .createdBy(site.getCreatedBy())
                 .geofence(geofenceService.findActiveGeofenceForSite(site.getId()).orElse(null))
                 .shifts(shiftService.findActiveShiftsForSite(site.getId()))
-                .activeAssignmentCount(0)
+                .activeAssignmentCount((int) assignmentService.countActiveAssignmentsForSite(site.getId()))
                 .createdAt(site.getCreatedAt())
                 .updatedAt(site.getUpdatedAt())
                 .build();
