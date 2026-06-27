@@ -1,6 +1,7 @@
 package com.fams.modules.site.dto.response;
 
 import com.fams.modules.geofence.dto.response.GeofenceResponse;
+import com.fams.modules.shift.dto.response.ShiftResponse;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Builder;
 import lombok.Data;
@@ -50,8 +51,8 @@ public class SiteDetailResponse {
     @Schema(description = "Active geofence polygon for this site, or null if none has been defined")
     private GeofenceResponse geofence;
 
-    @Schema(description = "Shift templates configured for this site — populated when shift module is implemented (tasks 59-62)")
-    private List<Object> shifts;
+    @Schema(description = "Active shift templates configured for this site, ordered by start time")
+    private List<ShiftResponse> shifts;
 
     @Schema(description = "Number of currently active employee assignments — populated when assignment module is implemented (task 63)")
     private int activeAssignmentCount;

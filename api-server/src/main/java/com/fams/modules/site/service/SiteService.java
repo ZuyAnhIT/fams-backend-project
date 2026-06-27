@@ -2,6 +2,7 @@ package com.fams.modules.site.service;
 
 import com.fams.modules.geofence.service.GeofenceService;
 import com.fams.modules.rbac.repository.UserRoleRepository;
+import com.fams.modules.shift.service.ShiftService;
 import com.fams.modules.site.dto.request.CreateSiteRequest;
 import com.fams.modules.site.dto.request.UpdateSiteRequest;
 import com.fams.modules.site.dto.response.SiteDetailResponse;
@@ -24,7 +25,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
-import java.util.Collections;
 import java.util.Set;
 import java.util.UUID;
 
@@ -39,15 +39,18 @@ public class SiteService {
     private final TenantRepository tenantRepository;
     private final UserRoleRepository userRoleRepository;
     private final GeofenceService geofenceService;
+    private final ShiftService shiftService;
 
     public SiteService(SiteRepository siteRepository,
                        TenantRepository tenantRepository,
                        UserRoleRepository userRoleRepository,
-                       GeofenceService geofenceService) {
+                       GeofenceService geofenceService,
+                       ShiftService shiftService) {
         this.siteRepository = siteRepository;
         this.tenantRepository = tenantRepository;
         this.userRoleRepository = userRoleRepository;
         this.geofenceService = geofenceService;
+        this.shiftService = shiftService;
     }
 
     @Transactional
@@ -214,7 +217,7 @@ public class SiteService {
                 .status(site.getStatus())
                 .createdBy(site.getCreatedBy())
                 .geofence(geofenceService.findActiveGeofenceForSite(site.getId()).orElse(null))
-                .shifts(Collections.emptyList())
+                .shifts(shiftService.findActiveShiftsForSite(site.getId()))
                 .activeAssignmentCount(0)
                 .createdAt(site.getCreatedAt())
                 .updatedAt(site.getUpdatedAt())
