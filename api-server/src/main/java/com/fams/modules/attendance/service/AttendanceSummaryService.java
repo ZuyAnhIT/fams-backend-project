@@ -445,6 +445,42 @@ public class AttendanceSummaryService {
         return PageResponse.from(resultPage);
     }
 
+    // ── Task 112: HR adjust attendance summary ────────────────────────────────
+
+    @Transactional
+    public AttendanceSummaryResponse adjustSummary(UUID tenantId, UUID summaryId,
+                                                    com.fams.modules.attendance.dto.request.AdjustAttendanceSummaryRequest request,
+                                                    UUID callerUserId, boolean callerIsPlatformAdmin) {
+        if (!callerIsPlatformAdmin) {
+            Set<String> perms = userRoleRepository
+                    .findPermissionNamesByUserIdAndTenantId(callerUserId, tenantId);
+            if (!perms.contains("attendance:list")) {
+                throw new AccessDeniedException("You do not have permission to adjust attendance summaries");
+            }
+        }
+
+        AttendanceSummary summary = summaryRepository
+                .findByIdAndTenantIdAndDeletedAtIsNull(summaryId, tenantId)
+                .orElseThrow(() -> new ResourceNotFoundException("Attendance summary not found: " + summaryId));
+
+        if (request.getTotalWorkMinutes() != null) summary.setTotalWorkMinutes(request.getTotalWorkMinutes());
+        if (request.getStatus() != null)           summary.setStatus(request.getStatus());
+        if (request.getLate() != null)             summary.setLate(request.getLate());
+        if (request.getLateMinutes() != null)      summary.setLateMinutes(request.getLateMinutes());
+        if (request.getEarlyLeave() != null)       summary.setEarlyLeave(request.getEarlyLeave());
+        if (request.getEarlyLeaveMinutes() != null) summary.setEarlyLeaveMinutes(request.getEarlyLeaveMinutes());
+        if (request.getOtMinutes() != null)        summary.setOtMinutes(request.getOtMinutes());
+        if (request.getMissingCheckout() != null)  summary.setMissingCheckout(request.getMissingCheckout());
+        summary.setAdjustmentReason(request.getReason());
+
+        summaryRepository.save(summary);
+
+        log.info("HR adjusted attendance summary: summaryId={} by={} reason={}",
+                summaryId, callerUserId, request.getReason());
+
+        return toResponse(summary);
+    }
+
     // ── Mapper ─────────────────────────────────────────────────────────────────
 
     private AttendanceSummaryResponse toResponse(AttendanceSummary a) {
@@ -469,6 +505,7 @@ public class AttendanceSummaryService {
                 .missingCheckout(a.isMissingCheckout())
                 .createdAt(a.getCreatedAt())
                 .updatedAt(a.getUpdatedAt())
+                .adjustmentReason(a.getAdjustmentReason())
                 .build();
     }
 }

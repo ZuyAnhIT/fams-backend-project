@@ -1,5 +1,6 @@
 package com.fams.modules.attendance.controller;
 
+import com.fams.modules.attendance.dto.request.AdjustAttendanceSummaryRequest;
 import com.fams.modules.attendance.dto.response.AttendanceHrMonthlyResponse;
 import com.fams.modules.attendance.dto.response.AttendanceMonthlyResponse;
 import com.fams.modules.attendance.dto.response.AttendanceSummaryResponse;
@@ -14,6 +15,7 @@ import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
@@ -209,6 +211,43 @@ public class AttendanceSummaryController {
         AttendanceMonthlyResponse result = attendanceSummaryService
                 .getMyMonthlyAttendance(tenantId, caller.getUserId(), year, month);
 
+        return ResponseEntity.ok(ApiResponse.success(result));
+    }
+
+    @Operation(
+        summary = "HR adjust attendance summary",
+        description = "Allows HR/Admin to manually override fields on a daily attendance summary record. " +
+                      "All fields are optional — only supplied fields are updated. " +
+                      "A reason is required and stored on the record for auditing. " +
+                      "Note: the nightly recompute job will overwrite adjustments for the current day; " +
+                      "adjustments to past dates are safe. Requires attendance:list permission."
+    )
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "200",
+            description = "Attendance summary updated",
+            content = @Content(schema = @Schema(implementation = AttendanceSummaryResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "400",
+            description = "Validation error — invalid field values or missing reason"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "403",
+            description = "Missing attendance:list permission"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "404",
+            description = "Attendance summary not found")
+    })
+    @PatchMapping("/{summaryId}/adjust")
+    public ResponseEntity<ApiResponse<AttendanceSummaryResponse>> adjustSummary(
+            @PathVariable UUID tenantId,
+            @PathVariable UUID summaryId,
+            @Valid @RequestBody AdjustAttendanceSummaryRequest request,
+            @AuthenticationPrincipal FamsUserDetails caller) {
+
+        log.info("HR adjust attendance summary tenantId={} summaryId={} by={}",
+                tenantId, summaryId, caller.getUserId());
+        AttendanceSummaryResponse result = attendanceSummaryService.adjustSummary(
+                tenantId, summaryId, request, caller.getUserId(), caller.isPlatformAdmin());
         return ResponseEntity.ok(ApiResponse.success(result));
     }
 

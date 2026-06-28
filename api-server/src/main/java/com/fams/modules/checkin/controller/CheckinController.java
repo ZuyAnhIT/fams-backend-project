@@ -1,5 +1,8 @@
 package com.fams.modules.checkin.controller;
 
+import com.fams.modules.checkin.dto.request.OverrideCheckinRequest;
+import com.fams.shared.dto.ExplanationResponse;
+import com.fams.shared.dto.SubmitExplanationRequest;
 import com.fams.modules.checkin.dto.request.SubmitCheckinRequest;
 import com.fams.modules.checkin.dto.request.SubmitCheckoutRequest;
 import com.fams.modules.checkin.dto.response.AvailableSiteResponse;
@@ -252,6 +255,79 @@ public class CheckinController {
         log.info("HR checkin detail tenantId={} checkinId={} userId={}", tenantId, checkinId, userDetails.getUserId());
         CheckinDetailResponse response =
                 checkinService.getCheckinDetail(tenantId, checkinId, userDetails.getUserId(), userDetails.isPlatformAdmin());
+        return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    @Operation(
+        summary = "Employee submits explanation for a check-in",
+        description = "Allows the authenticated employee to attach a written explanation and optional photo URL " +
+                      "to their own check-in record. Commonly used for 'pending_review' check-ins " +
+                      "where the GPS was outside the geofence. HR can review this explanation when deciding " +
+                      "whether to accept or reject the check-in. " +
+                      "Returns 403 if the check-in belongs to a different employee. " +
+                      "Requires checkins:read permission."
+    )
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "200",
+            description = "Explanation recorded successfully"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "400",
+            description = "Validation error — note is required"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "403",
+            description = "Check-in belongs to a different employee"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "404",
+            description = "Check-in not found")
+    })
+    @PostMapping("/{checkinId}/explain")
+    public ResponseEntity<ApiResponse<ExplanationResponse>> explainCheckin(
+            @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
+            @Parameter(description = "Check-in record UUID") @PathVariable UUID checkinId,
+            @Valid @RequestBody SubmitExplanationRequest request,
+            @AuthenticationPrincipal FamsUserDetails userDetails) {
+        log.info("Employee explain checkin tenantId={} checkinId={} userId={}",
+                tenantId, checkinId, userDetails.getUserId());
+        ExplanationResponse response =
+                checkinService.explainCheckin(tenantId, checkinId, request, userDetails.getUserId());
+        return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    @Operation(
+        summary = "HR override check-in status",
+        description = "Allows HR/Admin to accept ('valid') or reject ('rejected') a check-in that is in " +
+                      "any status. Commonly used to resolve 'pending_review' records where the employee's " +
+                      "GPS was outside the geofence but attendance was legitimate. " +
+                      "A reason is required and stored on the record for auditing. " +
+                      "Triggers attendance summary recomputation for the affected day. " +
+                      "Requires checkins:list permission."
+    )
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "200",
+            description = "Check-in status updated successfully",
+            content = @Content(schema = @Schema(implementation = CheckinResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "400",
+            description = "Validation error, or check-in is already in the requested status"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "403",
+            description = "Missing checkins:list permission"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "404",
+            description = "Check-in record not found")
+    })
+    @PatchMapping("/{checkinId}/override")
+    public ResponseEntity<ApiResponse<CheckinResponse>> overrideCheckin(
+            @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
+            @Parameter(description = "Check-in record UUID") @PathVariable UUID checkinId,
+            @Valid @RequestBody OverrideCheckinRequest request,
+            @AuthenticationPrincipal FamsUserDetails userDetails) {
+        log.info("HR override checkin tenantId={} checkinId={} status={} userId={}",
+                tenantId, checkinId, request.getStatus(), userDetails.getUserId());
+        CheckinResponse response = checkinService.overrideCheckin(
+                tenantId, checkinId, request, userDetails.getUserId(), userDetails.isPlatformAdmin());
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 

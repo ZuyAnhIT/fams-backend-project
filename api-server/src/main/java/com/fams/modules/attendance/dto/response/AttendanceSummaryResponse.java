@@ -73,4 +73,7 @@ public class AttendanceSummaryResponse {
 
     @Schema(description = "Record last-updated timestamp")
     private OffsetDateTime updatedAt;
+
+    @Schema(description = "Reason provided by HR when manually adjusting this summary (null if never adjusted)")
+    private String adjustmentReason;
 }

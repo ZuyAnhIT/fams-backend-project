@@ -3,6 +3,7 @@ package com.fams.modules.checkin.service;
 import com.fams.modules.assignment.entity.Assignment;
 import com.fams.modules.assignment.repository.AssignmentRepository;
 import com.fams.modules.attendance.service.AttendanceSummaryService;
+import com.fams.modules.checkin.dto.request.OverrideCheckinRequest;
 import com.fams.modules.checkin.dto.request.SubmitCheckinRequest;
 import com.fams.modules.checkin.dto.request.SubmitCheckoutRequest;
 import com.fams.modules.checkin.specification.CheckinSpecification;
@@ -446,6 +447,71 @@ public class CheckinService {
                 tenantId, employeeId, siteId, status, resultPage.getTotalElements());
 
         return PageResponse.from(resultPage);
+    }
+
+    // ── Task 113: Employee submit explanation for check-in ───────────────────────
+
+    @Transactional
+    public com.fams.shared.dto.ExplanationResponse explainCheckin(UUID tenantId, UUID checkinId,
+                                                                    com.fams.shared.dto.SubmitExplanationRequest request,
+                                                                    UUID callerUserId) {
+        Employee employee = resolveEmployee(tenantId, callerUserId);
+
+        CheckinRecord record = checkinRepository
+                .findByIdAndTenantIdAndDeletedAtIsNull(checkinId, tenantId)
+                .orElseThrow(() -> new ResourceNotFoundException("Check-in record not found: " + checkinId));
+
+        if (!record.getEmployeeId().equals(employee.getId())) {
+            throw new org.springframework.web.server.ResponseStatusException(
+                    org.springframework.http.HttpStatus.FORBIDDEN,
+                    "Check-in record does not belong to this employee");
+        }
+
+        record.setEmployeeNote(request.getNote());
+        record.setEmployeePhotoUrl(request.getPhotoUrl());
+        checkinRepository.save(record);
+
+        log.info("Employee explanation submitted: checkinId={} employeeId={}", checkinId, employee.getId());
+
+        return com.fams.shared.dto.ExplanationResponse.builder()
+                .id(record.getId())
+                .employeeNote(record.getEmployeeNote())
+                .employeePhotoUrl(record.getEmployeePhotoUrl())
+                .updatedAt(record.getUpdatedAt())
+                .build();
+    }
+
+    // ── Task 111: HR override check-in ──────────────────────────────────────────
+
+    @Transactional
+    public CheckinResponse overrideCheckin(UUID tenantId, UUID checkinId,
+                                            OverrideCheckinRequest request,
+                                            UUID callerUserId, boolean callerIsPlatformAdmin) {
+        if (!callerIsPlatformAdmin) {
+            Set<String> perms = userRoleRepository.findPermissionNamesByUserIdAndTenantId(callerUserId, tenantId);
+            if (!perms.contains("checkins:list")) {
+                throw new AccessDeniedException("You do not have permission to override check-ins in this tenant");
+            }
+        }
+
+        CheckinRecord record = checkinRepository
+                .findByIdAndTenantIdAndDeletedAtIsNull(checkinId, tenantId)
+                .orElseThrow(() -> new ResourceNotFoundException("Check-in record not found: " + checkinId));
+
+        if (record.getStatus().equals(request.getStatus())) {
+            throw new IllegalStateException(
+                    "Check-in is already in status '" + request.getStatus() + "' — no change needed");
+        }
+
+        record.setStatus(request.getStatus());
+        record.setNote(request.getReason());
+        checkinRepository.save(record);
+
+        log.info("HR override checkin: checkinId={} newStatus={} by={}", checkinId, request.getStatus(), callerUserId);
+
+        attendanceSummaryService.recomputeForCheckin(record);
+
+        return toCheckinResponse(record);
     }
 
     // ── Task 79: HR check-in detail ───────────────────────────────────────────

@@ -53,6 +53,12 @@ public class Violation {
     @Column(name = "resolved_by")
     private UUID resolvedBy;
 
+    @Column(name = "employee_note", columnDefinition = "TEXT")
+    private String employeeNote;
+
+    @Column(name = "employee_photo_url")
+    private String employeePhotoUrl;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
 

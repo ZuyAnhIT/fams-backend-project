@@ -74,6 +74,9 @@ public class AttendanceSummary {
     @Column(name = "missing_checkout", nullable = false)
     private boolean missingCheckout;
 
+    @Column(name = "adjustment_reason", columnDefinition = "TEXT")
+    private String adjustmentReason;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
 

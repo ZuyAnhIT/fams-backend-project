@@ -13,6 +13,8 @@ public interface ViolationRepository extends JpaRepository<Violation, UUID> {
 
     boolean existsByScheduledCheckIdAndViolationType(UUID scheduledCheckId, String violationType);
 
+    java.util.Optional<Violation> findByIdAndTenantIdAndDeletedAtIsNull(UUID id, UUID tenantId);
+
     @Query("SELECT v FROM Violation v WHERE v.tenantId = :tenantId AND v.deletedAt IS NULL " +
            "ORDER BY v.createdAt DESC")
     List<Violation> findByTenant(@Param("tenantId") UUID tenantId);
