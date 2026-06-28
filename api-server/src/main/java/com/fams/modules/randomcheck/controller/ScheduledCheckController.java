@@ -1,0 +1,543 @@
+package com.fams.modules.randomcheck.controller;
+
+import com.fams.modules.randomcheck.dto.request.GenerateScheduledChecksRequest;
+import com.fams.modules.randomcheck.dto.request.ManualCheckRequest;
+import com.fams.modules.randomcheck.dto.request.SubmitCheckResponseRequest;
+import com.fams.modules.randomcheck.dto.response.CheckResponseDto;
+import com.fams.modules.randomcheck.dto.response.ScheduledCheckDetailResponse;
+import com.fams.modules.randomcheck.dto.response.ScheduledCheckResponse;
+import com.fams.modules.randomcheck.entity.CheckResponse;
+import com.fams.modules.randomcheck.repository.CheckResponseRepository;
+import com.fams.modules.randomcheck.entity.ScheduledCheck;
+import com.fams.modules.randomcheck.redis.RandomCheckDispatchQueue;
+import com.fams.modules.randomcheck.repository.ScheduledCheckRepository;
+import com.fams.modules.randomcheck.service.CheckResponseService;
+import com.fams.modules.randomcheck.service.ManualCheckService;
+import com.fams.modules.randomcheck.service.NoResponseViolationService;
+import com.fams.modules.randomcheck.service.RandomCheckDispatchService;
+import com.fams.modules.randomcheck.service.ScheduledCheckCancelService;
+import com.fams.modules.randomcheck.service.ScheduledCheckGeneratorService;
+import com.fams.modules.employee.repository.EmployeeRepository;
+import com.fams.modules.rbac.repository.UserRoleRepository;
+import com.fams.shared.pagination.PageResponse;
+import com.fams.shared.response.ApiResponse;
+import com.fams.shared.security.FamsUserDetails;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import lombok.extern.slf4j.Slf4j;
+import jakarta.validation.Valid;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
+import org.springframework.format.annotation.DateTimeFormat;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.*;
+
+import java.time.LocalDate;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+import java.util.stream.Collectors;
+
+@Slf4j
+@Tag(name = "Scheduled Checks", description = "Random check schedule generation and listing")
+@RestController
+@RequestMapping("/api/v1/tenants/{tenantId}/scheduled-checks")
+public class ScheduledCheckController {
+
+    private static final String PERM_CONFIGURE = "randomchecks:configure";
+
+    private final ScheduledCheckGeneratorService generatorService;
+    private final ScheduledCheckRepository scheduledCheckRepository;
+    private final CheckResponseRepository checkResponseRepository;
+    private final UserRoleRepository userRoleRepository;
+    private final RandomCheckDispatchService dispatchService;
+    private final RandomCheckDispatchQueue dispatchQueue;
+    private final ScheduledCheckCancelService cancelService;
+    private final CheckResponseService checkResponseService;
+    private final EmployeeRepository employeeRepository;
+    private final NoResponseViolationService noResponseViolationService;
+    private final ManualCheckService manualCheckService;
+
+    public ScheduledCheckController(ScheduledCheckGeneratorService generatorService,
+                                    ScheduledCheckRepository scheduledCheckRepository,
+                                    CheckResponseRepository checkResponseRepository,
+                                    UserRoleRepository userRoleRepository,
+                                    RandomCheckDispatchService dispatchService,
+                                    RandomCheckDispatchQueue dispatchQueue,
+                                    ScheduledCheckCancelService cancelService,
+                                    CheckResponseService checkResponseService,
+                                    EmployeeRepository employeeRepository,
+                                    NoResponseViolationService noResponseViolationService,
+                                    ManualCheckService manualCheckService) {
+        this.generatorService = generatorService;
+        this.scheduledCheckRepository = scheduledCheckRepository;
+        this.checkResponseRepository = checkResponseRepository;
+        this.userRoleRepository = userRoleRepository;
+        this.dispatchService = dispatchService;
+        this.dispatchQueue = dispatchQueue;
+        this.cancelService = cancelService;
+        this.checkResponseService = checkResponseService;
+        this.employeeRepository = employeeRepository;
+        this.noResponseViolationService = noResponseViolationService;
+        this.manualCheckService = manualCheckService;
+    }
+
+    @Operation(
+        summary = "Trigger scheduled check generation for a date",
+        description = "Manually triggers the generation of random check schedules for all active assignments " +
+                      "in this tenant on the specified date (defaults to today). " +
+                      "The operation is idempotent — running it again for the same date skips already-generated assignments. " +
+                      "Normally handled automatically by the daily cron job (00:01 AM). " +
+                      "Requires randomchecks:configure permission."
+    )
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "200",
+            description = "Generation complete — returns count of new scheduled checks created"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "401",
+            description = "Unauthorized"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "403",
+            description = "Missing randomchecks:configure permission")
+    })
+    @PostMapping("/generate")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> generate(
+            @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
+            @RequestBody(required = false) GenerateScheduledChecksRequest request,
+            @AuthenticationPrincipal FamsUserDetails userDetails) {
+
+        checkPermission(userDetails.getUserId(), tenantId, userDetails.isPlatformAdmin());
+
+        LocalDate date = (request != null && request.getDate() != null)
+                ? request.getDate() : LocalDate.now();
+
+        log.info("Manual generation trigger tenantId={} date={} userId={}", tenantId, date, userDetails.getUserId());
+        int created = generatorService.generateForTenantAndDate(tenantId, date);
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("date", date.toString());
+        result.put("created", created);
+        return ResponseEntity.ok(ApiResponse.success(result));
+    }
+
+    @Operation(
+        summary = "List scheduled checks with filters and pagination",
+        description = "Returns a paginated list of scheduled random checks for this tenant. " +
+                      "All filter parameters are optional. Supports filtering by site, employee, status, " +
+                      "and date range. Results ordered by checkDate DESC, scheduledAt DESC. " +
+                      "Requires randomchecks:list or randomchecks:configure permission."
+    )
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "200",
+            description = "Paginated list of scheduled checks returned"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "401",
+            description = "Unauthorized"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "403",
+            description = "Missing randomchecks:list permission")
+    })
+    @GetMapping
+    public ResponseEntity<ApiResponse<PageResponse<ScheduledCheckResponse>>> list(
+            @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
+            @Parameter(description = "Filter by site UUID") @RequestParam(required = false) UUID siteId,
+            @Parameter(description = "Filter by employee UUID") @RequestParam(required = false) UUID employeeId,
+            @Parameter(description = "Filter by status (pending/sent/responded/no_response/cancelled)")
+                @RequestParam(required = false) String status,
+            @Parameter(description = "Filter from date (inclusive)", example = "2026-06-01")
+                @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dateFrom,
+            @Parameter(description = "Filter to date (inclusive)", example = "2026-06-30")
+                @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dateTo,
+            @Parameter(description = "Page number (0-based, default 0)") @RequestParam(defaultValue = "0") int page,
+            @Parameter(description = "Page size (default 20)") @RequestParam(defaultValue = "20") int size,
+            @AuthenticationPrincipal FamsUserDetails userDetails) {
+
+        if (!userDetails.isPlatformAdmin()) {
+            Set<String> perms = userRoleRepository.findPermissionNamesByUserIdAndTenantId(
+                    userDetails.getUserId(), tenantId);
+            if (!perms.contains("randomchecks:list") && !perms.contains(PERM_CONFIGURE)) {
+                throw new AccessDeniedException("Missing permission: randomchecks:list");
+            }
+        }
+
+        PageRequest pageable = PageRequest.of(page, size);
+        LocalDate from = dateFrom != null ? dateFrom : LocalDate.of(1970, 1, 1);
+        LocalDate to = dateTo != null ? dateTo : LocalDate.of(2099, 12, 31);
+        Page<ScheduledCheckResponse> resultPage = scheduledCheckRepository
+                .findByTenantWithFilters(tenantId, siteId, employeeId, status, from, to, pageable)
+                .map(this::toResponse);
+
+        return ResponseEntity.ok(ApiResponse.success(PageResponse.from(resultPage)));
+    }
+
+    @Operation(
+        summary = "Get scheduled check status summary",
+        description = "Returns a count breakdown of scheduled checks by status for this tenant. " +
+                      "Supports optional filtering by date range and site. " +
+                      "Requires randomchecks:list or randomchecks:configure permission."
+    )
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "200",
+            description = "Status summary returned"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "403",
+            description = "Missing randomchecks:list permission")
+    })
+    @GetMapping("/summary")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> summary(
+            @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
+            @Parameter(description = "Filter from date (inclusive)", example = "2026-06-01")
+                @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dateFrom,
+            @Parameter(description = "Filter to date (inclusive)", example = "2026-06-30")
+                @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dateTo,
+            @Parameter(description = "Filter by site UUID") @RequestParam(required = false) UUID siteId,
+            @AuthenticationPrincipal FamsUserDetails userDetails) {
+
+        if (!userDetails.isPlatformAdmin()) {
+            Set<String> perms = userRoleRepository.findPermissionNamesByUserIdAndTenantId(
+                    userDetails.getUserId(), tenantId);
+            if (!perms.contains("randomchecks:list") && !perms.contains(PERM_CONFIGURE)) {
+                throw new AccessDeniedException("Missing permission: randomchecks:list");
+            }
+        }
+
+        LocalDate from = dateFrom != null ? dateFrom : LocalDate.of(1970, 1, 1);
+        LocalDate to = dateTo != null ? dateTo : LocalDate.of(2099, 12, 31);
+        List<Object[]> rows = scheduledCheckRepository.countByStatusGrouped(tenantId, from, to, siteId);
+        Map<String, Object> counts = new LinkedHashMap<>();
+        long total = 0;
+        for (Object[] row : rows) {
+            String s = (String) row[0];
+            long c = ((Number) row[1]).longValue();
+            counts.put(s, c);
+            total += c;
+        }
+        counts.put("total", total);
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("counts", counts);
+        if (dateFrom != null) result.put("dateFrom", dateFrom.toString());
+        if (dateTo != null) result.put("dateTo", dateTo.toString());
+        if (siteId != null) result.put("siteId", siteId);
+        return ResponseEntity.ok(ApiResponse.success(result));
+    }
+
+    @Operation(
+        summary = "Get scheduled check detail",
+        description = "Returns the full detail of a single scheduled check, including the employee's response " +
+                      "if the status is 'responded'. Used by HR to review check outcomes and handle disputes. " +
+                      "Requires randomchecks:list or randomchecks:configure permission."
+    )
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "200",
+            description = "Check detail returned"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "404",
+            description = "Scheduled check not found or does not belong to this tenant"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "403",
+            description = "Missing randomchecks:list permission")
+    })
+    @GetMapping("/{checkId}")
+    public ResponseEntity<ApiResponse<ScheduledCheckDetailResponse>> getDetail(
+            @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
+            @Parameter(description = "Scheduled check UUID") @PathVariable UUID checkId,
+            @AuthenticationPrincipal FamsUserDetails userDetails) {
+
+        if (!userDetails.isPlatformAdmin()) {
+            Set<String> perms = userRoleRepository.findPermissionNamesByUserIdAndTenantId(
+                    userDetails.getUserId(), tenantId);
+            if (!perms.contains("randomchecks:list") && !perms.contains(PERM_CONFIGURE)) {
+                throw new AccessDeniedException("Missing permission: randomchecks:list");
+            }
+        }
+
+        ScheduledCheck check = scheduledCheckRepository
+                .findByIdAndTenant(checkId, tenantId)
+                .orElseThrow(() -> new com.fams.shared.exception.ResourceNotFoundException(
+                        "Scheduled check not found: " + checkId));
+
+        CheckResponseDto responseDto = null;
+        if ("responded".equals(check.getStatus())) {
+            responseDto = checkResponseRepository.findByScheduledCheckId(checkId)
+                    .map(this::toCheckResponseDto)
+                    .orElse(null);
+        }
+
+        return ResponseEntity.ok(ApiResponse.success(toDetailResponse(check, responseDto)));
+    }
+
+    @Operation(
+        summary = "Submit a response to a scheduled check",
+        description = "Called by the employee to respond to a random check. " +
+                      "Requires location (lat/lon). Face image and liveness score are optional, " +
+                      "required depending on the check mode. " +
+                      "Returns HTTP 410 Gone if the response window has already expired (now > expires_at). " +
+                      "Returns HTTP 400 if the check is not in a respondable state."
+    )
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "200",
+            description = "Response recorded successfully"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "400",
+            description = "Check not in respondable state (pending/cancelled/already responded)"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "404",
+            description = "Scheduled check not found or does not belong to this employee"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "410",
+            description = "Response window has expired — expires_at is in the past")
+    })
+    @PostMapping("/{checkId}/respond")
+    public ResponseEntity<ApiResponse<CheckResponseDto>> respond(
+            @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
+            @Parameter(description = "Scheduled check UUID") @PathVariable UUID checkId,
+            @Valid @RequestBody SubmitCheckResponseRequest request,
+            @AuthenticationPrincipal FamsUserDetails userDetails) {
+
+        UUID employeeId = employeeRepository
+                .findByUserIdAndTenantIdAndDeletedAtIsNull(userDetails.getUserId(), tenantId)
+                .map(e -> e.getId())
+                .orElseThrow(() -> new com.fams.shared.exception.ResourceNotFoundException(
+                        "Employee record not found for this tenant"));
+
+        CheckResponseDto dto = checkResponseService.submit(tenantId, checkId, employeeId, request);
+        return ResponseEntity.ok(ApiResponse.success(dto));
+    }
+
+    @Operation(
+        summary = "Cancel a scheduled check",
+        description = "Cancels a single scheduled check, removing it from the Redis dispatch queue. " +
+                      "Only checks with status 'pending' or 'sent' can be cancelled. " +
+                      "Requires randomchecks:configure permission."
+    )
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "200",
+            description = "Check cancelled successfully"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "400",
+            description = "Check is already in a terminal state (responded/no_response/cancelled)"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "404",
+            description = "Scheduled check not found"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "403",
+            description = "Missing randomchecks:configure permission")
+    })
+    @PostMapping("/{checkId}/cancel")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> cancelCheck(
+            @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
+            @Parameter(description = "Scheduled check UUID") @PathVariable UUID checkId,
+            @AuthenticationPrincipal FamsUserDetails userDetails) {
+
+        checkPermission(userDetails.getUserId(), tenantId, userDetails.isPlatformAdmin());
+        cancelService.cancelCheck(tenantId, checkId);
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("checkId", checkId);
+        result.put("cancelled", true);
+        return ResponseEntity.ok(ApiResponse.success(result));
+    }
+
+    @Operation(
+        summary = "Manually dispatch a scheduled check",
+        description = "Forces immediate dispatch of a single scheduled check by ID, " +
+                      "transitioning its status from 'pending' to 'sent'. " +
+                      "Useful for testing and manual intervention. " +
+                      "Requires randomchecks:configure permission."
+    )
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "200",
+            description = "Check dispatched (or already past pending — no-op)"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "403",
+            description = "Missing randomchecks:configure permission")
+    })
+    @PostMapping("/{checkId}/dispatch")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> dispatchCheck(
+            @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
+            @Parameter(description = "Scheduled check UUID") @PathVariable UUID checkId,
+            @AuthenticationPrincipal FamsUserDetails userDetails) {
+
+        checkPermission(userDetails.getUserId(), tenantId, userDetails.isPlatformAdmin());
+        dispatchService.dispatch(checkId);
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("checkId", checkId);
+        result.put("dispatched", true);
+        return ResponseEntity.ok(ApiResponse.success(result));
+    }
+
+    @Operation(
+        summary = "Get dispatch queue status",
+        description = "Returns the current size of the Redis dispatch queue and, optionally, " +
+                      "the scheduled score (epoch-seconds) of a specific check. " +
+                      "Requires randomchecks:configure permission."
+    )
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "200",
+            description = "Queue status returned")
+    })
+    @GetMapping("/dispatch-queue")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> queueStatus(
+            @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
+            @Parameter(description = "Optional check ID to look up in queue")
+                @RequestParam(required = false) UUID checkId,
+            @AuthenticationPrincipal FamsUserDetails userDetails) {
+
+        checkPermission(userDetails.getUserId(), tenantId, userDetails.isPlatformAdmin());
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("queueSize", dispatchQueue.queueSize());
+        if (checkId != null) {
+            Double score = dispatchQueue.scheduledScore(checkId);
+            result.put("checkId", checkId);
+            result.put("inQueue", score != null);
+            result.put("scheduledEpochSeconds", score);
+        }
+        return ResponseEntity.ok(ApiResponse.success(result));
+    }
+
+    @Operation(
+        summary = "Trigger an immediate manual random check for an employee",
+        description = "HR/Supervisor sends an on-demand random check directly to an employee at a site. " +
+                      "The check is created with status 'sent' and expires after the configured " +
+                      "responseWindowSeconds. The employee must have an active assignment at the site today. " +
+                      "Requires randomchecks:configure permission."
+    )
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "201",
+            description = "Manual check created and sent to the employee"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "400",
+            description = "Employee has no active assignment at site, or no config exists, or invalid checkMode"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "404",
+            description = "Site not found"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "403",
+            description = "Missing randomchecks:configure permission")
+    })
+    @PostMapping("/manual")
+    public ResponseEntity<ApiResponse<ScheduledCheckResponse>> triggerManualCheck(
+            @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
+            @Valid @RequestBody ManualCheckRequest request,
+            @AuthenticationPrincipal FamsUserDetails userDetails) {
+
+        checkPermission(userDetails.getUserId(), tenantId, userDetails.isPlatformAdmin());
+        com.fams.modules.randomcheck.entity.ScheduledCheck check =
+                manualCheckService.trigger(tenantId, request, userDetails.getUserId());
+        return ResponseEntity.status(201).body(ApiResponse.success(toResponse(check)));
+    }
+
+    @Operation(
+        summary = "Process expired checks and create no_response violations",
+        description = "Manually triggers the no-response violation processor for this tenant. " +
+                      "Marks all 'sent' checks whose expires_at has passed as 'no_response' " +
+                      "and creates a violation record for each. Normally runs automatically every 2 minutes. " +
+                      "Requires randomchecks:configure permission."
+    )
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "200",
+            description = "Processing complete — returns count of violations created"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "403",
+            description = "Missing randomchecks:configure permission")
+    })
+    @PostMapping("/process-expired")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> processExpired(
+            @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
+            @AuthenticationPrincipal FamsUserDetails userDetails) {
+
+        checkPermission(userDetails.getUserId(), tenantId, userDetails.isPlatformAdmin());
+        int created = noResponseViolationService.processExpiredForTenant(tenantId);
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("violationsCreated", created);
+        return ResponseEntity.ok(ApiResponse.success(result));
+    }
+
+    private void checkPermission(UUID callerId, UUID tenantId, boolean isPlatformAdmin) {
+        if (isPlatformAdmin) return;
+        Set<String> perms = userRoleRepository.findPermissionNamesByUserIdAndTenantId(callerId, tenantId);
+        if (!perms.contains(PERM_CONFIGURE)) {
+            throw new AccessDeniedException("Missing permission: " + PERM_CONFIGURE);
+        }
+    }
+
+    private ScheduledCheckDetailResponse toDetailResponse(ScheduledCheck s, CheckResponseDto responseDto) {
+        return ScheduledCheckDetailResponse.builder()
+                .id(s.getId())
+                .tenantId(s.getTenantId())
+                .assignmentId(s.getAssignmentId())
+                .employeeId(s.getEmployeeId())
+                .siteId(s.getSiteId())
+                .shiftId(s.getShiftId())
+                .configId(s.getConfigId())
+                .configSnapshot(s.getConfigSnapshot())
+                .checkDate(s.getCheckDate())
+                .checkIndex(s.getCheckIndex())
+                .scheduledAt(s.getScheduledAt())
+                .expiresAt(s.getExpiresAt())
+                .status(s.getStatus())
+                .createdAt(s.getCreatedAt())
+                .response(responseDto)
+                .build();
+    }
+
+    private CheckResponseDto toCheckResponseDto(CheckResponse r) {
+        return CheckResponseDto.builder()
+                .id(r.getId())
+                .scheduledCheckId(r.getScheduledCheckId())
+                .employeeId(r.getEmployeeId())
+                .respondedAt(r.getRespondedAt())
+                .latitude(r.getLatitude())
+                .longitude(r.getLongitude())
+                .accuracyMeters(r.getAccuracyMeters())
+                .locationVerified(r.isLocationVerified())
+                .faceVerified(r.getFaceVerified())
+                .livenessVerified(r.getLivenessVerified())
+                .outcome(r.getOutcome())
+                .failureReason(r.getFailureReason())
+                .createdAt(r.getCreatedAt())
+                .build();
+    }
+
+    private ScheduledCheckResponse toResponse(ScheduledCheck s) {
+        return ScheduledCheckResponse.builder()
+                .id(s.getId())
+                .tenantId(s.getTenantId())
+                .assignmentId(s.getAssignmentId())
+                .employeeId(s.getEmployeeId())
+                .siteId(s.getSiteId())
+                .shiftId(s.getShiftId())
+                .configId(s.getConfigId())
+                .configSnapshot(s.getConfigSnapshot())
+                .checkDate(s.getCheckDate())
+                .checkIndex(s.getCheckIndex())
+                .scheduledAt(s.getScheduledAt())
+                .expiresAt(s.getExpiresAt())
+                .status(s.getStatus())
+                .createdAt(s.getCreatedAt())
+                .build();
+    }
+}

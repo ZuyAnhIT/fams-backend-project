@@ -34,4 +34,25 @@ public interface AssignmentRepository extends JpaRepository<Assignment, UUID>,
             @Param("tenantId") UUID tenantId,
             @Param("employeeId") UUID employeeId,
             @Param("today") LocalDate today);
+
+    @Query("SELECT a FROM Assignment a WHERE a.tenantId = :tenantId AND a.status = 'active' " +
+           "AND a.deletedAt IS NULL AND a.shiftId IS NOT NULL " +
+           "AND a.startDate <= :date AND (a.endDate IS NULL OR a.endDate >= :date)")
+    List<Assignment> findActiveAssignmentsWithShiftForDate(
+            @Param("tenantId") UUID tenantId,
+            @Param("date") LocalDate date);
+
+    @Query("SELECT a FROM Assignment a WHERE a.status = 'active' AND a.deletedAt IS NULL " +
+           "AND a.shiftId IS NOT NULL " +
+           "AND a.startDate <= :date AND (a.endDate IS NULL OR a.endDate >= :date)")
+    List<Assignment> findAllActiveAssignmentsWithShiftForDate(@Param("date") LocalDate date);
+
+    @Query("SELECT a FROM Assignment a WHERE a.tenantId = :tenantId AND a.siteId = :siteId " +
+           "AND a.employeeId = :employeeId AND a.status = 'active' AND a.deletedAt IS NULL " +
+           "AND a.startDate <= :today AND (a.endDate IS NULL OR a.endDate >= :today)")
+    Optional<Assignment> findActiveAssignmentByEmployeeAndSite(
+            @Param("tenantId") UUID tenantId,
+            @Param("siteId") UUID siteId,
+            @Param("employeeId") UUID employeeId,
+            @Param("today") LocalDate today);
 }

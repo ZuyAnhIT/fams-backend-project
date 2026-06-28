@@ -7,6 +7,7 @@ import com.fams.modules.assignment.entity.Assignment;
 import com.fams.modules.assignment.repository.AssignmentRepository;
 import com.fams.modules.assignment.specification.AssignmentSpecification;
 import com.fams.modules.employee.repository.EmployeeRepository;
+import com.fams.modules.randomcheck.service.ScheduledCheckCancelService;
 import com.fams.modules.rbac.repository.UserRoleRepository;
 import com.fams.modules.shift.repository.ShiftRepository;
 import com.fams.modules.site.repository.SiteRepository;
@@ -42,19 +43,22 @@ public class AssignmentService {
     private final ShiftRepository shiftRepository;
     private final TenantRepository tenantRepository;
     private final UserRoleRepository userRoleRepository;
+    private final ScheduledCheckCancelService scheduledCheckCancelService;
 
     public AssignmentService(AssignmentRepository assignmentRepository,
                              SiteRepository siteRepository,
                              EmployeeRepository employeeRepository,
                              ShiftRepository shiftRepository,
                              TenantRepository tenantRepository,
-                             UserRoleRepository userRoleRepository) {
+                             UserRoleRepository userRoleRepository,
+                             ScheduledCheckCancelService scheduledCheckCancelService) {
         this.assignmentRepository = assignmentRepository;
         this.siteRepository = siteRepository;
         this.employeeRepository = employeeRepository;
         this.shiftRepository = shiftRepository;
         this.tenantRepository = tenantRepository;
         this.userRoleRepository = userRoleRepository;
+        this.scheduledCheckCancelService = scheduledCheckCancelService;
     }
 
     @Transactional
@@ -235,6 +239,12 @@ public class AssignmentService {
         assignmentRepository.save(assignment);
         log.info("Assignment cancelled: id={} siteId={} tenantId={} by={}",
                 assignmentId, siteId, tenantId, callerUserId);
+
+        int cancelled = scheduledCheckCancelService.cancelPendingByAssignment(assignmentId);
+        if (cancelled > 0) {
+            log.info("Auto-cancelled {} scheduled check(s) due to assignment cancellation id={}",
+                    cancelled, assignmentId);
+        }
     }
 
     @Transactional(readOnly = true)

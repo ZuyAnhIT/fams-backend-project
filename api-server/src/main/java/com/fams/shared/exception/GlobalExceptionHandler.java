@@ -1,5 +1,6 @@
 package com.fams.shared.exception;
 
+import com.fams.modules.randomcheck.service.CheckExpiredException;
 import com.fams.shared.response.ApiResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -59,6 +60,18 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<ApiResponse<Void>> handleIllegalArgument(IllegalArgumentException ex) {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(ApiResponse.error(ex.getMessage()));
+    }
+
+    @ExceptionHandler(IllegalStateException.class)
+    public ResponseEntity<ApiResponse<Void>> handleIllegalState(IllegalStateException ex) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(ApiResponse.error(ex.getMessage()));
+    }
+
+    @ExceptionHandler(CheckExpiredException.class)
+    public ResponseEntity<ApiResponse<Void>> handleCheckExpired(CheckExpiredException ex) {
+        return ResponseEntity.status(HttpStatus.GONE)
                 .body(ApiResponse.error(ex.getMessage()));
     }
 
