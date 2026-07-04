@@ -53,6 +53,15 @@ public class Violation {
     @Column(name = "resolved_by")
     private UUID resolvedBy;
 
+    @Column(name = "affects_attendance", nullable = false)
+    private boolean affectsAttendance;
+
+    @Column(name = "resolution", length = 20)
+    private String resolution;
+
+    @Column(name = "resolution_reason", columnDefinition = "TEXT")
+    private String resolutionReason;
+
     @Column(name = "employee_note", columnDefinition = "TEXT")
     private String employeeNote;
 
@@ -62,11 +71,21 @@ public class Violation {
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
 
+    @Column(name = "updated_at", nullable = false)
+    private OffsetDateTime updatedAt;
+
     @Column(name = "deleted_at")
     private OffsetDateTime deletedAt;
 
     @PrePersist
     protected void onCreate() {
-        if (createdAt == null) createdAt = OffsetDateTime.now();
+        OffsetDateTime now = OffsetDateTime.now();
+        if (createdAt == null) createdAt = now;
+        if (updatedAt == null) updatedAt = now;
+    }
+
+    @PreUpdate
+    protected void onUpdate() {
+        updatedAt = OffsetDateTime.now();
     }
 }
