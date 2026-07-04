@@ -1,0 +1,111 @@
+# Full stack — Java API + Python AI service + PostgreSQL + Redis
+# Usage:
+#   docker compose -f docker-compose.full.yml up --build
+#
+# For dev (hot-reload Java source):
+#   docker compose -f docker-compose.full.yml -f docker-compose.dev.yml up --build
+
+services:
+
+  fams-postgres:
+    image: postgis/postgis:16-3.4
+    container_name: fams-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - fams_postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init-postgis.sql:/docker-entrypoint-initdb.d/init-postgis.sql:ro
+    ports:
+      - "${DB_EXPOSE_PORT:-5433}:5432"
+    networks:
+      - fams-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  fams-redis:
+    image: redis:7-alpine
+    container_name: fams-redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASSWORD}
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    ports:
+      - "${REDIS_EXPOSE_PORT:-6379}:6379"
+    volumes:
+      - fams_redis_data:/data
+    networks:
+      - fams-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  fams-ai:
+    build:
+      context: ./ai-service
+      dockerfile: Dockerfile
+    container_name: fams-ai
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DB_HOST: fams-postgres
+      DB_PORT: "5432"
+      REDIS_HOST: fams-redis
+      REDIS_PORT: "6379"
+      JAVA_API_INTERNAL_URL: http://fams-api:8080
+    volumes:
+      - ./ai-service/storage:/app/storage   # host-mounted: photos are visible on host filesystem
+    ports: []                               # intentionally no host port — internal network only
+    networks:
+      - fams-net
+    depends_on:
+      fams-postgres:
+        condition: service_healthy
+      fams-redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  fams-api:
+    build:
+      context: ./api-server
+      dockerfile: Dockerfile
+    container_name: fams-api
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DB_HOST: fams-postgres
+      DB_PORT: 5432
+      REDIS_HOST: fams-redis
+      REDIS_PORT: 6379
+    ports:
+      - "${API_EXPOSE_PORT:-8080}:8080"
+    networks:
+      - fams-net
+    depends_on:
+      fams-postgres:
+        condition: service_healthy
+      fams-redis:
+        condition: service_healthy
+      fams-ai:
+        condition: service_healthy
+
+networks:
+  fams-net:
+    driver: bridge
+
+volumes:
+  fams_postgres_data:
+  fams_redis_data:

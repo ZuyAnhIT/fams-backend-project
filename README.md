@@ -1,6 +1,15 @@
 # FAMS Backend
 
-Faculty and Alumni Management System — multi-service backend built with Spring Boot, PostgreSQL (PostGIS), and Redis.
+Faculty and Alumni Management System — multi-service backend built with Spring Boot, PostgreSQL (PostGIS), Redis, and an optional Python AI service for Face ID and liveness detection.
+
+## Stack Variants
+
+| Variant | Compose file | Use when |
+|---|---|---|
+| **Java only** | `docker-compose.yml` | Working on core HR, attendance, check-in, RBAC — anything that does not involve Face ID |
+| **Full stack** | `docker-compose.full.yml` | Working on or testing Face ID enrollment, face verification, or liveness detection |
+
+> **Warning:** The Java API's Face ID endpoints (enrollment, face verification, liveness) call the Python AI service internally. If you start the Java-only stack, those specific endpoints will fail. All other API functionality works without the AI service.
 
 ## Prerequisites
 
@@ -8,7 +17,7 @@ Faculty and Alumni Management System — multi-service backend built with Spring
 - [Docker Compose](https://docs.docker.com/compose/install/) v2 (bundled with Docker Desktop)
 - `make`
 
-No local Java or Maven required — everything runs inside Docker.
+No local Java, Maven, or Python required — everything runs inside Docker.
 
 ---
 
@@ -44,22 +53,28 @@ All other fields have safe defaults and can be left as-is for local development.
 
 ### 3. Start the backend and seed demo data
 
-**First-time setup (recommended):**
+Choose the variant that matches your work:
+
+**Java backend only (recommended for most development):**
 
 ```bash
-make setup
+make setup      # start + seed demo data (first time)
+make dev-d      # subsequent starts
 ```
 
-This command starts all services in the background, waits for the API to be ready, then seeds demo tenants and employees automatically.
+**Full stack including AI service (required for Face ID / liveness work):**
 
-**Or step by step:**
+> **Note:** The first `full` build downloads PyTorch, TensorFlow, and face recognition models (~3–4 GB total). Subsequent builds are fast thanks to Docker layer caching.
 
 ```bash
-make dev-d          # start services in background
-bash scripts/dev-start.sh   # wait for ready + seed demo data
+make full-dev-d     # dev mode, background
+# or
+make full-d         # production image, background
 ```
 
-The first start downloads Docker images and Maven dependencies — this may take a few minutes. Flyway migrations run automatically on startup.
+> **Warning:** Face ID and liveness endpoints in the Java API require the full stack. Starting with `make dev`/`make setup` and then calling those endpoints will return errors.
+
+The first Java start downloads Docker images and Maven dependencies — this may take a few minutes. Flyway migrations run automatically on startup.
 
 ### 4. Verify the system is live
 
@@ -124,11 +139,14 @@ BASE_URL=http://localhost:8080 bash tests/auth/test_login.sh
 
 ## Services & Ports
 
-| Service | Host Port | Container | Description |
+| Service | Host Port | Container | Stack |
 |---|---|---|---|
-| API Server | 8080 | `fams-api` | Spring Boot REST API |
-| PostgreSQL | 5433 | `fams-postgres` | Database with PostGIS |
-| Redis | 6379 | `fams-redis` | Cache / session store |
+| API Server | 8080 | `fams-api` | Both |
+| PostgreSQL | 5433 | `fams-postgres` | Both |
+| Redis | 6379 | `fams-redis` | Both |
+| AI Service | *(internal only)* | `fams-ai` | Full stack only |
+
+The AI service is intentionally not exposed to the host. It is reachable only from `fams-api` inside the Docker network at `http://fams-ai:5000`.
 
 Ports can be changed via `DB_EXPOSE_PORT`, `REDIS_EXPOSE_PORT`, and `API_EXPOSE_PORT` in `.env`.
 
@@ -136,11 +154,13 @@ Ports can be changed via `DB_EXPOSE_PORT`, `REDIS_EXPOSE_PORT`, and `API_EXPOSE_
 
 ## Common Commands
 
+**Java backend only:**
+
 ```bash
 make setup         # First-time setup: start services + seed demo data
-make dev-d         # Start all services in background (dev mode)
-make dev           # Start all services in foreground (dev mode)
-make seed          # Seed demo tenants and employees (curl-only, no DB access needed)
+make dev-d         # Start in background (dev mode)
+make dev           # Start in foreground (dev mode)
+make seed          # Seed demo tenants and employees
 make prod          # Build production image and start
 make stop          # Stop all services
 make stop-v        # Stop and remove all data volumes (destructive)
@@ -152,6 +172,23 @@ make shell-db      # Open psql in PostgreSQL container
 make restart-api   # Restart only the API container
 make clean         # Remove containers, volumes, and dangling images
 ```
+
+**Full stack (Java + AI service):**
+
+> **Warning:** Face ID and liveness endpoints require the full stack. Use `make dev`/`make setup` for all other development.
+
+```bash
+make full-d        # Start full stack in background (production image)
+make full-dev-d    # Start full stack in background (dev mode, source mounted)
+make full-dev      # Start full stack in foreground (dev mode)
+make full-stop     # Stop full stack
+make full-stop-v   # Stop full stack and remove volumes (destructive)
+make logs-ai       # Tail AI service logs
+make restart-ai    # Restart only the AI service container
+make shell-ai      # Open bash inside AI service container
+```
+
+Run `make help` to see the full reference.
 
 ---
 
@@ -168,18 +205,24 @@ Set `SPRING_PROFILES_ACTIVE` in `.env`:
 
 ```
 fams-backend-project/
-├── api-server/          # Java/Spring Boot application
-│   ├── src/             # Application source code
-│   └── Dockerfile       # Multi-stage build
+├── api-server/              # Java/Spring Boot application
+│   ├── src/                 # Application source code
+│   └── Dockerfile           # Multi-stage build
+├── ai-service/              # Python FastAPI AI service (Face ID + liveness)
+│   ├── app/                 # FastAPI application
+│   ├── storage/             # Host-mounted face image store (gitignored)
+│   ├── Dockerfile           # Includes pre-baked model weights
+│   └── requirements.txt
 ├── database/
-│   └── diagrams/        # ERD and schema docs
-├── docker/              # Config files for Postgres, Redis, Nginx
-├── docs/                # Architecture and API documentation
-├── tests/               # Shell script test suites (curl-based)
-├── docker-compose.yml   # Production compose
-├── docker-compose.dev.yml # Dev overrides (source mount + Maven)
-├── Makefile             # Developer shortcuts
-└── .env.example         # Environment variable template
+│   └── diagrams/            # ERD and schema docs
+├── docker/                  # Config files for Postgres, Redis, Nginx
+├── docs/                    # Architecture and API documentation
+├── tests/                   # Shell script test suites (curl-based)
+├── docker-compose.yml       # Java backend only (postgres + redis + api)
+├── docker-compose.full.yml  # Full stack (adds AI service)
+├── docker-compose.dev.yml   # Dev overrides (source mount + Maven); works with both compose files
+├── Makefile                 # Developer shortcuts
+└── .env.example             # Environment variable template
 ```
 
 ### API Modules
