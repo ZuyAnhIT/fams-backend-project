@@ -55,4 +55,20 @@ public interface AssignmentRepository extends JpaRepository<Assignment, UUID>,
             @Param("siteId") UUID siteId,
             @Param("employeeId") UUID employeeId,
             @Param("today") LocalDate today);
+
+    @Query("SELECT a FROM Assignment a WHERE a.tenantId = :tenantId AND a.employeeId = :employeeId " +
+           "AND a.role = 'supervisor' AND a.status = 'active' AND a.deletedAt IS NULL " +
+           "AND a.startDate <= :today AND (a.endDate IS NULL OR a.endDate >= :today)")
+    List<Assignment> findActiveSupervisorAssignmentsForEmployee(
+            @Param("tenantId") UUID tenantId,
+            @Param("employeeId") UUID employeeId,
+            @Param("today") LocalDate today);
+
+    @Query("SELECT a FROM Assignment a WHERE a.tenantId = :tenantId AND a.siteId = :siteId " +
+           "AND a.status = 'active' AND a.deletedAt IS NULL " +
+           "AND a.startDate <= :today AND (a.endDate IS NULL OR a.endDate >= :today)")
+    List<Assignment> findActiveAssignmentsForSiteOnDate(
+            @Param("tenantId") UUID tenantId,
+            @Param("siteId") UUID siteId,
+            @Param("today") LocalDate today);
 }

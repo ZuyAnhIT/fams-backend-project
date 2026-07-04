@@ -29,4 +29,10 @@ public interface AttendanceSummaryRepository
     java.util.List<AttendanceSummary> findByTenantIdAndEmployeeIdAndDateRange(
             @Param("tenantId") UUID tenantId, @Param("employeeId") UUID employeeId,
             @Param("from") LocalDate from, @Param("to") LocalDate to);
+
+    @Query("SELECT COUNT(a) FROM AttendanceSummary a WHERE a.tenantId = :tenantId AND a.attendanceDate = :date AND a.deletedAt IS NULL")
+    long countByTenantAndDate(@Param("tenantId") UUID tenantId, @Param("date") LocalDate date);
+
+    @Query("SELECT COUNT(a) FROM AttendanceSummary a WHERE a.tenantId = :tenantId AND a.attendanceDate = :date AND a.late = true AND a.deletedAt IS NULL")
+    long countLateByTenantAndDate(@Param("tenantId") UUID tenantId, @Param("date") LocalDate date);
 }

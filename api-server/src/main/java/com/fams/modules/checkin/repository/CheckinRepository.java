@@ -34,6 +34,24 @@ public interface CheckinRepository extends JpaRepository<CheckinRecord, UUID>, J
                                                   @Param("from") OffsetDateTime from,
                                                   @Param("to") OffsetDateTime to);
 
+    /** Today's check-ins for a specific employee across all sites, newest first. */
+    @Query("SELECT c FROM CheckinRecord c WHERE c.tenantId = :tenantId AND c.employeeId = :employeeId " +
+           "AND c.deletedAt IS NULL AND c.checkInAt >= :from AND c.checkInAt < :to ORDER BY c.checkInAt DESC")
+    List<CheckinRecord> findTodayCheckins(@Param("tenantId") UUID tenantId,
+                                           @Param("employeeId") UUID employeeId,
+                                           @Param("from") OffsetDateTime from,
+                                           @Param("to") OffsetDateTime to);
+
+    /** Count of currently open check-in sessions (no checkout) for the tenant. */
+    @Query("SELECT COUNT(c) FROM CheckinRecord c WHERE c.tenantId = :tenantId AND c.checkOutAt IS NULL AND c.deletedAt IS NULL")
+    long countOpenSessions(@Param("tenantId") UUID tenantId);
+
+    /** All open check-in sessions for a specific site (employees currently on-site). */
+    @Query("SELECT c FROM CheckinRecord c WHERE c.tenantId = :tenantId AND c.siteId = :siteId " +
+           "AND c.checkOutAt IS NULL AND c.deletedAt IS NULL ORDER BY c.checkInAt ASC")
+    List<CheckinRecord> findOpenSessionsBySite(@Param("tenantId") UUID tenantId,
+                                                @Param("siteId") UUID siteId);
+
     /** All non-deleted checkins whose check_in_at falls within the given UTC range. Used by the daily summary job. */
     @Query("SELECT c FROM CheckinRecord c WHERE c.deletedAt IS NULL " +
            "AND c.checkInAt >= :from AND c.checkInAt < :to")

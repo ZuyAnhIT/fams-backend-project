@@ -26,4 +26,6 @@ public interface SiteRepository extends JpaRepository<Site, UUID>, JpaSpecificat
     boolean existsByTenantIdAndCodeAndDeletedAtIsNull(UUID tenantId, String code);
 
     boolean existsByTenantIdAndCodeAndDeletedAtIsNullAndIdNot(UUID tenantId, String code, UUID excludeId);
+
+    long countByTenantIdAndDeletedAtIsNull(UUID tenantId);
 }
