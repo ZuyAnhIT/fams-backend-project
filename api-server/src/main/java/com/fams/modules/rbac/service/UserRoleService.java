@@ -2,6 +2,7 @@ package com.fams.modules.rbac.service;
 
 import com.fams.modules.auth.repository.UserRepository;
 import com.fams.modules.rbac.dto.request.AssignRoleRequest;
+import com.fams.modules.rbac.dto.response.MyRoleResponse;
 import com.fams.modules.rbac.dto.response.UserRoleResponse;
 import com.fams.modules.rbac.entity.Role;
 import com.fams.modules.rbac.entity.UserRole;
@@ -19,6 +20,7 @@ import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -37,6 +39,28 @@ public class UserRoleService {
         this.userRepository = userRepository;
         this.roleRepository = roleRepository;
         this.tenantRepository = tenantRepository;
+    }
+
+    @Transactional(readOnly = true)
+    public List<MyRoleResponse> getCurrentUserRoles(UUID userId) {
+        return userRoleRepository.findAllActiveByUserId(userId).stream()
+                .map(ur -> {
+                    Role role = ur.getRole();
+                    List<String> permissions = role.getPermissions().stream()
+                            .map(p -> p.getName())
+                            .sorted()
+                            .collect(Collectors.toList());
+                    return MyRoleResponse.builder()
+                            .id(ur.getId())
+                            .userId(ur.getUserId())
+                            .roleId(role.getId())
+                            .roleName(role.getName())
+                            .tenantId(ur.getTenantId())
+                            .assignedAt(ur.getCreatedAt())
+                            .permissions(permissions)
+                            .build();
+                })
+                .collect(Collectors.toList());
     }
 
     @Transactional

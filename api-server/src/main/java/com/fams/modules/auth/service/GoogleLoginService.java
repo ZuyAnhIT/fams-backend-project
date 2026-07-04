@@ -6,6 +6,8 @@ import com.fams.modules.auth.entity.RefreshToken;
 import com.fams.modules.auth.entity.User;
 import com.fams.modules.auth.repository.RefreshTokenRepository;
 import com.fams.modules.auth.repository.UserRepository;
+import com.fams.modules.rbac.entity.UserRole;
+import com.fams.modules.rbac.repository.UserRoleRepository;
 import com.fams.shared.security.JwtProvider;
 import com.google.api.client.googleapis.auth.oauth2.GoogleIdToken;
 import com.google.api.client.googleapis.auth.oauth2.GoogleIdTokenVerifier;
@@ -22,6 +24,8 @@ import java.io.IOException;
 import java.security.GeneralSecurityException;
 import java.time.OffsetDateTime;
 import java.util.Collections;
+import java.util.List;
+import java.util.UUID;
 
 @Slf4j
 @Service
@@ -29,6 +33,7 @@ public class GoogleLoginService {
 
     private final UserRepository userRepository;
     private final RefreshTokenRepository refreshTokenRepository;
+    private final UserRoleRepository userRoleRepository;
     private final JwtProvider jwtProvider;
     private final GoogleIdTokenVerifier verifier;
     private final int accessTtlMinutes;
@@ -37,12 +42,14 @@ public class GoogleLoginService {
     public GoogleLoginService(
             UserRepository userRepository,
             RefreshTokenRepository refreshTokenRepository,
+            UserRoleRepository userRoleRepository,
             JwtProvider jwtProvider,
             @Value("${app.google.client-id}") String googleClientId,
             @Value("${app.jwt.access-ttl-minutes}") int accessTtlMinutes,
             @Value("${app.jwt.refresh-ttl-days}") int refreshTtlDays) {
         this.userRepository = userRepository;
         this.refreshTokenRepository = refreshTokenRepository;
+        this.userRoleRepository = userRoleRepository;
         this.jwtProvider = jwtProvider;
         this.accessTtlMinutes = accessTtlMinutes;
         this.refreshTtlDays = refreshTtlDays;
@@ -72,7 +79,11 @@ public class GoogleLoginService {
         }
 
         String deviceId = (request.getDeviceId() != null) ? request.getDeviceId() : "google";
-        String accessToken = jwtProvider.generateAccessToken(user.getId(), user.getEmail(), deviceId, user.isPlatformAdmin());
+        List<UserRole> roles = userRoleRepository.findAllActiveByUserId(user.getId());
+        UUID primaryTenantId = roles.isEmpty() ? null : roles.get(0).getTenantId();
+        String primaryRole = roles.isEmpty() ? null : roles.get(0).getRole().getName();
+        String accessToken = jwtProvider.generateAccessToken(
+                user.getId(), user.getEmail(), deviceId, user.isPlatformAdmin(), primaryTenantId, primaryRole);
 
         String rawRefreshToken = jwtProvider.generateRefreshTokenRaw();
         RefreshToken refreshToken = RefreshToken.builder()

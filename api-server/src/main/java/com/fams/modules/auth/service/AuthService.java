@@ -6,6 +6,8 @@ import com.fams.modules.auth.entity.RefreshToken;
 import com.fams.modules.auth.entity.User;
 import com.fams.modules.auth.repository.RefreshTokenRepository;
 import com.fams.modules.auth.repository.UserRepository;
+import com.fams.modules.rbac.entity.UserRole;
+import com.fams.modules.rbac.repository.UserRoleRepository;
 import com.fams.shared.constants.AppConstants;
 import com.fams.shared.exception.AccountLockedException;
 import com.fams.shared.exception.EmailNotVerifiedException;
@@ -19,6 +21,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
@@ -31,6 +34,7 @@ public class AuthService {
 
     private final UserRepository userRepository;
     private final RefreshTokenRepository refreshTokenRepository;
+    private final UserRoleRepository userRoleRepository;
     private final JwtProvider jwtProvider;
     private final BCryptPasswordEncoder passwordEncoder;
     private final StringRedisTemplate redis;
@@ -40,6 +44,7 @@ public class AuthService {
     public AuthService(
             UserRepository userRepository,
             RefreshTokenRepository refreshTokenRepository,
+            UserRoleRepository userRoleRepository,
             JwtProvider jwtProvider,
             BCryptPasswordEncoder passwordEncoder,
             StringRedisTemplate redis,
@@ -47,6 +52,7 @@ public class AuthService {
             @Value("${app.jwt.refresh-ttl-days}") int refreshTtlDays) {
         this.userRepository = userRepository;
         this.refreshTokenRepository = refreshTokenRepository;
+        this.userRoleRepository = userRoleRepository;
         this.jwtProvider = jwtProvider;
         this.passwordEncoder = passwordEncoder;
         this.redis = redis;
@@ -93,12 +99,20 @@ public class AuthService {
         user.setLockedUntil(null);
         userRepository.save(user);
 
-        // 6. If TOTP is enabled, issue a pending token instead of real tokens
+        // 6. Resolve primary tenant role for JWT claims
+        List<UserRole> roles = userRoleRepository.findAllActiveByUserId(user.getId());
+        UUID primaryTenantId = roles.isEmpty() ? null : roles.get(0).getTenantId();
+        String primaryRole = roles.isEmpty() ? null : roles.get(0).getRole().getName();
+
+        // 7. If TOTP is enabled, issue a pending token instead of real tokens
         String deviceId = (request.getDeviceId() != null) ? request.getDeviceId() : "unknown";
         if (user.isTotpEnabled()) {
             String pendingToken = UUID.randomUUID().toString();
-            // Store: userId|email|deviceId|isPlatformAdmin
-            String value = user.getId() + "|" + user.getEmail() + "|" + deviceId + "|" + user.isPlatformAdmin();
+            // Store: userId|email|deviceId|isPlatformAdmin|tenantId|role
+            String tenantStr = primaryTenantId != null ? primaryTenantId.toString() : "";
+            String roleStr = primaryRole != null ? primaryRole : "";
+            String value = user.getId() + "|" + user.getEmail() + "|" + deviceId + "|" + user.isPlatformAdmin()
+                    + "|" + tenantStr + "|" + roleStr;
             redis.opsForValue().set(TOTP_PENDING_PREFIX + pendingToken, value, TOTP_PENDING_TTL_MIN, TimeUnit.MINUTES);
             log.info("TOTP required for user {} — pending token issued", user.getEmail());
             return LoginResponse.builder()
@@ -107,8 +121,9 @@ public class AuthService {
                     .build();
         }
 
-        // 7. Generate access token
-        String accessToken = jwtProvider.generateAccessToken(user.getId(), user.getEmail(), deviceId, user.isPlatformAdmin());
+        // 8. Generate access token
+        String accessToken = jwtProvider.generateAccessToken(
+                user.getId(), user.getEmail(), deviceId, user.isPlatformAdmin(), primaryTenantId, primaryRole);
 
         // 8. Generate and save refresh token
         String rawRefreshToken = jwtProvider.generateRefreshTokenRaw();

@@ -9,6 +9,8 @@ import com.fams.modules.auth.service.EmailService;
 import com.fams.modules.employee.dto.request.AcceptInvitationRequest;
 import com.fams.modules.employee.dto.request.InviteEmployeeRequest;
 import com.fams.modules.employee.dto.response.InvitationResponse;
+import com.fams.modules.employee.dto.response.ValidateInvitationResponse;
+import com.fams.modules.tenant.entity.Tenant;
 import com.fams.modules.employee.entity.Employee;
 import com.fams.modules.employee.entity.EmployeeInvitation;
 import com.fams.modules.employee.repository.EmployeeInvitationRepository;
@@ -18,12 +20,18 @@ import com.fams.modules.rbac.entity.UserRole;
 import com.fams.modules.rbac.repository.RoleRepository;
 import com.fams.modules.rbac.repository.UserRoleRepository;
 import com.fams.modules.tenant.repository.TenantRepository;
+import com.fams.modules.employee.specification.EmployeeInvitationSpecification;
 import com.fams.shared.exception.DuplicateResourceException;
 import com.fams.shared.exception.InvalidInvitationException;
 import com.fams.shared.exception.ResourceNotFoundException;
+import com.fams.shared.pagination.PageResponse;
 import com.fams.shared.security.JwtProvider;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -83,6 +91,53 @@ public class EmployeeInvitationService {
         this.invitationExpiryDays = invitationExpiryDays;
         this.accessTtlMinutes = accessTtlMinutes;
         this.refreshTtlDays = refreshTtlDays;
+    }
+
+    @Transactional(readOnly = true)
+    public ValidateInvitationResponse validateInvitation(UUID token) {
+        EmployeeInvitation invitation = invitationRepository.findByToken(token)
+                .orElseThrow(() -> new ResourceNotFoundException("Invitation not found"));
+
+        if (!"pending".equals(invitation.getStatus())) {
+            throw new InvalidInvitationException(
+                    "Invitation is " + invitation.getStatus() + " and can no longer be used");
+        }
+        if (OffsetDateTime.now().isAfter(invitation.getExpiresAt())) {
+            throw new InvalidInvitationException("Invitation has expired");
+        }
+
+        boolean isExistingUser = userRepository
+                .findByEmailAndDeletedAtIsNull(invitation.getEmail()).isPresent();
+
+        Tenant tenant = tenantRepository.findByIdAndDeletedAtIsNull(invitation.getTenantId())
+                .orElseThrow(() -> new ResourceNotFoundException("Tenant not found"));
+
+        return ValidateInvitationResponse.builder()
+                .email(invitation.getEmail())
+                .isExistingUser(isExistingUser)
+                .tenantName(tenant.getName())
+                .build();
+    }
+
+    public PageResponse<InvitationResponse> listInvitations(UUID tenantId, String status, String email,
+                                                             int page, int size,
+                                                             UUID callerUserId, boolean callerIsPlatformAdmin) {
+        tenantRepository.findByIdAndDeletedAtIsNull(tenantId)
+                .orElseThrow(() -> new ResourceNotFoundException("Tenant not found: " + tenantId));
+
+        if (!callerIsPlatformAdmin) {
+            Set<String> permissions = userRoleRepository
+                    .findPermissionNamesByUserIdAndTenantId(callerUserId, tenantId);
+            if (!permissions.contains("employees:read")) {
+                throw new AccessDeniedException("You do not have permission to view invitations in this tenant");
+            }
+        }
+
+        int clampedSize = Math.min(size, 100);
+        PageRequest pageable = PageRequest.of(page, clampedSize, Sort.by(Sort.Direction.DESC, "createdAt"));
+        Specification<EmployeeInvitation> spec = EmployeeInvitationSpecification.build(tenantId, status, email);
+        Page<InvitationResponse> resultPage = invitationRepository.findAll(spec, pageable).map(this::toResponse);
+        return PageResponse.from(resultPage);
     }
 
     @Transactional
@@ -233,7 +288,7 @@ public class EmployeeInvitationService {
         log.info("Invitation accepted: invitationId={} userId={} tenantId={}",
                 invitation.getId(), user.getId(), invitation.getTenantId());
 
-        return issueTokens(user, request.getDeviceId());
+        return issueTokens(user, request.getDeviceId(), invitation.getTenantId(), role.getName());
     }
 
     private String resolveDisplayName(String requested, EmployeeInvitation invitation) {
@@ -253,9 +308,10 @@ public class EmployeeInvitationService {
                 .orElseThrow(() -> new ResourceNotFoundException("Default EMPLOYEE role not found"));
     }
 
-    private LoginResponse issueTokens(User user, String deviceIdRaw) {
+    private LoginResponse issueTokens(User user, String deviceIdRaw, UUID tenantId, String roleName) {
         String deviceId = StringUtils.hasText(deviceIdRaw) ? deviceIdRaw : "unknown";
-        String accessToken = jwtProvider.generateAccessToken(user.getId(), user.getEmail(), deviceId, false);
+        String accessToken = jwtProvider.generateAccessToken(
+                user.getId(), user.getEmail(), deviceId, false, tenantId, roleName);
 
         String rawRefresh = jwtProvider.generateRefreshTokenRaw();
         RefreshToken refreshToken = RefreshToken.builder()

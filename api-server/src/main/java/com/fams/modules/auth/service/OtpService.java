@@ -7,6 +7,8 @@ import com.fams.modules.auth.entity.RefreshToken;
 import com.fams.modules.auth.entity.User;
 import com.fams.modules.auth.repository.RefreshTokenRepository;
 import com.fams.modules.auth.repository.UserRepository;
+import com.fams.modules.rbac.entity.UserRole;
+import com.fams.modules.rbac.repository.UserRoleRepository;
 import com.fams.shared.exception.InvalidOtpException;
 import com.fams.shared.exception.OtpRateLimitException;
 import com.fams.shared.security.JwtProvider;
@@ -19,7 +21,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.security.SecureRandom;
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 @Slf4j
@@ -35,6 +39,7 @@ public class OtpService {
     private final SmsService smsService;
     private final UserRepository userRepository;
     private final RefreshTokenRepository refreshTokenRepository;
+    private final UserRoleRepository userRoleRepository;
     private final JwtProvider jwtProvider;
     private final int accessTtlMinutes;
     private final int refreshTtlDays;
@@ -46,6 +51,7 @@ public class OtpService {
             SmsService smsService,
             UserRepository userRepository,
             RefreshTokenRepository refreshTokenRepository,
+            UserRoleRepository userRoleRepository,
             JwtProvider jwtProvider,
             @Value("${app.jwt.access-ttl-minutes}") int accessTtlMinutes,
             @Value("${app.jwt.refresh-ttl-days}") int refreshTtlDays,
@@ -55,6 +61,7 @@ public class OtpService {
         this.smsService = smsService;
         this.userRepository = userRepository;
         this.refreshTokenRepository = refreshTokenRepository;
+        this.userRoleRepository = userRoleRepository;
         this.jwtProvider = jwtProvider;
         this.accessTtlMinutes = accessTtlMinutes;
         this.refreshTtlDays = refreshTtlDays;
@@ -103,7 +110,11 @@ public class OtpService {
                 .orElseThrow(InvalidOtpException::new);
 
         String deviceId = (request.getDeviceId() != null) ? request.getDeviceId() : "unknown";
-        String accessToken = jwtProvider.generateAccessToken(user.getId(), user.getEmail(), deviceId, user.isPlatformAdmin());
+        List<UserRole> roles = userRoleRepository.findAllActiveByUserId(user.getId());
+        UUID primaryTenantId = roles.isEmpty() ? null : roles.get(0).getTenantId();
+        String primaryRole = roles.isEmpty() ? null : roles.get(0).getRole().getName();
+        String accessToken = jwtProvider.generateAccessToken(
+                user.getId(), user.getEmail(), deviceId, user.isPlatformAdmin(), primaryTenantId, primaryRole);
 
         String rawRefresh = jwtProvider.generateRefreshTokenRaw();
         String tokenHash = jwtProvider.hashToken(rawRefresh);

@@ -4,9 +4,13 @@ import com.fams.modules.auth.dto.request.UpdateProfileRequest;
 import com.fams.modules.auth.dto.response.UserProfileResponse;
 import com.fams.modules.auth.entity.User;
 import com.fams.modules.auth.repository.UserRepository;
+import com.fams.modules.auth.specification.UserSpecification;
 import com.fams.shared.exception.DuplicateResourceException;
 import com.fams.shared.exception.InvalidCredentialsException;
+import com.fams.shared.pagination.PageResponse;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -21,6 +25,14 @@ public class UserProfileService {
 
     public UserProfileService(UserRepository userRepository) {
         this.userRepository = userRepository;
+    }
+
+    @Transactional(readOnly = true)
+    public PageResponse<UserProfileResponse> searchUsers(String search, int page, int size) {
+        int clampedSize = Math.min(size, 100);
+        PageRequest pageable = PageRequest.of(page, clampedSize, Sort.by(Sort.Direction.ASC, "email"));
+        return PageResponse.from(
+                userRepository.findAll(UserSpecification.build(search), pageable).map(this::toResponse));
     }
 
     @Transactional

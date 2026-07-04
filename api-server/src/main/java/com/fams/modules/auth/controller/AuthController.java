@@ -5,6 +5,7 @@ import com.fams.modules.auth.dto.request.ForgotPasswordRequest;
 import com.fams.modules.auth.dto.request.GoogleLoginRequest;
 import com.fams.modules.auth.dto.request.LoginRequest;
 import com.fams.modules.auth.dto.request.LoginTotpRequest;
+import com.fams.modules.auth.dto.request.RefreshTokenRequest;
 import com.fams.modules.auth.dto.request.ResetPasswordRequest;
 import com.fams.modules.auth.dto.request.TotpVerifyRequest;
 import com.fams.modules.auth.dto.request.UpdateProfileRequest;
@@ -25,6 +26,7 @@ import com.fams.modules.auth.service.LogoutService;
 import com.fams.modules.auth.service.OtpService;
 import com.fams.modules.auth.service.LoginTotpService;
 import com.fams.modules.auth.service.PasswordResetService;
+import com.fams.modules.auth.service.RefreshTokenService;
 import com.fams.modules.auth.service.RegisterService;
 import com.fams.modules.auth.service.TotpService;
 import com.fams.modules.auth.service.UserProfileService;
@@ -63,6 +65,7 @@ public class AuthController {
     private final TotpService totpService;
     private final LoginTotpService loginTotpService;
     private final GoogleLoginService googleLoginService;
+    private final RefreshTokenService refreshTokenService;
 
     public AuthController(HealthCheckRepository healthCheckRepository,
                           AuthService authService,
@@ -75,7 +78,8 @@ public class AuthController {
                           PasswordResetService passwordResetService,
                           TotpService totpService,
                           LoginTotpService loginTotpService,
-                          GoogleLoginService googleLoginService) {
+                          GoogleLoginService googleLoginService,
+                          RefreshTokenService refreshTokenService) {
         this.healthCheckRepository = healthCheckRepository;
         this.authService = authService;
         this.otpService = otpService;
@@ -88,6 +92,7 @@ public class AuthController {
         this.totpService = totpService;
         this.loginTotpService = loginTotpService;
         this.googleLoginService = googleLoginService;
+        this.refreshTokenService = refreshTokenService;
     }
 
     @Operation(summary = "Health check", description = "Returns a simple liveness string. No auth required.")
@@ -394,5 +399,23 @@ public class AuthController {
         log.info("TOTP disable requested by user {}", userDetails.getUserId());
         totpService.disableTotp(userDetails.getUserId());
         return ResponseEntity.ok(new ApiResponse<>(true, "TOTP two-factor authentication has been disabled.", null));
+    }
+
+    @Operation(summary = "Refresh access token",
+        description = "Exchanges a valid refresh token for a new access token and a rotated refresh token. No auth required.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Token refreshed successfully",
+            content = @Content(schema = @Schema(implementation = LoginResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Validation error — refreshToken field missing"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Refresh token invalid, revoked, or expired"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "User associated with this token no longer exists")
+    })
+    @SecurityRequirements({})
+    @PostMapping("/refresh-token")
+    public ResponseEntity<ApiResponse<LoginResponse>> refreshToken(
+            @Valid @RequestBody RefreshTokenRequest request) {
+        log.info("Refresh token requested");
+        LoginResponse response = refreshTokenService.refresh(request.getRefreshToken());
+        return ResponseEntity.ok(new ApiResponse<>(true, "Token refreshed successfully", response));
     }
 }

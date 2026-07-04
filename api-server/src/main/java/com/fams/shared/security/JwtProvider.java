@@ -34,19 +34,22 @@ public class JwtProvider {
         this.refreshTtlDays = refreshTtlDays;
     }
 
-    public String generateAccessToken(UUID userId, String email, String deviceId, boolean isPlatformAdmin) {
+    public String generateAccessToken(UUID userId, String email, String deviceId, boolean isPlatformAdmin,
+                                      UUID tenantId, String role) {
         Date now = new Date();
         Date expiry = new Date(now.getTime() + (long) accessTtlMinutes * 60 * 1000);
 
-        return Jwts.builder()
+        var builder = Jwts.builder()
                 .subject(userId.toString())
                 .claim("email", email)
                 .claim("deviceId", deviceId)
                 .claim("isPlatformAdmin", isPlatformAdmin)
+                .claim("tenantId", tenantId != null ? tenantId.toString() : null)
+                .claim("role", role)
                 .issuedAt(now)
-                .expiration(expiry)
-                .signWith(signingKey)
-                .compact();
+                .expiration(expiry);
+
+        return builder.signWith(signingKey).compact();
     }
 
     public String generateRefreshTokenRaw() {

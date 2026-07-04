@@ -54,12 +54,14 @@ public class LoginTotpService {
             throw new InvalidCredentialsException("Invalid or expired TOTP session");
         }
 
-        // value format: userId|email|deviceId|isPlatformAdmin
-        String[] parts = value.split("\\|", 4);
+        // value format: userId|email|deviceId|isPlatformAdmin|tenantId|role
+        String[] parts = value.split("\\|", 6);
         UUID userId = UUID.fromString(parts[0]);
         String email = parts[1];
         String deviceId = parts[2];
         boolean isPlatformAdmin = Boolean.parseBoolean(parts[3]);
+        UUID tenantId = (parts.length > 4 && !parts[4].isEmpty()) ? UUID.fromString(parts[4]) : null;
+        String role = (parts.length > 5 && !parts[5].isEmpty()) ? parts[5] : null;
 
         User user = userRepository.findByIdAndDeletedAtIsNull(userId)
                 .orElseThrow(() -> new InvalidCredentialsException("Invalid or expired TOTP session"));
@@ -76,7 +78,7 @@ public class LoginTotpService {
         // Consume the pending token immediately to prevent replay
         redis.delete(key);
 
-        String accessToken = jwtProvider.generateAccessToken(userId, email, deviceId, isPlatformAdmin);
+        String accessToken = jwtProvider.generateAccessToken(userId, email, deviceId, isPlatformAdmin, tenantId, role);
 
         String rawRefresh = jwtProvider.generateRefreshTokenRaw();
         String tokenHash = jwtProvider.hashToken(rawRefresh);

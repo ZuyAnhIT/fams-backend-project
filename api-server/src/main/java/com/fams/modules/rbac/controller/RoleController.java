@@ -2,9 +2,11 @@ package com.fams.modules.rbac.controller;
 
 import com.fams.modules.rbac.dto.request.CreateRoleRequest;
 import com.fams.modules.rbac.dto.request.UpdateRoleRequest;
+import com.fams.modules.rbac.dto.response.MyRoleResponse;
 import com.fams.modules.rbac.dto.response.RoleDetailResponse;
 import com.fams.modules.rbac.dto.response.RoleResponse;
 import com.fams.modules.rbac.service.RoleService;
+import com.fams.modules.rbac.service.UserRoleService;
 import com.fams.shared.pagination.PageResponse;
 import com.fams.shared.response.ApiResponse;
 import com.fams.shared.security.FamsUserDetails;
@@ -24,6 +26,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.UUID;
 
 @Slf4j
@@ -33,9 +36,29 @@ import java.util.UUID;
 public class RoleController {
 
     private final RoleService roleService;
+    private final UserRoleService userRoleService;
 
-    public RoleController(RoleService roleService) {
+    public RoleController(RoleService roleService, UserRoleService userRoleService) {
         this.roleService = roleService;
+        this.userRoleService = userRoleService;
+    }
+
+    @Operation(
+        summary = "Get my roles",
+        description = "Returns all role assignments for the currently authenticated user, " +
+                      "including the full list of permissions granted by each role."
+    )
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Roles returned"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Unauthorized")
+    })
+    @GetMapping("/me")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<ApiResponse<List<MyRoleResponse>>> getMyRoles(
+            @AuthenticationPrincipal FamsUserDetails userDetails) {
+        log.info("Get my roles: userId={}", userDetails.getUserId());
+        List<MyRoleResponse> roles = userRoleService.getCurrentUserRoles(userDetails.getUserId());
+        return ResponseEntity.ok(ApiResponse.success(roles));
     }
 
     @Operation(summary = "List roles",

@@ -99,7 +99,7 @@ public class RegisterService {
 
         // Phone-only registration: issue tokens immediately
         String deviceId = StringUtils.hasText(request.getDeviceId()) ? request.getDeviceId() : "unknown";
-        String accessToken = jwtProvider.generateAccessToken(user.getId(), null, deviceId, false);
+        String accessToken = jwtProvider.generateAccessToken(user.getId(), null, deviceId, false, null, null);
 
         String rawRefresh = jwtProvider.generateRefreshTokenRaw();
         String tokenHash = jwtProvider.hashToken(rawRefresh);

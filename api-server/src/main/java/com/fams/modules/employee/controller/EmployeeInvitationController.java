@@ -3,6 +3,7 @@ package com.fams.modules.employee.controller;
 import com.fams.modules.employee.dto.request.InviteEmployeeRequest;
 import com.fams.modules.employee.dto.response.InvitationResponse;
 import com.fams.modules.employee.service.EmployeeInvitationService;
+import com.fams.shared.pagination.PageResponse;
 import com.fams.shared.response.ApiResponse;
 import com.fams.shared.security.FamsUserDetails;
 import io.swagger.v3.oas.annotations.Operation;
@@ -29,6 +30,33 @@ public class EmployeeInvitationController {
 
     public EmployeeInvitationController(EmployeeInvitationService invitationService) {
         this.invitationService = invitationService;
+    }
+
+    @Operation(
+        summary = "List invitations",
+        description = "Returns a paginated list of invitations for the tenant. " +
+                      "Supports optional filtering by status (pending/accepted/cancelled/expired) and email search. " +
+                      "Requires the employees:read permission."
+    )
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Invitation list returned"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Invalid query parameters"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Unauthorized"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "Insufficient permissions"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "Tenant not found")
+    })
+    @GetMapping
+    public ResponseEntity<ApiResponse<PageResponse<InvitationResponse>>> listInvitations(
+            @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
+            @Parameter(description = "Filter by status") @RequestParam(required = false) String status,
+            @Parameter(description = "Search by email") @RequestParam(required = false) String email,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @AuthenticationPrincipal FamsUserDetails userDetails) {
+        log.info("List invitations tenantId={} status={} email={} by userId={}", tenantId, status, email, userDetails.getUserId());
+        PageResponse<InvitationResponse> response = invitationService.listInvitations(
+                tenantId, status, email, page, size, userDetails.getUserId(), userDetails.isPlatformAdmin());
+        return ResponseEntity.ok(ApiResponse.success(response));
     }
 
     @Operation(
