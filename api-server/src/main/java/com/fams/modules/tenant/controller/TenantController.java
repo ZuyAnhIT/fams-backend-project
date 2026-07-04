@@ -10,9 +10,11 @@ import com.fams.modules.tenant.dto.request.UpdateIpWhitelistRequest;
 import com.fams.modules.tenant.dto.request.UpdateTenantRequest;
 import com.fams.modules.tenant.dto.request.UpdateTenantSettingsRequest;
 import com.fams.modules.tenant.dto.response.IpWhitelistResponse;
+import com.fams.modules.tenant.dto.response.TenantDetailResponse;
 import com.fams.modules.tenant.dto.response.TenantResponse;
 import com.fams.modules.tenant.dto.response.TenantSettingsResponse;
 import com.fams.modules.tenant.service.IpWhitelistService;
+import com.fams.modules.tenant.service.TenantDetailService;
 import com.fams.modules.tenant.service.TenantService;
 import com.fams.modules.tenant.service.TenantSettingsService;
 
@@ -43,14 +45,18 @@ import org.springframework.web.bind.annotation.*;
 public class TenantController {
 
     private final TenantService tenantService;
+    private final TenantDetailService tenantDetailService;
     private final TenantSettingsService tenantSettingsService;
     private final IpWhitelistService ipWhitelistService;
     private final TenantSubscriptionService subscriptionService;
 
-    public TenantController(TenantService tenantService, TenantSettingsService tenantSettingsService,
+    public TenantController(TenantService tenantService,
+                            TenantDetailService tenantDetailService,
+                            TenantSettingsService tenantSettingsService,
                             IpWhitelistService ipWhitelistService,
                             TenantSubscriptionService subscriptionService) {
         this.tenantService = tenantService;
+        this.tenantDetailService = tenantDetailService;
         this.tenantSettingsService = tenantSettingsService;
         this.ipWhitelistService = ipWhitelistService;
         this.subscriptionService = subscriptionService;
@@ -79,6 +85,25 @@ public class TenantController {
         PageResponse<TenantResponse> result = tenantService.listTenants(
                 search, status, industry, countryCode, sortBy, sortDir, page, size);
         return ResponseEntity.ok(ApiResponse.success(result));
+    }
+
+    @Operation(summary = "Get tenant operational detail",
+        description = "Returns the full operational view of a tenant: profile, subscription, plan limits, and current usage counts. Restricted to Platform Admins.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Detail returned",
+            content = @Content(schema = @Schema(implementation = TenantDetailResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Unauthorized"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "Platform Admin role required"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "Tenant not found")
+    })
+    @GetMapping("/{id}/detail")
+    @PreAuthorize("hasRole('PLATFORM_ADMIN')")
+    public ResponseEntity<ApiResponse<TenantDetailResponse>> getTenantDetail(
+            @Parameter(description = "Tenant UUID") @PathVariable UUID id,
+            @AuthenticationPrincipal FamsUserDetails userDetails) {
+        log.info("Get tenant detail id={} by userId={}", id, userDetails.getUserId());
+        TenantDetailResponse response = tenantDetailService.getDetail(id);
+        return ResponseEntity.ok(ApiResponse.success(response));
     }
 
     @Operation(summary = "Create a tenant",
@@ -276,6 +301,46 @@ public class TenantController {
         log.info("Assign subscription tenantId={} planId={}", id, request.getPlanId());
         SubscriptionResponse response = subscriptionService.assignSubscription(id, request);
         return ResponseEntity.status(201).body(ApiResponse.success(response));
+    }
+
+    @Operation(summary = "Suspend a tenant",
+        description = "Sets tenant status to 'suspended', immediately blocking all non-admin users. Restricted to Platform Admins.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Tenant suspended",
+            content = @Content(schema = @Schema(implementation = TenantResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Tenant is already suspended or cancelled"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Unauthorized"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "Platform Admin role required"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "Tenant not found")
+    })
+    @PostMapping("/{id}/suspend")
+    @PreAuthorize("hasRole('PLATFORM_ADMIN')")
+    public ResponseEntity<ApiResponse<TenantResponse>> suspendTenant(
+            @Parameter(description = "Tenant UUID") @PathVariable UUID id,
+            @AuthenticationPrincipal FamsUserDetails userDetails) {
+        log.info("Suspend tenant id={} by userId={}", id, userDetails.getUserId());
+        TenantResponse response = tenantService.suspendTenant(id);
+        return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    @Operation(summary = "Reactivate a tenant",
+        description = "Sets tenant status from 'suspended' back to 'active'. Restricted to Platform Admins.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Tenant reactivated",
+            content = @Content(schema = @Schema(implementation = TenantResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Tenant is not currently suspended"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Unauthorized"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "Platform Admin role required"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "Tenant not found")
+    })
+    @PostMapping("/{id}/reactivate")
+    @PreAuthorize("hasRole('PLATFORM_ADMIN')")
+    public ResponseEntity<ApiResponse<TenantResponse>> reactivateTenant(
+            @Parameter(description = "Tenant UUID") @PathVariable UUID id,
+            @AuthenticationPrincipal FamsUserDetails userDetails) {
+        log.info("Reactivate tenant id={} by userId={}", id, userDetails.getUserId());
+        TenantResponse response = tenantService.reactivateTenant(id);
+        return ResponseEntity.ok(ApiResponse.success(response));
     }
 
     @Operation(summary = "Update tenant subscription",

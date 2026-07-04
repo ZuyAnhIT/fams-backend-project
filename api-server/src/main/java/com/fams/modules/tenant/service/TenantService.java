@@ -9,6 +9,7 @@ import com.fams.modules.tenant.specification.TenantSpecification;
 import com.fams.shared.exception.DuplicateResourceException;
 import com.fams.shared.exception.ResourceNotFoundException;
 import com.fams.shared.pagination.PageResponse;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.security.access.AccessDeniedException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -27,10 +28,14 @@ import java.util.UUID;
 @Service
 public class TenantService {
 
-    private final TenantRepository tenantRepository;
+    public static final String TENANT_SUSPENDED_PREFIX = "tenant:suspended:";
 
-    public TenantService(TenantRepository tenantRepository) {
+    private final TenantRepository tenantRepository;
+    private final StringRedisTemplate redis;
+
+    public TenantService(TenantRepository tenantRepository, StringRedisTemplate redis) {
         this.tenantRepository = tenantRepository;
+        this.redis = redis;
     }
 
     @Transactional
@@ -108,6 +113,41 @@ public class TenantService {
         Page<TenantResponse> resultPage = tenantRepository.findAll(spec, pageable).map(this::toResponse);
 
         return PageResponse.from(resultPage);
+    }
+
+    @Transactional
+    public TenantResponse suspendTenant(UUID tenantId) {
+        Tenant tenant = tenantRepository.findByIdAndDeletedAtIsNull(tenantId)
+                .orElseThrow(() -> new ResourceNotFoundException("Tenant not found: " + tenantId));
+
+        if ("suspended".equals(tenant.getStatus())) {
+            throw new IllegalStateException("Tenant is already suspended");
+        }
+        if ("cancelled".equals(tenant.getStatus())) {
+            throw new IllegalStateException("Cannot suspend a cancelled tenant");
+        }
+
+        tenant.setStatus("suspended");
+        tenantRepository.save(tenant);
+        redis.opsForValue().set(TENANT_SUSPENDED_PREFIX + tenantId, "1");
+        log.info("Tenant suspended: id={}", tenantId);
+        return toResponse(tenant);
+    }
+
+    @Transactional
+    public TenantResponse reactivateTenant(UUID tenantId) {
+        Tenant tenant = tenantRepository.findByIdAndDeletedAtIsNull(tenantId)
+                .orElseThrow(() -> new ResourceNotFoundException("Tenant not found: " + tenantId));
+
+        if (!"suspended".equals(tenant.getStatus())) {
+            throw new IllegalStateException("Tenant is not currently suspended");
+        }
+
+        tenant.setStatus("active");
+        tenantRepository.save(tenant);
+        redis.delete(TENANT_SUSPENDED_PREFIX + tenantId);
+        log.info("Tenant reactivated: id={}", tenantId);
+        return toResponse(tenant);
     }
 
     private TenantResponse toResponse(Tenant tenant) {

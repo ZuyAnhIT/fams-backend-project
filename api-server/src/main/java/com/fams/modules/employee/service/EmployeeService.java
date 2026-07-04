@@ -13,6 +13,7 @@ import com.fams.modules.employee.specification.EmployeeSpecification;
 import com.fams.modules.rbac.dto.response.UserRoleResponse;
 import com.fams.modules.rbac.entity.UserRole;
 import com.fams.modules.rbac.repository.UserRoleRepository;
+import com.fams.modules.subscription.service.PlanLimitEnforcementService;
 import com.fams.modules.tenant.repository.TenantRepository;
 import com.fams.shared.exception.DuplicateResourceException;
 import com.fams.shared.exception.ResourceNotFoundException;
@@ -47,13 +48,16 @@ public class EmployeeService {
     private final EmployeeRepository employeeRepository;
     private final UserRoleRepository userRoleRepository;
     private final TenantRepository tenantRepository;
+    private final PlanLimitEnforcementService planLimitEnforcementService;
 
     public EmployeeService(EmployeeRepository employeeRepository,
                            UserRoleRepository userRoleRepository,
-                           TenantRepository tenantRepository) {
+                           TenantRepository tenantRepository,
+                           PlanLimitEnforcementService planLimitEnforcementService) {
         this.employeeRepository = employeeRepository;
         this.userRoleRepository = userRoleRepository;
         this.tenantRepository = tenantRepository;
+        this.planLimitEnforcementService = planLimitEnforcementService;
     }
 
     @Transactional
@@ -69,6 +73,8 @@ public class EmployeeService {
                 throw new AccessDeniedException("You do not have permission to create employees in this tenant");
             }
         }
+
+        planLimitEnforcementService.assertEmployeeLimit(tenantId);
 
         if (org.springframework.util.StringUtils.hasText(request.getEmployeeCode())
                 && employeeRepository.existsByTenantIdAndEmployeeCodeAndDeletedAtIsNull(

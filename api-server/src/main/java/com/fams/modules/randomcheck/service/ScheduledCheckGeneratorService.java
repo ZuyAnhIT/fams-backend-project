@@ -11,6 +11,7 @@ import com.fams.modules.shift.entity.Shift;
 import com.fams.modules.shift.repository.ShiftRepository;
 import com.fams.modules.site.entity.Site;
 import com.fams.modules.site.repository.SiteRepository;
+import com.fams.modules.subscription.service.PlanLimitEnforcementService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -32,6 +33,7 @@ public class ScheduledCheckGeneratorService {
     private final ShiftRepository shiftRepository;
     private final SiteRepository siteRepository;
     private final RandomCheckDispatchQueue dispatchQueue;
+    private final PlanLimitEnforcementService planLimitEnforcementService;
     private final SecureRandom random = new SecureRandom();
 
     public ScheduledCheckGeneratorService(AssignmentRepository assignmentRepository,
@@ -39,13 +41,15 @@ public class ScheduledCheckGeneratorService {
                                           ScheduledCheckRepository scheduledCheckRepository,
                                           ShiftRepository shiftRepository,
                                           SiteRepository siteRepository,
-                                          RandomCheckDispatchQueue dispatchQueue) {
+                                          RandomCheckDispatchQueue dispatchQueue,
+                                          PlanLimitEnforcementService planLimitEnforcementService) {
         this.assignmentRepository = assignmentRepository;
         this.configRepository = configRepository;
         this.scheduledCheckRepository = scheduledCheckRepository;
         this.shiftRepository = shiftRepository;
         this.siteRepository = siteRepository;
         this.dispatchQueue = dispatchQueue;
+        this.planLimitEnforcementService = planLimitEnforcementService;
     }
 
     /**
@@ -128,11 +132,20 @@ public class ScheduledCheckGeneratorService {
                 .orElse("UTC");
         ZoneId zone = safeZone(timezone);
 
+        // Enforce monthly random check quota
+        int remaining = planLimitEnforcementService.getRemainingRandomChecks(assignment.getTenantId());
+        if (remaining <= 0) {
+            log.debug("Random check monthly quota exhausted for tenantId={} — skipping assignment={}",
+                    assignment.getTenantId(), assignment.getId());
+            return 0;
+        }
+        int checksToGenerate = Math.min(config.getChecksPerShift(), remaining);
+
         // Generate N random check times within the allowed window
         List<OffsetDateTime> checkTimes = generateCheckTimes(
                 date, zone,
                 config.getAllowedStartTime(), config.getAllowedEndTime(),
-                config.getChecksPerShift(), config.getMinIntervalMinutes());
+                checksToGenerate, config.getMinIntervalMinutes());
 
         String snapshot = buildSnapshot(config);
 

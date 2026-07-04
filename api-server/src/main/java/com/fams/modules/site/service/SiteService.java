@@ -11,6 +11,7 @@ import com.fams.modules.site.dto.response.SiteResponse;
 import com.fams.modules.site.entity.Site;
 import com.fams.modules.site.repository.SiteRepository;
 import com.fams.modules.site.specification.SiteSpecification;
+import com.fams.modules.subscription.service.PlanLimitEnforcementService;
 import com.fams.modules.tenant.repository.TenantRepository;
 import com.fams.shared.exception.DuplicateResourceException;
 import com.fams.shared.exception.ResourceNotFoundException;
@@ -42,19 +43,22 @@ public class SiteService {
     private final GeofenceService geofenceService;
     private final ShiftService shiftService;
     private final AssignmentService assignmentService;
+    private final PlanLimitEnforcementService planLimitEnforcementService;
 
     public SiteService(SiteRepository siteRepository,
                        TenantRepository tenantRepository,
                        UserRoleRepository userRoleRepository,
                        GeofenceService geofenceService,
                        ShiftService shiftService,
-                       AssignmentService assignmentService) {
+                       AssignmentService assignmentService,
+                       PlanLimitEnforcementService planLimitEnforcementService) {
         this.siteRepository = siteRepository;
         this.tenantRepository = tenantRepository;
         this.userRoleRepository = userRoleRepository;
         this.geofenceService = geofenceService;
         this.shiftService = shiftService;
         this.assignmentService = assignmentService;
+        this.planLimitEnforcementService = planLimitEnforcementService;
     }
 
     @Transactional
@@ -71,6 +75,8 @@ public class SiteService {
                         "You do not have permission to create sites in this tenant");
             }
         }
+
+        planLimitEnforcementService.assertSiteLimit(tenantId);
 
         if (siteRepository.existsByTenantIdAndNameIgnoreCaseAndDeletedAtIsNull(
                 tenantId, request.getName().trim())) {

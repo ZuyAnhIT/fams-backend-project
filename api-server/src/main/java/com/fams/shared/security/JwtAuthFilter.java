@@ -1,6 +1,7 @@
 package com.fams.shared.security;
 
 import com.fams.modules.auth.service.LogoutService;
+import com.fams.modules.tenant.service.TenantService;
 import io.jsonwebtoken.Claims;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -28,6 +29,11 @@ public class JwtAuthFilter extends OncePerRequestFilter {
     public JwtAuthFilter(JwtProvider jwtProvider, StringRedisTemplate redis) {
         this.jwtProvider = jwtProvider;
         this.redis = redis;
+    }
+
+    private boolean isTenantSuspended(String tenantId) {
+        if (tenantId == null || tenantId.isEmpty()) return false;
+        return Boolean.TRUE.equals(redis.hasKey(TenantService.TENANT_SUSPENDED_PREFIX + tenantId));
     }
 
     @Override
@@ -62,6 +68,15 @@ public class JwtAuthFilter extends OncePerRequestFilter {
 
                 String email = claims.get("email", String.class);
                 Boolean isPlatformAdmin = claims.get("isPlatformAdmin", Boolean.class);
+                String tenantId = claims.get("tenantId", String.class);
+
+                if (!Boolean.TRUE.equals(isPlatformAdmin) && isTenantSuspended(tenantId)) {
+                    log.debug("Rejecting request — tenant {} is suspended", tenantId);
+                    response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+                    response.setContentType("application/json");
+                    response.getWriter().write("{\"success\":false,\"message\":\"Tenant account is suspended\",\"data\":null}");
+                    return;
+                }
 
                 FamsUserDetails userDetails = new FamsUserDetails(
                         com.fams.modules.auth.entity.User.builder()

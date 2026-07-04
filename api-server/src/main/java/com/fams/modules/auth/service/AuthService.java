@@ -8,10 +8,12 @@ import com.fams.modules.auth.repository.RefreshTokenRepository;
 import com.fams.modules.auth.repository.UserRepository;
 import com.fams.modules.rbac.entity.UserRole;
 import com.fams.modules.rbac.repository.UserRoleRepository;
+import com.fams.modules.tenant.repository.TenantRepository;
 import com.fams.shared.constants.AppConstants;
 import com.fams.shared.exception.AccountLockedException;
 import com.fams.shared.exception.EmailNotVerifiedException;
 import com.fams.shared.exception.InvalidCredentialsException;
+import com.fams.shared.exception.TenantSuspendedException;
 import com.fams.shared.security.JwtProvider;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -35,6 +37,7 @@ public class AuthService {
     private final UserRepository userRepository;
     private final RefreshTokenRepository refreshTokenRepository;
     private final UserRoleRepository userRoleRepository;
+    private final TenantRepository tenantRepository;
     private final JwtProvider jwtProvider;
     private final BCryptPasswordEncoder passwordEncoder;
     private final StringRedisTemplate redis;
@@ -45,6 +48,7 @@ public class AuthService {
             UserRepository userRepository,
             RefreshTokenRepository refreshTokenRepository,
             UserRoleRepository userRoleRepository,
+            TenantRepository tenantRepository,
             JwtProvider jwtProvider,
             BCryptPasswordEncoder passwordEncoder,
             StringRedisTemplate redis,
@@ -53,6 +57,7 @@ public class AuthService {
         this.userRepository = userRepository;
         this.refreshTokenRepository = refreshTokenRepository;
         this.userRoleRepository = userRoleRepository;
+        this.tenantRepository = tenantRepository;
         this.jwtProvider = jwtProvider;
         this.passwordEncoder = passwordEncoder;
         this.redis = redis;
@@ -103,6 +108,15 @@ public class AuthService {
         List<UserRole> roles = userRoleRepository.findAllActiveByUserId(user.getId());
         UUID primaryTenantId = roles.isEmpty() ? null : roles.get(0).getTenantId();
         String primaryRole = roles.isEmpty() ? null : roles.get(0).getRole().getName();
+
+        // 6a. Block login if tenant is suspended (platform admins are not tenant-scoped)
+        if (!user.isPlatformAdmin() && primaryTenantId != null) {
+            tenantRepository.findByIdAndDeletedAtIsNull(primaryTenantId).ifPresent(tenant -> {
+                if ("suspended".equals(tenant.getStatus())) {
+                    throw new TenantSuspendedException();
+                }
+            });
+        }
 
         // 7. If TOTP is enabled, issue a pending token instead of real tokens
         String deviceId = (request.getDeviceId() != null) ? request.getDeviceId() : "unknown";

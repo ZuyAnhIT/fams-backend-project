@@ -85,4 +85,11 @@ public interface ScheduledCheckRepository extends JpaRepository<ScheduledCheck, 
            "AND s.expiresAt < :now AND s.deletedAt IS NULL")
     List<ScheduledCheck> findExpiredSentChecksForTenant(@Param("tenantId") UUID tenantId,
                                                         @Param("now") java.time.OffsetDateTime now);
+
+    @Query("SELECT COUNT(s) FROM ScheduledCheck s WHERE s.tenantId = :tenantId " +
+           "AND s.checkDate >= :monthStart AND s.checkDate <= :monthEnd " +
+           "AND s.deletedAt IS NULL")
+    long countByTenantAndMonth(@Param("tenantId") UUID tenantId,
+                               @Param("monthStart") LocalDate monthStart,
+                               @Param("monthEnd") LocalDate monthEnd);
 }

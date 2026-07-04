@@ -9,6 +9,7 @@ import com.fams.modules.randomcheck.repository.RandomCheckConfigRepository;
 import com.fams.modules.randomcheck.repository.ScheduledCheckRepository;
 import com.fams.modules.site.entity.Site;
 import com.fams.modules.site.repository.SiteRepository;
+import com.fams.modules.subscription.service.PlanLimitEnforcementService;
 import com.fams.shared.exception.ResourceNotFoundException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -30,15 +31,18 @@ public class ManualCheckService {
     private final RandomCheckConfigRepository configRepository;
     private final ScheduledCheckRepository scheduledCheckRepository;
     private final SiteRepository siteRepository;
+    private final PlanLimitEnforcementService planLimitEnforcementService;
 
     public ManualCheckService(AssignmentRepository assignmentRepository,
                               RandomCheckConfigRepository configRepository,
                               ScheduledCheckRepository scheduledCheckRepository,
-                              SiteRepository siteRepository) {
+                              SiteRepository siteRepository,
+                              PlanLimitEnforcementService planLimitEnforcementService) {
         this.assignmentRepository = assignmentRepository;
         this.configRepository = configRepository;
         this.scheduledCheckRepository = scheduledCheckRepository;
         this.siteRepository = siteRepository;
+        this.planLimitEnforcementService = planLimitEnforcementService;
     }
 
     /**
@@ -73,6 +77,9 @@ public class ManualCheckService {
         RandomCheckConfig config = configOpt
                 .orElseThrow(() -> new IllegalArgumentException(
                         "No random check config found for tenant " + tenantId));
+
+        // Enforce monthly random check quota
+        planLimitEnforcementService.assertRandomCheckLimit(tenantId);
 
         // Validate and apply checkMode override
         String checkMode = resolveCheckMode(request.getCheckMode(), config.getCheckMode());
