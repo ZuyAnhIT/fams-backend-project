@@ -210,6 +210,53 @@ public class ReportController {
     }
 
     @Operation(
+        summary = "Export violation list to Excel (HR/Admin)",
+        description = "Generates and downloads an Excel (.xlsx) file containing all violations matching the " +
+                      "supplied filters — one row per violation with type, date, resolved status, attendance " +
+                      "impact, employee note, and timestamps. All filters are optional. " +
+                      "Requires reports:export permission."
+    )
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "200",
+            description = "Excel file downloaded successfully"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "401",
+            description = "Unauthorized — valid JWT required"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "403",
+            description = "Forbidden — reports:export permission required")
+    })
+    @GetMapping("/violations/export")
+    public ResponseEntity<byte[]> exportViolations(
+            @PathVariable UUID tenantId,
+            @Parameter(description = "Start date inclusive (yyyy-MM-dd, optional)")
+                @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @Parameter(description = "End date inclusive (yyyy-MM-dd, optional)")
+                @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+            @Parameter(description = "Filter by site ID (optional)")
+                @RequestParam(required = false) UUID siteId,
+            @Parameter(description = "Filter by employee ID (optional)")
+                @RequestParam(required = false) UUID employeeId,
+            @Parameter(description = "Filter by violation type (optional)")
+                @RequestParam(required = false) String violationType,
+            @AuthenticationPrincipal FamsUserDetails caller) {
+
+        byte[] content = reportService.exportViolations(
+                tenantId, from, to, siteId, employeeId, violationType,
+                caller.getUserId(), caller.isPlatformAdmin());
+
+        String filename = "violations-export.xlsx";
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.parseMediaType(
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"));
+        headers.setContentDispositionFormData("attachment", filename);
+        headers.setContentLength(content.length);
+
+        return ResponseEntity.ok().headers(headers).body(content);
+    }
+
+    @Operation(
         summary = "Site presence report — real-time (HR/Admin/Supervisor)",
         description = "Returns a real-time snapshot of employee presence at each site: how many are currently " +
                       "checked in (open session) versus the number with active assignments today. " +

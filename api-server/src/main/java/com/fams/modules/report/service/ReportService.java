@@ -465,6 +465,66 @@ public class ReportService {
                 .build();
     }
 
+    @Transactional(readOnly = true)
+    public byte[] exportViolations(UUID tenantId, LocalDate from, LocalDate to,
+                                   UUID siteId, UUID employeeId, String violationType,
+                                   UUID callerUserId, boolean callerIsPlatformAdmin) {
+        if (!callerIsPlatformAdmin) {
+            Set<String> perms = userRoleRepository
+                    .findPermissionNamesByUserIdAndTenantId(callerUserId, tenantId);
+            if (!perms.contains("reports:export")) {
+                throw new AccessDeniedException("reports:export permission required to export violations");
+            }
+        }
+
+        org.springframework.data.jpa.domain.Specification<Violation> spec =
+                ViolationSpecification.build(tenantId, employeeId, siteId, violationType, null, from, to);
+        List<Violation> all = violationRepository.findAll(spec,
+                Sort.by(Sort.Direction.DESC, "checkDate"));
+
+        try (XSSFWorkbook workbook = new XSSFWorkbook()) {
+            Sheet sheet = workbook.createSheet("Violations");
+
+            String[] headers = {
+                "ID", "Employee ID", "Site ID", "Violation Type",
+                "Check Date", "Description", "Resolved", "Resolved At",
+                "Affects Attendance", "Employee Note", "Created At"
+            };
+            Row headerRow = sheet.createRow(0);
+            for (int i = 0; i < headers.length; i++) {
+                headerRow.createCell(i).setCellValue(headers[i]);
+            }
+
+            int rowNum = 1;
+            for (Violation v : all) {
+                Row row = sheet.createRow(rowNum++);
+                row.createCell(0).setCellValue(v.getId().toString());
+                row.createCell(1).setCellValue(v.getEmployeeId().toString());
+                row.createCell(2).setCellValue(v.getSiteId() != null ? v.getSiteId().toString() : "");
+                row.createCell(3).setCellValue(v.getViolationType());
+                row.createCell(4).setCellValue(v.getCheckDate() != null ? v.getCheckDate().toString() : "");
+                row.createCell(5).setCellValue(v.getDescription() != null ? v.getDescription() : "");
+                row.createCell(6).setCellValue(v.isResolved());
+                row.createCell(7).setCellValue(v.getResolvedAt() != null ? v.getResolvedAt().toString() : "");
+                row.createCell(8).setCellValue(v.isAffectsAttendance());
+                row.createCell(9).setCellValue(v.getEmployeeNote() != null ? v.getEmployeeNote() : "");
+                row.createCell(10).setCellValue(v.getCreatedAt() != null ? v.getCreatedAt().toString() : "");
+            }
+
+            for (int i = 0; i < headers.length; i++) {
+                sheet.autoSizeColumn(i);
+            }
+
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            workbook.write(out);
+            log.info("Violation export: tenantId={} from={} to={} siteId={} employeeId={} rows={}",
+                    tenantId, from, to, siteId, employeeId, all.size());
+            return out.toByteArray();
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to generate violations Excel export", e);
+        }
+    }
+
     private ViolationListResponse toViolationListResponse(Violation v) {
         return ViolationListResponse.builder()
                 .id(v.getId())
