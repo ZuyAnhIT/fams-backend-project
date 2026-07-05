@@ -1,0 +1,33 @@
+package com.fams.modules.report.dto.response;
+
+import com.fams.shared.pagination.PageResponse;
+import io.swagger.v3.oas.annotations.media.Schema;
+import lombok.Builder;
+import lombok.Data;
+
+@Data
+@Builder
+@Schema(description = "Face ID enrollment status report — aggregate counts plus per-employee rows")
+public class FaceIdReportResponse {
+
+    @Schema(description = "Total active employees in the tenant", example = "120")
+    private int totalEmployees;
+
+    @Schema(description = "Number of employees with status = enrolled", example = "95")
+    private int enrolledCount;
+
+    @Schema(description = "Number of employees with status = pending (consent given, enrollment in progress)", example = "5")
+    private int pendingCount;
+
+    @Schema(description = "Number of employees who have never created a Face ID record or status = not_enrolled", example = "18")
+    private int notEnrolledCount;
+
+    @Schema(description = "Number of employees with status = revoked", example = "2")
+    private int revokedCount;
+
+    @Schema(description = "Status filter applied (null = all statuses)", example = "not_enrolled")
+    private String statusFilter;
+
+    @Schema(description = "Paginated employee Face ID rows matching the filters")
+    private PageResponse<FaceIdReportRow> records;
+}

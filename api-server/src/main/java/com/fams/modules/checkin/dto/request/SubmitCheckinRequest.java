@@ -34,4 +34,10 @@ public class SubmitCheckinRequest {
 
     @Schema(description = "Device identifier for multi-device tracking (optional)", example = "device-abc-123")
     private String deviceId;
+
+    @Schema(description = "Base64-encoded selfie for face verification (optional, required when policy = location_face or location_face_liveness)")
+    private String employeePhotoBase64;
+
+    @Schema(description = "Require liveness check in addition to face match (policy = location_face_liveness)", example = "false", defaultValue = "false")
+    private boolean requiresLiveness;
 }

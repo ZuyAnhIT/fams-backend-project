@@ -63,8 +63,8 @@ public class EmployeeDetailResponse {
     @Schema(description = "Site/shift assignments — populated when assignment module is implemented (tasks 63-66)")
     private List<Object> assignments;
 
-    @Schema(description = "Face ID registration status — populated when Face ID module is implemented (tasks 48-51)")
-    private Object faceId;
+    @Schema(description = "Face ID enrollment status for this employee")
+    private FaceIdStatusDto faceId;
 
     @Schema(description = "Creation timestamp (UTC)")
     private OffsetDateTime createdAt;

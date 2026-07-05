@@ -67,6 +67,12 @@ app:
     expiry-days: ${INVITATION_EXPIRY_DAYS:7}
   google:
     client-id: ${GOOGLE_CLIENT_ID}
+  ai:
+    service:
+      internal-url: ${AI_SERVICE_INTERNAL_URL:http://fams-ai:5000}
+    internal-secret: ${AI_INTERNAL_SECRET}
+    enroll-min-photos: ${AI_ENROLL_MIN_PHOTOS:3}
+    enroll-max-photos: ${AI_ENROLL_MAX_PHOTOS:5}
 
 springdoc:
   api-docs:

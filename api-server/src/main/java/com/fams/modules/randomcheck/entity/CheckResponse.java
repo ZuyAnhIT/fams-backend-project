@@ -56,6 +56,9 @@ public class CheckResponse {
     @Column(name = "liveness_verified")
     private Boolean livenessVerified;
 
+    @Column(name = "face_verify_score")
+    private Double faceVerifyScore;
+
     @Column(name = "outcome", nullable = false, length = 10)
     private String outcome;
 

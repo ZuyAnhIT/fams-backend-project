@@ -85,6 +85,15 @@ public class CheckinRecord {
     @Column(name = "employee_photo_url")
     private String employeePhotoUrl;
 
+    @Column(name = "face_verified")
+    private Boolean faceVerified;
+
+    @Column(name = "liveness_verified")
+    private Boolean livenessVerified;
+
+    @Column(name = "face_verify_score")
+    private Double faceVerifyScore;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
 

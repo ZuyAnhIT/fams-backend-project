@@ -20,6 +20,7 @@ public class CheckResponseDto {
     private boolean locationVerified;
     private Boolean faceVerified;
     private Boolean livenessVerified;
+    private Double faceVerifyScore;
     private String outcome;
     private String failureReason;
     private OffsetDateTime createdAt;

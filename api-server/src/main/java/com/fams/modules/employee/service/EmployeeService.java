@@ -7,8 +7,11 @@ import com.fams.modules.employee.dto.response.EmployeeDetailResponse;
 import com.fams.modules.employee.dto.response.EmployeeImportError;
 import com.fams.modules.employee.dto.response.EmployeeImportResponse;
 import com.fams.modules.employee.dto.response.EmployeeResponse;
+import com.fams.modules.employee.dto.response.FaceIdStatusDto;
 import com.fams.modules.employee.entity.Employee;
 import com.fams.modules.employee.repository.EmployeeRepository;
+import com.fams.modules.employee.repository.FaceProfileRepository;
+import com.fams.modules.employee.service.FaceIdService;
 import com.fams.modules.employee.specification.EmployeeSpecification;
 import com.fams.modules.rbac.dto.response.UserRoleResponse;
 import com.fams.modules.rbac.entity.UserRole;
@@ -49,15 +52,18 @@ public class EmployeeService {
     private final UserRoleRepository userRoleRepository;
     private final TenantRepository tenantRepository;
     private final PlanLimitEnforcementService planLimitEnforcementService;
+    private final FaceProfileRepository faceProfileRepository;
 
     public EmployeeService(EmployeeRepository employeeRepository,
                            UserRoleRepository userRoleRepository,
                            TenantRepository tenantRepository,
-                           PlanLimitEnforcementService planLimitEnforcementService) {
+                           PlanLimitEnforcementService planLimitEnforcementService,
+                           FaceProfileRepository faceProfileRepository) {
         this.employeeRepository = employeeRepository;
         this.userRoleRepository = userRoleRepository;
         this.tenantRepository = tenantRepository;
         this.planLimitEnforcementService = planLimitEnforcementService;
+        this.faceProfileRepository = faceProfileRepository;
     }
 
     @Transactional
@@ -252,7 +258,16 @@ public class EmployeeService {
                 .roles(roles)
                 .workspaces(Collections.emptyList())
                 .assignments(Collections.emptyList())
-                .faceId(null)
+                .faceId(faceProfileRepository
+                        .findByEmployeeIdAndTenantId(employee.getId(), tenantId)
+                        .map(FaceIdService::toDto)
+                        .orElse(FaceIdStatusDto.builder()
+                                .status("not_enrolled")
+                                .consentGiven(false)
+                                .consentGivenAt(null)
+                                .enrolledAt(null)
+                                .revokedAt(null)
+                                .build()))
                 .createdAt(employee.getCreatedAt())
                 .updatedAt(employee.getUpdatedAt())
                 .build();

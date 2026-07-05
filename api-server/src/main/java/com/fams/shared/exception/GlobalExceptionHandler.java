@@ -1,6 +1,7 @@
 package com.fams.shared.exception;
 
 import com.fams.modules.randomcheck.service.CheckExpiredException;
+import com.fams.shared.ai.AiServiceException;
 import com.fams.shared.exception.PlanLimitExceededException;
 import com.fams.shared.exception.TenantSuspendedException;
 import com.fams.shared.response.ApiResponse;
@@ -96,6 +97,15 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiResponse<Void>> handleIllegalState(IllegalStateException ex) {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                 .body(ApiResponse.error(ex.getMessage()));
+    }
+
+    @ExceptionHandler(AiServiceException.class)
+    public ResponseEntity<ApiResponse<Void>> handleAiServiceException(AiServiceException ex) {
+        int code = ex.getStatusCode();
+        HttpStatus status = (code >= 400 && code < 500)
+                ? HttpStatus.valueOf(code)
+                : HttpStatus.BAD_GATEWAY;
+        return ResponseEntity.status(status).body(ApiResponse.error(ex.getMessage()));
     }
 
     @ExceptionHandler(CheckExpiredException.class)

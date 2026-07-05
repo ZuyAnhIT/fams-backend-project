@@ -69,4 +69,13 @@ public class CheckinResponse {
     @Schema(description = "Human-readable result message for the employee",
             example = "Check-in recorded. Your location was outside the site geofence — HR will review your attendance.")
     private String message;
+
+    @Schema(description = "Face verification result (null until async job completes)", example = "true")
+    private Boolean faceVerified;
+
+    @Schema(description = "Liveness check result (null unless liveness mode enabled)", example = "true")
+    private Boolean livenessVerified;
+
+    @Schema(description = "Face similarity score 0.0 – 1.0 (null until async job completes)", example = "0.92")
+    private Double faceVerifyScore;
 }

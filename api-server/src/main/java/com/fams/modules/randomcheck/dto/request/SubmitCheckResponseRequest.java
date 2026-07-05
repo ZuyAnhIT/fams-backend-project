@@ -26,8 +26,11 @@ public class SubmitCheckResponseRequest {
 
     private BigDecimal accuracyMeters;
 
-    /** Optional: base64-encoded selfie for face-verification modes */
+    /** Optional: URL or path of a previously uploaded face image */
     private String faceImageUrl;
+
+    /** Base64-encoded selfie for async AI face verification (location_face / location_face_liveness modes) */
+    private String employeePhotoBase64;
 
     /** Optional: liveness score [0,1] provided by the client SDK */
     @DecimalMin(value = "0.0", message = "livenessScore must be >= 0")

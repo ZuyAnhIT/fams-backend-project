@@ -37,3 +37,14 @@ logs/
 
 # ── Maven cache (if accidentally created locally) ─────────────────
 .m2/
+
+# ── Test fixture images (downloaded at runtime, not source files) ──
+tests/**/fixtures/*.jpg
+tests/**/fixtures/*.jpeg
+tests/**/fixtures/*.png
+tests/**/fixtures/*.gif
+tests/**/fixtures/*.bmp
+tests/**/fixtures/*.webp
+
+# ── AI service runtime storage (enrollment/checkin photos) ────────
+ai-service/storage/

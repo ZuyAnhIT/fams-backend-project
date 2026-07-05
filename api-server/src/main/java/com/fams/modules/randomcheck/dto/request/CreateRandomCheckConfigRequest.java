@@ -32,7 +32,11 @@ public class CreateRandomCheckConfigRequest {
     private LocalTime allowedEndTime;
 
     @Schema(
-        description = "Verification mode",
+        description = "Verification mode for random checks. " +
+                      "location_only: GPS geofence check only. " +
+                      "location_face: GPS + async AI face match (requires employee to have an enrolled Face ID; " +
+                      "employees without an enrolled profile will automatically receive a face_fail violation). " +
+                      "location_face_liveness: GPS + face match + liveness anti-spoofing (same enrollment requirement).",
         example = "location_only",
         allowableValues = {"location_only", "location_face", "location_face_liveness"}
     )

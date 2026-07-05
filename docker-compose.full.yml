@@ -62,8 +62,10 @@ services:
       REDIS_HOST: fams-redis
       REDIS_PORT: "6379"
       JAVA_API_INTERNAL_URL: http://fams-api:8080
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "5000", "--reload", "--log-level", "info"]
     volumes:
       - ./ai-service/storage:/app/storage   # host-mounted: photos are visible on host filesystem
+      - ./ai-service/app:/app/app            # live-reload: edit on host, uvicorn hot-restarts instantly
     ports: []                               # intentionally no host port — internal network only
     networks:
       - fams-net

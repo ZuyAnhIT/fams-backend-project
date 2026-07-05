@@ -8,6 +8,7 @@ import com.fams.modules.checkin.dto.request.SubmitCheckinRequest;
 import com.fams.modules.checkin.dto.request.SubmitCheckoutRequest;
 import com.fams.modules.checkin.specification.CheckinSpecification;
 import com.fams.modules.checkin.dto.response.AvailableSiteResponse;
+import com.fams.shared.ai.FaceVerifyJobPublisher;
 import com.fams.modules.checkin.dto.response.CheckinDetailResponse;
 import com.fams.modules.checkin.dto.response.CheckinResponse;
 import com.fams.modules.checkin.entity.CheckinRecord;
@@ -62,6 +63,7 @@ public class CheckinService {
     private final CheckinRepository checkinRepository;
     private final UserRoleRepository userRoleRepository;
     private final AttendanceSummaryService attendanceSummaryService;
+    private final FaceVerifyJobPublisher faceVerifyJobPublisher;
 
     public CheckinService(EmployeeRepository employeeRepository,
                           AssignmentRepository assignmentRepository,
@@ -70,7 +72,8 @@ public class CheckinService {
                           GeofenceRepository geofenceRepository,
                           CheckinRepository checkinRepository,
                           UserRoleRepository userRoleRepository,
-                          AttendanceSummaryService attendanceSummaryService) {
+                          AttendanceSummaryService attendanceSummaryService,
+                          FaceVerifyJobPublisher faceVerifyJobPublisher) {
         this.employeeRepository = employeeRepository;
         this.assignmentRepository = assignmentRepository;
         this.siteRepository = siteRepository;
@@ -79,6 +82,7 @@ public class CheckinService {
         this.checkinRepository = checkinRepository;
         this.userRoleRepository = userRoleRepository;
         this.attendanceSummaryService = attendanceSummaryService;
+        this.faceVerifyJobPublisher = faceVerifyJobPublisher;
     }
 
     // ── Task 67: Available sites ──────────────────────────────────────────────
@@ -168,6 +172,16 @@ public class CheckinService {
         checkinRepository.save(record);
         log.info("Check-in recorded: id={} employeeId={} siteId={} status={} insideGeofence={} riskScore={}",
                 record.getId(), employee.getId(), request.getSiteId(), status, insideGeofence, riskScore);
+
+        // Task 69/70: async face verification if photo provided
+        if (request.getEmployeePhotoBase64() != null && !request.getEmployeePhotoBase64().isBlank()) {
+            try {
+                faceVerifyJobPublisher.publish(tenantId, employee.getId(), record.getId(),
+                        "checkin", request.getEmployeePhotoBase64(), request.isRequiresLiveness());
+            } catch (Exception e) {
+                log.warn("Failed to publish face verify job for checkin {}: {}", record.getId(), e.getMessage());
+            }
+        }
 
         // Task 80: update daily attendance summary on check-in (marks any prior summary as incomplete)
         try {
@@ -630,6 +644,9 @@ public class CheckinService {
                 .createdAt(r.getCreatedAt())
                 .updatedAt(r.getUpdatedAt())
                 .message(resolveDisplayMessage(r))
+                .faceVerified(r.getFaceVerified())
+                .livenessVerified(r.getLivenessVerified())
+                .faceVerifyScore(r.getFaceVerifyScore())
                 .build();
     }
 

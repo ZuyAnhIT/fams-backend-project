@@ -1,6 +1,7 @@
 package com.fams.modules.report.controller;
 
 import com.fams.modules.report.dto.response.DailyAttendanceReportResponse;
+import com.fams.modules.report.dto.response.FaceIdReportResponse;
 import com.fams.modules.report.dto.response.MonthlyAttendanceReportResponse;
 import com.fams.modules.report.dto.response.SitePresenceReportResponse;
 import com.fams.modules.report.dto.response.ViolationReportResponse;
@@ -254,6 +255,40 @@ public class ReportController {
         headers.setContentLength(content.length);
 
         return ResponseEntity.ok().headers(headers).body(content);
+    }
+
+    @Operation(
+        summary = "Face ID enrollment status report (HR/Admin)",
+        description = "Returns aggregate Face ID enrollment stats (enrolled, pending, not_enrolled, revoked) " +
+                      "for all active employees, plus a paginated list of per-employee rows. " +
+                      "Optionally filter by Face ID status. Requires reports:list permission."
+    )
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "200",
+            description = "Face ID enrollment report returned successfully",
+            content = @Content(schema = @Schema(implementation = FaceIdReportResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "401",
+            description = "Unauthorized — valid JWT required"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "403",
+            description = "Forbidden — reports:list permission required")
+    })
+    @GetMapping("/face-id/enrollment")
+    public ResponseEntity<ApiResponse<FaceIdReportResponse>> getFaceIdEnrollmentReport(
+            @PathVariable UUID tenantId,
+            @Parameter(description = "Filter by Face ID status: enrolled | pending | not_enrolled | revoked (optional)")
+                @RequestParam(required = false) String status,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @AuthenticationPrincipal FamsUserDetails caller) {
+
+        FaceIdReportResponse result = reportService.getFaceIdEnrollmentReport(
+                tenantId, status, page, size,
+                caller.getUserId(), caller.isPlatformAdmin());
+
+        return ResponseEntity.ok(ApiResponse.success(result));
     }
 
     @Operation(

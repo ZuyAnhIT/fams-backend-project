@@ -6,9 +6,15 @@ import com.fams.modules.attendance.dto.response.AttendanceSummaryResponse;
 import com.fams.modules.attendance.entity.AttendanceSummary;
 import com.fams.modules.attendance.repository.AttendanceSummaryRepository;
 import com.fams.modules.attendance.specification.AttendanceSummarySpecification;
+import com.fams.modules.employee.entity.Employee;
+import com.fams.modules.employee.entity.FaceProfile;
+import com.fams.modules.employee.repository.EmployeeRepository;
+import com.fams.modules.employee.repository.FaceProfileRepository;
 import com.fams.modules.rbac.repository.UserRoleRepository;
 import com.fams.modules.attendance.dto.response.AttendanceHrMonthlyResponse;
 import com.fams.modules.report.dto.response.DailyAttendanceReportResponse;
+import com.fams.modules.report.dto.response.FaceIdReportResponse;
+import com.fams.modules.report.dto.response.FaceIdReportRow;
 import com.fams.modules.report.dto.response.MonthlyAttendanceReportResponse;
 import com.fams.modules.report.dto.response.SitePresenceEntry;
 import com.fams.modules.report.dto.response.SitePresenceReportResponse;
@@ -58,19 +64,25 @@ public class ReportService {
     private final SiteRepository siteRepository;
     private final CheckinRepository checkinRepository;
     private final UserRoleRepository userRoleRepository;
+    private final EmployeeRepository employeeRepository;
+    private final FaceProfileRepository faceProfileRepository;
 
     public ReportService(AttendanceSummaryRepository summaryRepository,
                          AssignmentRepository assignmentRepository,
                          ViolationRepository violationRepository,
                          SiteRepository siteRepository,
                          CheckinRepository checkinRepository,
-                         UserRoleRepository userRoleRepository) {
+                         UserRoleRepository userRoleRepository,
+                         EmployeeRepository employeeRepository,
+                         FaceProfileRepository faceProfileRepository) {
         this.summaryRepository = summaryRepository;
         this.assignmentRepository = assignmentRepository;
         this.violationRepository = violationRepository;
         this.siteRepository = siteRepository;
         this.checkinRepository = checkinRepository;
         this.userRoleRepository = userRoleRepository;
+        this.employeeRepository = employeeRepository;
+        this.faceProfileRepository = faceProfileRepository;
     }
 
     @Transactional(readOnly = true)
@@ -523,6 +535,83 @@ public class ReportService {
         } catch (IOException e) {
             throw new RuntimeException("Failed to generate violations Excel export", e);
         }
+    }
+
+    @Transactional(readOnly = true)
+    public FaceIdReportResponse getFaceIdEnrollmentReport(
+            UUID tenantId, String statusFilter, int page, int size,
+            UUID callerUserId, boolean callerIsPlatformAdmin) {
+
+        if (!callerIsPlatformAdmin) {
+            Set<String> perms = userRoleRepository
+                    .findPermissionNamesByUserIdAndTenantId(callerUserId, tenantId);
+            if (!perms.contains("reports:list")) {
+                throw new AccessDeniedException("reports:list permission required to view Face ID report");
+            }
+        }
+
+        // Load all active employees for the tenant
+        Specification<Employee> empSpec = (root, query, cb) -> cb.and(
+                cb.equal(root.get("tenantId"), tenantId),
+                cb.isNull(root.get("deletedAt")));
+        List<Employee> employees = employeeRepository.findAll(empSpec,
+                Sort.by(Sort.Direction.ASC, "lastName", "firstName"));
+
+        // Build map: employeeId → FaceProfile
+        Map<UUID, FaceProfile> profileMap = faceProfileRepository.findAllByTenantId(tenantId)
+                .stream().collect(Collectors.toMap(FaceProfile::getEmployeeId, fp -> fp));
+
+        // Build full row list
+        List<FaceIdReportRow> allRows = employees.stream().map(emp -> {
+            FaceProfile fp = profileMap.get(emp.getId());
+            String status = (fp == null) ? "not_enrolled" : fp.getStatus();
+            return FaceIdReportRow.builder()
+                    .employeeId(emp.getId())
+                    .employeeCode(emp.getEmployeeCode())
+                    .firstName(emp.getFirstName())
+                    .lastName(emp.getLastName())
+                    .email(emp.getEmail())
+                    .department(emp.getDepartment())
+                    .faceIdStatus(status)
+                    .consentGiven(fp != null && fp.isConsentGiven())
+                    .consentGivenAt(fp != null ? fp.getConsentGivenAt() : null)
+                    .enrolledAt(fp != null ? fp.getEnrolledAt() : null)
+                    .revokedAt(fp != null ? fp.getRevokedAt() : null)
+                    .build();
+        }).collect(Collectors.toList());
+
+        // Aggregate counts across all rows (before status filter)
+        int enrolledCount    = (int) allRows.stream().filter(r -> "enrolled".equals(r.getFaceIdStatus())).count();
+        int pendingCount     = (int) allRows.stream().filter(r -> "pending".equals(r.getFaceIdStatus())).count();
+        int notEnrolledCount = (int) allRows.stream().filter(r -> "not_enrolled".equals(r.getFaceIdStatus())).count();
+        int revokedCount     = (int) allRows.stream().filter(r -> "revoked".equals(r.getFaceIdStatus())).count();
+
+        // Apply optional status filter
+        List<FaceIdReportRow> filtered = (statusFilter == null || statusFilter.isBlank())
+                ? allRows
+                : allRows.stream().filter(r -> statusFilter.equals(r.getFaceIdStatus())).collect(Collectors.toList());
+
+        // Manual pagination
+        int total   = filtered.size();
+        int fromIdx = Math.min(page * size, total);
+        int toIdx   = Math.min(fromIdx + size, total);
+        List<FaceIdReportRow> pageContent = filtered.subList(fromIdx, toIdx);
+        PageRequest pageable = PageRequest.of(page, size);
+        PageResponse<FaceIdReportRow> recordPage =
+                PageResponse.from(new PageImpl<>(pageContent, pageable, total));
+
+        log.info("Face ID enrollment report: tenantId={} total={} enrolled={} pending={} notEnrolled={} revoked={}",
+                tenantId, employees.size(), enrolledCount, pendingCount, notEnrolledCount, revokedCount);
+
+        return FaceIdReportResponse.builder()
+                .totalEmployees(employees.size())
+                .enrolledCount(enrolledCount)
+                .pendingCount(pendingCount)
+                .notEnrolledCount(notEnrolledCount)
+                .revokedCount(revokedCount)
+                .statusFilter(statusFilter)
+                .records(recordPage)
+                .build();
     }
 
     private ViolationListResponse toViolationListResponse(Violation v) {
