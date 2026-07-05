@@ -13,7 +13,6 @@ public class ValidateInvitationResponse {
     private String email;
 
     @Schema(description = "Whether this email already has an account; if true, frontend should show login form instead of password creation")
-    @com.fasterxml.jackson.annotation.JsonProperty("isExistingUser")
     private boolean isExistingUser;
 
     @Schema(description = "Display name of the tenant the user is being invited to", example = "Công ty ABC")
