@@ -43,4 +43,7 @@ public class InvitationResponse {
 
     @Schema(description = "Last update timestamp (UTC)")
     private OffsetDateTime updatedAt;
+
+    @Schema(description = "Invitation token UUID (only present on creation, used to accept the invitation)")
+    private UUID token;
 }

@@ -4,6 +4,7 @@ import com.fams.modules.randomcheck.dto.request.GenerateScheduledChecksRequest;
 import com.fams.modules.randomcheck.dto.request.ManualCheckRequest;
 import com.fams.modules.randomcheck.dto.request.SubmitCheckResponseRequest;
 import com.fams.modules.randomcheck.dto.response.CheckResponseDto;
+import com.fams.modules.randomcheck.dto.response.EmployeePendingCheckResponse;
 import com.fams.modules.randomcheck.dto.response.ScheduledCheckDetailResponse;
 import com.fams.modules.randomcheck.dto.response.ScheduledCheckResponse;
 import com.fams.modules.randomcheck.entity.CheckResponse;
@@ -40,6 +41,8 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
+import java.time.OffsetDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -179,6 +182,69 @@ public class ScheduledCheckController {
                 .map(this::toResponse);
 
         return ResponseEntity.ok(ApiResponse.success(PageResponse.from(resultPage)));
+    }
+
+    @Operation(
+        summary = "Employee: list my pending / sent checks with countdown",
+        description = "Returns all random checks assigned to the authenticated employee in this tenant " +
+                      "that are in 'pending' or 'sent' status (or a specific status supplied via the ?status param). " +
+                      "Each item includes a `secondsRemaining` field calculated as (expiresAt - now) in seconds " +
+                      "— negative values mean the window has already closed. " +
+                      "Any authenticated tenant member can call this endpoint; only their own checks are returned."
+    )
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "200",
+            description = "List of pending/sent checks for the authenticated employee"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "401",
+            description = "Unauthorized"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "404",
+            description = "No employee record found for this user in this tenant")
+    })
+    @GetMapping("/my-pending")
+    public ResponseEntity<ApiResponse<List<EmployeePendingCheckResponse>>> myPending(
+            @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
+            @Parameter(description = "Status filter — defaults to 'pending,sent' when omitted. " +
+                                     "Pass 'pending' or 'sent' to restrict to one status.")
+                @RequestParam(required = false) String status,
+            @AuthenticationPrincipal FamsUserDetails userDetails) {
+
+        UUID employeeId = employeeRepository
+                .findByUserIdAndTenantIdAndDeletedAtIsNull(userDetails.getUserId(), tenantId)
+                .map(e -> e.getId())
+                .orElseThrow(() -> new com.fams.shared.exception.ResourceNotFoundException(
+                        "Employee record not found for this user in tenant " + tenantId));
+
+        OffsetDateTime now = OffsetDateTime.now();
+
+        List<ScheduledCheck> checks;
+        if (status != null && !status.isBlank()) {
+            // Caller wants a specific status — run through the generic filter
+            checks = scheduledCheckRepository
+                    .findByTenantWithFilters(tenantId, null, employeeId, status,
+                            LocalDate.of(1970, 1, 1), LocalDate.of(2099, 12, 31),
+                            PageRequest.of(0, 1000, Sort.by(Sort.Direction.ASC, "expiresAt")))
+                    .getContent();
+        } else {
+            // Default: pending + sent
+            checks = scheduledCheckRepository.findPendingForEmployee(tenantId, employeeId);
+            List<ScheduledCheck> sent = scheduledCheckRepository
+                    .findByTenantWithFilters(tenantId, null, employeeId, "sent",
+                            LocalDate.of(1970, 1, 1), LocalDate.of(2099, 12, 31),
+                            PageRequest.of(0, 1000, Sort.by(Sort.Direction.ASC, "expiresAt")))
+                    .getContent();
+            checks = new java.util.ArrayList<>(checks);
+            checks.addAll(sent);
+            checks.sort(java.util.Comparator.comparing(ScheduledCheck::getExpiresAt));
+        }
+
+        List<EmployeePendingCheckResponse> result = checks.stream()
+                .map(s -> toPendingResponse(s, now))
+                .collect(Collectors.toList());
+
+        return ResponseEntity.ok(ApiResponse.success(result));
     }
 
     @Operation(
@@ -474,6 +540,30 @@ public class ScheduledCheckController {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("violationsCreated", created);
         return ResponseEntity.ok(ApiResponse.success(result));
+    }
+
+    private EmployeePendingCheckResponse toPendingResponse(ScheduledCheck s, OffsetDateTime now) {
+        Long secondsRemaining = null;
+        if (s.getExpiresAt() != null && "sent".equals(s.getStatus())) {
+            secondsRemaining = ChronoUnit.SECONDS.between(now, s.getExpiresAt());
+        }
+        return EmployeePendingCheckResponse.builder()
+                .id(s.getId())
+                .tenantId(s.getTenantId())
+                .assignmentId(s.getAssignmentId())
+                .employeeId(s.getEmployeeId())
+                .siteId(s.getSiteId())
+                .shiftId(s.getShiftId())
+                .configId(s.getConfigId())
+                .configSnapshot(s.getConfigSnapshot())
+                .checkDate(s.getCheckDate())
+                .checkIndex(s.getCheckIndex())
+                .scheduledAt(s.getScheduledAt())
+                .expiresAt(s.getExpiresAt())
+                .status(s.getStatus())
+                .secondsRemaining(secondsRemaining)
+                .createdAt(s.getCreatedAt())
+                .build();
     }
 
     private void checkPermission(UUID callerId, UUID tenantId, boolean isPlatformAdmin) {

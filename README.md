@@ -47,7 +47,9 @@ Open `.env` and fill in every field marked **REQUIRED** or **RANDOM**:
 | `OTP_RATE_LIMIT_MAX` | `10` (recommended for dev) |
 | `GMAIL_USERNAME` | Your Gmail address |
 | `GMAIL_APP_PASSWORD` | Gmail [App Password](https://myaccount.google.com/apppasswords) |
-| `GOOGLE_CLIENT_ID` | From Google Cloud Console |
+| `GOOGLE_CLIENT_ID` | From Google Cloud Console → OAuth 2.0 credentials |
+| `FCM_PROJECT_ID` | Firebase project ID — found in Firebase Console → Project Settings |
+| `FCM_SERVICE_ACCOUNT_JSON` | Full service account JSON as a single-line string — download from Firebase Console → Project Settings → Service Accounts → Generate new private key, then minify and paste |
 
 All other fields have safe defaults and can be left as-is for local development.
 

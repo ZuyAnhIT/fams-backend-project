@@ -343,6 +343,7 @@ public class EmployeeInvitationService {
                 .expiresAt(inv.getExpiresAt())
                 .createdAt(inv.getCreatedAt())
                 .updatedAt(inv.getUpdatedAt())
+                .token(inv.getToken())
                 .build();
     }
 }
