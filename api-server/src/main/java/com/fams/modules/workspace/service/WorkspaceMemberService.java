@@ -208,12 +208,26 @@ public class WorkspaceMemberService {
     }
 
     private WorkspaceMemberResponse toResponse(WorkspaceMember m) {
+        WorkspaceMemberResponse.EmployeeSummary employeeSummary = employeeRepository
+                .findByIdAndTenantIdAndDeletedAtIsNull(m.getEmployeeId(), m.getTenantId())
+                .map(e -> WorkspaceMemberResponse.EmployeeSummary.builder()
+                        .id(e.getId())
+                        .employeeCode(e.getEmployeeCode())
+                        .firstName(e.getFirstName())
+                        .lastName(e.getLastName())
+                        .fullName(e.getFirstName() + " " + e.getLastName())
+                        .position(e.getPosition())
+                        .email(e.getEmail())
+                        .build())
+                .orElse(null);
+
         return WorkspaceMemberResponse.builder()
                 .id(m.getId())
                 .workspaceId(m.getWorkspaceId())
                 .employeeId(m.getEmployeeId())
                 .tenantId(m.getTenantId())
                 .role(m.getRole())
+                .employee(employeeSummary)
                 .assignedBy(m.getAssignedBy())
                 .createdAt(m.getCreatedAt())
                 .updatedAt(m.getUpdatedAt())

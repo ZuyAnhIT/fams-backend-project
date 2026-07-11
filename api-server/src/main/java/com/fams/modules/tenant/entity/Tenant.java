@@ -49,6 +49,9 @@ public class Tenant {
     @Column(nullable = false, length = 20)
     private String status;
 
+    @Column(name = "pre_suspension_status", length = 20)
+    private String preSuspensionStatus;
+
     @Column(name = "owner_id")
     private UUID ownerId;
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Tests for POST /api/v1/tenants/{id}/suspend and /api/v1/tenants/{id}/reactivate
+# Tests for POST /api/v1/tenants/{id}/suspend, /reactivate, and /cancel
 # Usage: BASE_URL=http://localhost:8080 bash test_tenant_status.sh
 
 set -euo pipefail
@@ -70,30 +70,19 @@ if [ -z "$TENANT_ID" ]; then
 fi
 echo "Test tenant created: $TENANT_ID"
 
-# --- Setup: Register a regular user for 403 tests ---
+# --- Setup: Register a regular user for 403 tests (phone to avoid SMTP dependency) ---
 echo "--- Setup: Register a regular user ---"
-reg_response=$(curl -s -w "\n%{http_code}" \
+TS=$(date +%s)
+REG_PHONE="+849$(printf '%07d' $(( (TS + $$) % 10000000 )))"
+reg_body=$(curl -s \
     -X POST "$BASE_URL/api/v1/auth/register" \
     -H "Content-Type: application/json" \
-    -d '{"email":"regular_suspend_test@fams.com","password":"Regular@1234","displayName":"Regular User"}')
-reg_status=$(echo "$reg_response" | tail -n 1)
-reg_body=$(echo "$reg_response" | head -n -1)
-
-if [ "$reg_status" -eq 201 ]; then
-    REGULAR_TOKEN=$(echo "$reg_body" | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4 || true)
-elif [ "$reg_status" -eq 409 ]; then
-    login2=$(curl -s \
-        -X POST "$BASE_URL/api/v1/auth/login" \
-        -H "Content-Type: application/json" \
-        -d '{"email":"regular_suspend_test@fams.com","password":"Regular@1234"}')
-    REGULAR_TOKEN=$(echo "$login2" | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4 || true)
-else
-    REGULAR_TOKEN=""
-fi
+    -d "{\"phone\":\"$REG_PHONE\",\"password\":\"Regular@1234\",\"displayName\":\"Regular User\"}")
+REGULAR_TOKEN=$(echo "$reg_body" | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4 || true)
 if [ -n "$REGULAR_TOKEN" ]; then
     echo "Regular user token obtained."
 else
-    echo "WARNING: Could not get regular user token — 403 test will be skipped"
+    echo "WARNING: Could not get regular user token — 403 tests will be skipped"
 fi
 echo ""
 
@@ -158,6 +147,61 @@ curl -s -o /dev/null \
     -X POST "$BASE_URL/api/v1/tenants/$TENANT_ID/reactivate" \
     -H "Authorization: Bearer $ADMIN_TOKEN"
 echo "Test tenant restored to active."
+
+echo ""
+echo "=== Cancel Endpoint ==="
+
+# Create a fresh tenant for cancel tests
+CANCEL_SLUG="test-cancel-$(date +%s)"
+cancel_tenant_body=$(curl -s \
+    -X POST "$BASE_URL/api/v1/tenants" \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer $ADMIN_TOKEN" \
+    -d "{\"name\":\"Cancel Test Tenant\",\"slug\":\"$CANCEL_SLUG\"}")
+CANCEL_TENANT_ID=$(echo "$cancel_tenant_body" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+echo "Cancel test tenant: $CANCEL_TENANT_ID"
+
+run_test "401 - Cancel without auth" 401 \
+    -X POST "$BASE_URL/api/v1/tenants/$CANCEL_TENANT_ID/cancel"
+
+if [ -n "$REGULAR_TOKEN" ]; then
+    run_test "403 - Cancel as non-platform-admin" 403 \
+        -X POST "$BASE_URL/api/v1/tenants/$CANCEL_TENANT_ID/cancel" \
+        -H "Authorization: Bearer $REGULAR_TOKEN"
+fi
+
+run_test "404 - Cancel non-existent tenant" 404 \
+    -X POST "$BASE_URL/api/v1/tenants/00000000-0000-0000-0000-000000000000/cancel" \
+    -H "Authorization: Bearer $ADMIN_TOKEN"
+
+# Happy path — verify status is cancelled
+cancel_response=$(curl -s -w "\n%{http_code}" \
+    -X POST "$BASE_URL/api/v1/tenants/$CANCEL_TENANT_ID/cancel" \
+    -H "Authorization: Bearer $ADMIN_TOKEN")
+cancel_body=$(echo "$cancel_response" | head -n -1)
+cancel_http=$(echo "$cancel_response" | tail -n 1)
+if [ "$cancel_http" -eq 200 ]; then
+    cancel_status=$(echo "$cancel_body" | grep -o '"status":"[^"]*"' | head -1 | cut -d'"' -f4 || true)
+    if [ "$cancel_status" = "cancelled" ]; then
+        echo "PASS: 200 - Cancel tenant (HTTP 200, status=cancelled)"
+        PASS=$((PASS + 1))
+    else
+        echo "FAIL: 200 - Cancel tenant — expected status=cancelled, got status=$cancel_status"
+        FAIL=$((FAIL + 1))
+    fi
+else
+    echo "FAIL: 200 - Cancel tenant — expected HTTP 200, got HTTP $cancel_http"
+    FAIL=$((FAIL + 1))
+fi
+
+run_test "400 - Cancel already-cancelled tenant" 400 \
+    -X POST "$BASE_URL/api/v1/tenants/$CANCEL_TENANT_ID/cancel" \
+    -H "Authorization: Bearer $ADMIN_TOKEN"
+
+# Cancelled tenant cannot be suspended
+run_test "400 - Suspend a cancelled tenant" 400 \
+    -X POST "$BASE_URL/api/v1/tenants/$CANCEL_TENANT_ID/suspend" \
+    -H "Authorization: Bearer $ADMIN_TOKEN"
 
 echo ""
 echo "=== Results ==="

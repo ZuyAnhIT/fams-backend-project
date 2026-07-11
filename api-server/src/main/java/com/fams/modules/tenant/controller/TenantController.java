@@ -343,6 +343,26 @@ public class TenantController {
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 
+    @Operation(summary = "Cancel a tenant",
+        description = "Permanently cancels a tenant, blocking all access. Cannot be undone. Restricted to Platform Admins.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Tenant cancelled",
+            content = @Content(schema = @Schema(implementation = TenantResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Tenant is already cancelled"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Unauthorized"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "Platform Admin role required"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "Tenant not found")
+    })
+    @PostMapping("/{id}/cancel")
+    @PreAuthorize("hasRole('PLATFORM_ADMIN')")
+    public ResponseEntity<ApiResponse<TenantResponse>> cancelTenant(
+            @Parameter(description = "Tenant UUID") @PathVariable UUID id,
+            @AuthenticationPrincipal FamsUserDetails userDetails) {
+        log.info("Cancel tenant id={} by userId={}", id, userDetails.getUserId());
+        TenantResponse response = tenantService.cancelTenant(id);
+        return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
     @Operation(summary = "Update tenant subscription",
         description = "Changes the plan, billing cycle, status, or expiry of an existing subscription. Restricted to Platform Admins.")
     @ApiResponses({

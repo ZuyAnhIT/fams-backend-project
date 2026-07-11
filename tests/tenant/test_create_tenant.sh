@@ -51,30 +51,19 @@ fi
 echo "Admin token obtained."
 echo ""
 
-# Register a regular (non-admin) user for 403 tests
-echo "--- Setup: Register a regular user ---"
-REG_RESPONSE=$(curl -s -w "\n%{http_code}" \
+# Register a regular (non-admin) user for 403 tests using phone to avoid SMTP dependency
+echo "--- Setup: Register a regular user (phone) ---"
+TS=$(date +%s)
+REGULAR_PHONE="+849$(printf '%07d' $(( (TS + $$) % 10000000 )))"
+REG_BODY=$(curl -s \
     -X POST "$BASE_URL/api/v1/auth/register" \
     -H "Content-Type: application/json" \
-    -d '{"email":"regularuser_tenant_test@fams.com","password":"Regular@1234","displayName":"Regular User"}')
-REG_STATUS=$(echo "$REG_RESPONSE" | tail -n 1)
-REG_BODY=$(echo "$REG_RESPONSE" | head -n -1)
-
-if [ "$REG_STATUS" -eq 201 ] || [ "$REG_STATUS" -eq 409 ]; then
-    if [ "$REG_STATUS" -eq 201 ]; then
-        REGULAR_TOKEN=$(echo "$REG_BODY" | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4)
-    else
-        # User already exists — login instead
-        login2=$(curl -s \
-            -X POST "$BASE_URL/api/v1/auth/login" \
-            -H "Content-Type: application/json" \
-            -d '{"email":"regularuser_tenant_test@fams.com","password":"Regular@1234"}')
-        REGULAR_TOKEN=$(echo "$login2" | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4)
-    fi
+    -d "{\"phone\":\"$REGULAR_PHONE\",\"password\":\"Regular@1234\",\"displayName\":\"Regular User\"}")
+REGULAR_TOKEN=$(echo "$REG_BODY" | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4)
+if [ -n "$REGULAR_TOKEN" ]; then
     echo "Regular user token obtained."
 else
-    echo "SETUP WARNING: Could not register regular user (HTTP $REG_STATUS) — skipping 403 test"
-    REGULAR_TOKEN=""
+    echo "SETUP WARNING: Could not register regular user — skipping 403 test"
 fi
 echo ""
 

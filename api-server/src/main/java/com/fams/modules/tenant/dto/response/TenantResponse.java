@@ -48,6 +48,12 @@ public class TenantResponse {
     @Schema(description = "UUID of the user who owns / created this tenant")
     private UUID ownerId;
 
+    @Schema(description = "Display name of the tenant owner", example = "Nguyen Van A")
+    private String ownerName;
+
+    @Schema(description = "Email of the tenant owner", example = "nguyenvana@example.com")
+    private String ownerEmail;
+
     @Schema(description = "Creation timestamp (UTC)")
     private OffsetDateTime createdAt;
 

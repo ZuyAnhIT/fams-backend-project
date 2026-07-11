@@ -114,7 +114,7 @@ public class EmployeeInvitationService {
 
         return ValidateInvitationResponse.builder()
                 .email(invitation.getEmail())
-                .isExistingUser(isExistingUser)
+                .existingUser(isExistingUser)
                 .tenantName(tenant.getName())
                 .build();
     }

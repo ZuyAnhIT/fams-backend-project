@@ -188,22 +188,15 @@ echo "--- Test 8: Unauthenticated ---"
 run_test "Unauthenticated" 401 \
     -X GET "$BASE_URL/api/v1/tenants"
 
-# Test 9: Regular user → 403
+# Test 9: Regular user → 403 (register via phone to avoid SMTP dependency)
 echo ""
 echo "--- Test 9: Regular user forbidden ---"
-# Register or login regular user
+REG_PHONE="+849$(printf '%07d' $(( (TS + $$ + 1) % 10000000 )))"
 reg_body=$(curl -s \
     -X POST "$BASE_URL/api/v1/auth/register" \
     -H "Content-Type: application/json" \
-    -d '{"email":"regular_list_test@fams.com","password":"Regular@1234","displayName":"Regular"}' 2>/dev/null || true)
-if echo "$reg_body" | grep -q '"accessToken"'; then
-    REGULAR_TOKEN=$(echo "$reg_body" | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4)
-else
-    login2=$(curl -s -X POST "$BASE_URL/api/v1/auth/login" \
-        -H "Content-Type: application/json" \
-        -d '{"email":"regular_list_test@fams.com","password":"Regular@1234"}')
-    REGULAR_TOKEN=$(echo "$login2" | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4)
-fi
+    -d "{\"phone\":\"$REG_PHONE\",\"password\":\"Regular@1234\",\"displayName\":\"Regular\"}")
+REGULAR_TOKEN=$(echo "$reg_body" | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4)
 
 if [ -n "$REGULAR_TOKEN" ]; then
     run_test "Regular user forbidden" 403 \

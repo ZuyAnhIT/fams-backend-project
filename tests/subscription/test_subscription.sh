@@ -67,42 +67,40 @@ echo "Trial plan id: $TRIAL_PLAN_ID"
 echo "Basic plan id: $BASIC_PLAN_ID"
 echo ""
 
-# Test 1: GET subscription — 404 before assign
-echo "--- Test 1: GET subscription before assign → 404 ---"
-run_test "GET subscription not found" 404 \
+# Test 1: GET subscription — auto-created as TRIAL on tenant creation
+echo "--- Test 1: GET subscription auto-created on tenant creation → 200 ---"
+auto_sub_response=$(curl -s -w "\n%{http_code}" \
     -X GET "$BASE_URL/api/v1/tenants/$TENANT_ID/subscription" \
-    -H "Authorization: Bearer $ADMIN_TOKEN"
+    -H "Authorization: Bearer $ADMIN_TOKEN")
+auto_sub_body=$(echo "$auto_sub_response" | head -n -1)
+auto_sub_status=$(echo "$auto_sub_response" | tail -n 1)
 
-# Test 2: POST assign subscription
-echo ""
-echo "--- Test 2: Assign subscription (PLATFORM_ADMIN) ---"
-assign_response=$(curl -s -w "\n%{http_code}" \
-    -X POST "$BASE_URL/api/v1/tenants/$TENANT_ID/subscription" \
-    -H "Content-Type: application/json" \
-    -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"planId\":\"$TRIAL_PLAN_ID\",\"billingCycle\":\"MONTHLY\",\"status\":\"TRIAL\"}")
-assign_body=$(echo "$assign_response" | head -n -1)
-assign_status=$(echo "$assign_response" | tail -n 1)
-
-if [ "$assign_status" -eq 201 ]; then
-    sub_id=$(echo "$assign_body" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4 || true)
-    plan_name=$(echo "$assign_body" | grep -o '"planName":"[^"]*"' | cut -d'"' -f4 || true)
-    sub_status=$(echo "$assign_body" | grep -o '"status":"[^"]*"' | cut -d'"' -f4 || true)
-    if [ -n "$sub_id" ] && [ "$sub_status" = "TRIAL" ]; then
-        echo "PASS: Assign subscription (HTTP 201, planName=$plan_name status=$sub_status)"
+if [ "$auto_sub_status" -eq 200 ]; then
+    auto_tenant_id=$(echo "$auto_sub_body" | grep -o '"tenantId":"[^"]*"' | cut -d'"' -f4 || true)
+    auto_status=$(echo "$auto_sub_body" | grep -o '"status":"[^"]*"' | cut -d'"' -f4 || true)
+    if [ "$auto_tenant_id" = "$TENANT_ID" ] && [ "$auto_status" = "TRIAL" ]; then
+        echo "PASS: Auto-created subscription (HTTP 200, tenantId=$auto_tenant_id status=$auto_status)"
         PASS=$((PASS + 1))
     else
-        echo "FAIL: Assign subscription — sub_id=$sub_id status=$sub_status"
-        echo "Body: $assign_body"
+        echo "FAIL: Auto-created subscription — tenantId=$auto_tenant_id status=$auto_status"
+        echo "Body: $auto_sub_body"
         FAIL=$((FAIL + 1))
     fi
 else
-    echo "FAIL: Assign subscription — expected HTTP 201, got HTTP $assign_status"
-    echo "Body: $assign_body"
+    echo "FAIL: Auto-created subscription — expected HTTP 200, got HTTP $auto_sub_status"
     FAIL=$((FAIL + 1))
 fi
 
-# Test 3: POST again → 409 conflict
+# Test 2: POST assign → 409 (subscription already auto-created)
+echo ""
+echo "--- Test 2: POST assign → 409 (auto-created subscription already exists) ---"
+run_test "Assign blocked — already exists → 409" 409 \
+    -X POST "$BASE_URL/api/v1/tenants/$TENANT_ID/subscription" \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer $ADMIN_TOKEN" \
+    -d "{\"planId\":\"$TRIAL_PLAN_ID\",\"billingCycle\":\"MONTHLY\",\"status\":\"TRIAL\"}"
+
+# Test 3: POST again → 409 conflict (idempotency check)
 echo ""
 echo "--- Test 3: Assign subscription again → 409 ---"
 run_test "Duplicate assign → 409" 409 \

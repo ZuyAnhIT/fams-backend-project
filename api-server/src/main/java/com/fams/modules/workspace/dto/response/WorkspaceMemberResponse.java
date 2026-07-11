@@ -26,6 +26,9 @@ public class WorkspaceMemberResponse {
     @Schema(description = "Workspace-level role", example = "member")
     private String role;
 
+    @Schema(description = "Employee details")
+    private EmployeeSummary employee;
+
     @Schema(description = "UUID of the user who made the assignment")
     private UUID assignedBy;
 
@@ -34,4 +37,31 @@ public class WorkspaceMemberResponse {
 
     @Schema(description = "Last update timestamp")
     private OffsetDateTime updatedAt;
+
+    @Data
+    @Builder
+    @Schema(description = "Brief employee details embedded in workspace member response")
+    public static class EmployeeSummary {
+
+        @Schema(description = "Employee UUID")
+        private UUID id;
+
+        @Schema(description = "Internal employee code", example = "EMP-001")
+        private String employeeCode;
+
+        @Schema(description = "First name", example = "John")
+        private String firstName;
+
+        @Schema(description = "Last name", example = "Doe")
+        private String lastName;
+
+        @Schema(description = "Full name", example = "John Doe")
+        private String fullName;
+
+        @Schema(description = "Job position / title", example = "Site Engineer")
+        private String position;
+
+        @Schema(description = "Work email", example = "john.doe@example.com")
+        private String email;
+    }
 }

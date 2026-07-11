@@ -1,5 +1,6 @@
 package com.fams.modules.employee.dto.response;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Builder;
 import lombok.Data;
@@ -13,8 +14,8 @@ public class ValidateInvitationResponse {
     private String email;
 
     @Schema(description = "Whether this email already has an account; if true, frontend should show login form instead of password creation")
-    @com.fasterxml.jackson.annotation.JsonProperty("isExistingUser")
-    private boolean isExistingUser;
+    @JsonProperty("isExistingUser")
+    private boolean existingUser;
 
     @Schema(description = "Display name of the tenant the user is being invited to", example = "Công ty ABC")
     private String tenantName;
