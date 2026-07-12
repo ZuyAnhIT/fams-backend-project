@@ -194,6 +194,160 @@ Run `make help` to see the full reference.
 
 ---
 
+## Phone Authentication (Firebase)
+
+Phone OTP login is implemented via **Firebase Phone Authentication**. The mobile/web client handles the full OTP flow with Firebase directly — the backend only receives and verifies the resulting Firebase ID Token.
+
+### How the flow works
+
+```
+Mobile / Web App              Firebase                  FAMS Backend
+──────────────────            ────────                  ────────────
+signInWithPhoneNumber()  →→→  Sends OTP SMS
+User enters code
+confirmationResult()     →→→  Firebase validates code
+getIdToken()             ←←←  Returns Firebase ID Token
+POST /api/v1/auth/otp/verify ──────────────────────→  verifyIdToken()
+{ firebaseIdToken }                                    lookup user by phone
+                         ←←←←←←←←←←←←←←←←←←←←←←←←  return FAMS JWT pair
+```
+
+The backend never sends SMS itself — Firebase handles delivery entirely.
+
+### Firebase project details
+
+All values are in Firebase Console → Project Settings → General → Your apps.
+
+| Field | Where to find it |
+|---|---|
+| Project ID | Project Settings → General → Project ID |
+| Project Number | Project Settings → General → Project number |
+| Web App ID | Project Settings → General → Your apps → App ID |
+| Auth Domain | `<your-project-id>.firebaseapp.com` |
+| Web API Key | Project Settings → General → Web API key |
+
+> **Phone Authentication must be enabled** in Firebase Console → Authentication → Sign-in method → Phone.
+
+### Backend env vars required
+
+| Variable | Where to get it |
+|---|---|
+| `FCM_PROJECT_ID` | Firebase Console → Project Settings → General → Project ID |
+| `FCM_SERVICE_ACCOUNT_JSON` | Firebase Console → Project Settings → Service Accounts → Generate new private key → minify JSON to single line |
+
+The same Firebase Admin SDK used for push notifications (FCM) also verifies phone auth tokens — no additional credentials needed.
+
+---
+
+### Frontend integration guide
+
+#### React (Web)
+
+```bash
+npm install firebase
+```
+
+```js
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInWithPhoneNumber, RecaptchaVerifier } from 'firebase/auth';
+
+const app = initializeApp({
+  apiKey:            '<your-firebase-web-api-key>',
+  authDomain:        '<your-project-id>.firebaseapp.com',
+  projectId:         '<your-project-id>',
+  storageBucket:     '<your-project-id>.firebasestorage.app',
+  messagingSenderId: '<your-project-number>',
+  appId:             '<your-web-app-id>',
+});
+
+const auth = getAuth(app);
+
+// Step 1 — send OTP (invisible reCAPTCHA handled automatically)
+const recaptcha = new RecaptchaVerifier(auth, 'recaptcha-container', { size: 'invisible' });
+const confirmationResult = await signInWithPhoneNumber(auth, phoneNumber, recaptcha);
+
+// Step 2 — verify code entered by user
+const result = await confirmationResult.confirm(otpCode);
+const firebaseIdToken = await result.user.getIdToken();
+
+// Step 3 — exchange for FAMS JWT
+const res = await fetch('/api/v1/auth/otp/verify', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ firebaseIdToken, deviceId: 'web' }),
+});
+const { data } = await res.json(); // data.accessToken, data.refreshToken
+```
+
+Add an invisible reCAPTCHA anchor anywhere in your page:
+
+```html
+<div id="recaptcha-container"></div>
+```
+
+#### React Native (Android & iOS)
+
+```bash
+npm install @react-native-firebase/app @react-native-firebase/auth
+```
+
+Follow the [React Native Firebase setup guide](https://rnfirebase.io/) to add `google-services.json` (Android) and `GoogleService-Info.plist` (iOS) — both are generated from the same Firebase project.
+
+```js
+import auth from '@react-native-firebase/auth';
+
+// Step 1 — send OTP
+const confirmation = await auth().signInWithPhoneNumber(phoneNumber);
+
+// Step 2 — verify code entered by user
+const result = await confirmation.confirm(otpCode);
+const firebaseIdToken = await result.user.getIdToken();
+
+// Step 3 — exchange for FAMS JWT
+const res = await fetch(`${API_BASE_URL}/api/v1/auth/otp/verify`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ firebaseIdToken, deviceId }),
+});
+const { data } = await res.json(); // data.accessToken, data.refreshToken
+```
+
+React Native Firebase handles reCAPTCHA / SafetyNet / App Attest automatically on each platform — no extra configuration needed.
+
+---
+
+### Testing
+
+#### Option A — Test phone numbers (recommended for development, no SMS quota used)
+
+Register a fake phone number with a fixed OTP code in Firebase Console:
+
+> Firebase Console → Authentication → Sign-in method → Phone → **Test phone numbers** → Add
+
+Use any E.164 number (e.g. `+84900000000`) and any 6-digit code (e.g. `456789`). Firebase will accept this number without sending a real SMS and without reCAPTCHA.
+
+Run the backend manual test:
+
+```bash
+FIREBASE_API_KEY=<your-web-api-key> BASE_URL=http://localhost:8080 bash tests/auth/test_otp_login.sh
+```
+
+The script prompts for phone number and OTP code interactively, then verifies the full flow against the running backend.
+
+#### Option B — Real phone + real SMS (end-to-end)
+
+Use your actual React or React Native app to complete the Firebase Phone Auth flow. Once you have the Firebase ID Token, test the backend directly:
+
+```bash
+FIREBASE_ID_TOKEN=<token> BASE_URL=http://localhost:8080 bash tests/auth/test_otp_login.sh
+```
+
+The script skips all Firebase steps and sends the token straight to the backend.
+
+> **Quota:** Firebase free tier allows 10 real SMS per day. Use test phone numbers for repeated backend testing and save the real SMS quota for full end-to-end app testing.
+
+---
+
 ## Spring Profiles
 
 Set `SPRING_PROFILES_ACTIVE` in `.env`:

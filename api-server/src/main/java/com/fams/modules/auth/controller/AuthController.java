@@ -1,6 +1,7 @@
 package com.fams.modules.auth.controller;
 
 import com.fams.modules.auth.dto.request.ChangePasswordRequest;
+import com.fams.modules.auth.dto.request.FirebasePhoneLoginRequest;
 import com.fams.modules.auth.dto.request.ForgotPasswordRequest;
 import com.fams.modules.auth.dto.request.GoogleLoginRequest;
 import com.fams.modules.auth.dto.request.LoginRequest;
@@ -13,17 +14,15 @@ import com.fams.modules.auth.dto.response.TotpSetupResponse;
 import com.fams.modules.auth.dto.response.UserProfileResponse;
 import com.fams.modules.auth.dto.request.LogoutRequest;
 import com.fams.modules.auth.dto.request.RegisterRequest;
-import com.fams.modules.auth.dto.request.SendOtpRequest;
-import com.fams.modules.auth.dto.request.VerifyOtpRequest;
 import com.fams.modules.auth.dto.response.LoginResponse;
 import com.fams.modules.auth.dto.response.RegisterResponse;
 import com.fams.modules.auth.service.EmailVerificationService;
 import com.fams.modules.auth.repository.HealthCheckRepository;
 import com.fams.modules.auth.service.AuthService;
 import com.fams.modules.auth.service.ChangePasswordService;
+import com.fams.modules.auth.service.FirebasePhoneLoginService;
 import com.fams.modules.auth.service.GoogleLoginService;
 import com.fams.modules.auth.service.LogoutService;
-import com.fams.modules.auth.service.OtpService;
 import com.fams.modules.auth.service.LoginTotpService;
 import com.fams.modules.auth.service.PasswordResetService;
 import com.fams.modules.auth.service.RefreshTokenService;
@@ -55,7 +54,7 @@ public class AuthController {
 
     private final HealthCheckRepository healthCheckRepository;
     private final AuthService authService;
-    private final OtpService otpService;
+    private final FirebasePhoneLoginService firebasePhoneLoginService;
     private final LogoutService logoutService;
     private final RegisterService registerService;
     private final ChangePasswordService changePasswordService;
@@ -69,7 +68,7 @@ public class AuthController {
 
     public AuthController(HealthCheckRepository healthCheckRepository,
                           AuthService authService,
-                          OtpService otpService,
+                          FirebasePhoneLoginService firebasePhoneLoginService,
                           LogoutService logoutService,
                           RegisterService registerService,
                           ChangePasswordService changePasswordService,
@@ -82,7 +81,7 @@ public class AuthController {
                           RefreshTokenService refreshTokenService) {
         this.healthCheckRepository = healthCheckRepository;
         this.authService = authService;
-        this.otpService = otpService;
+        this.firebasePhoneLoginService = firebasePhoneLoginService;
         this.logoutService = logoutService;
         this.registerService = registerService;
         this.changePasswordService = changePasswordService;
@@ -193,34 +192,24 @@ public class AuthController {
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 
-    @Operation(summary = "Send OTP to phone",
-        description = "Sends a 6-digit OTP to the provided phone number for phone-based login. No auth required.")
+    @Operation(
+        summary = "Login with Firebase Phone Auth",
+        description = "Accepts a Firebase ID Token obtained after the client completes phone number verification " +
+                      "via Firebase Authentication (SMS OTP). The backend verifies the token with Firebase, " +
+                      "extracts the phone number, and returns FAMS JWT tokens. No auth required.")
     @ApiResponses({
-        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "OTP sent"),
-        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Validation error"),
-        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "429", description = "Rate limit exceeded")
-    })
-    @SecurityRequirements({})
-    @PostMapping("/otp/send")
-    public ResponseEntity<ApiResponse<Void>> sendOtp(@Valid @RequestBody SendOtpRequest request) {
-        log.info("OTP send requested for phone: {}", request.getPhone());
-        otpService.sendOtp(request);
-        return ResponseEntity.ok(ApiResponse.success(null));
-    }
-
-    @Operation(summary = "Verify OTP and log in",
-        description = "Validates the OTP code and returns JWT tokens on success. No auth required.")
-    @ApiResponses({
-        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "OTP verified — tokens returned",
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Login successful — JWT tokens returned",
             content = @Content(schema = @Schema(implementation = LoginResponse.class))),
-        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Validation error"),
-        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Invalid or expired OTP")
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Validation error — firebaseIdToken field missing"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Firebase token invalid/expired, or phone not linked to a FAMS account"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "503", description = "Firebase is not configured on this server")
     })
     @SecurityRequirements({})
     @PostMapping("/otp/verify")
-    public ResponseEntity<ApiResponse<LoginResponse>> verifyOtp(@Valid @RequestBody VerifyOtpRequest request) {
-        log.info("OTP verify requested for phone: {}", request.getPhone());
-        LoginResponse response = otpService.verifyOtp(request);
+    public ResponseEntity<ApiResponse<LoginResponse>> loginWithPhone(
+            @Valid @RequestBody FirebasePhoneLoginRequest request) {
+        log.info("Firebase phone login attempt");
+        LoginResponse response = firebasePhoneLoginService.loginWithPhone(request);
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 
