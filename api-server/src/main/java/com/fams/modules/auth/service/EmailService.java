@@ -51,6 +51,16 @@ public class EmailService {
         log.info("Invitation email sent to {}", to);
     }
 
+    public void sendNotificationFallback(String to, String title, String body) {
+        SimpleMailMessage msg = new SimpleMailMessage();
+        msg.setFrom(from);
+        msg.setTo(to);
+        msg.setSubject("FAMS - " + title);
+        msg.setText(body + "\n\n(This message was delivered by email because push notification could not be sent.)");
+        mailSender.send(msg);
+        log.info("Notification fallback email sent to {}", to);
+    }
+
     public void sendVerificationEmail(String to, String verificationUrl) {
         SimpleMailMessage msg = new SimpleMailMessage();
         msg.setFrom(from);

@@ -19,6 +19,7 @@ import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
@@ -59,6 +60,7 @@ public class SiteController {
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "409",
             description = "Site name or code already exists in this tenant")
     })
+    @PreAuthorize("hasAuthority('sites:create')")
     @PostMapping
     public ResponseEntity<ApiResponse<SiteResponse>> createSite(
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
@@ -86,6 +88,7 @@ public class SiteController {
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404",
             description = "Tenant not found")
     })
+    @PreAuthorize("hasAuthority('sites:list')")
     @GetMapping
     public ResponseEntity<ApiResponse<PageResponse<SiteResponse>>> listSites(
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
@@ -125,6 +128,7 @@ public class SiteController {
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "409",
             description = "Site name or code already exists in this tenant")
     })
+    @PreAuthorize("hasAuthority('sites:update')")
     @PutMapping("/{siteId}")
     public ResponseEntity<ApiResponse<SiteResponse>> updateSite(
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
@@ -155,6 +159,7 @@ public class SiteController {
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404",
             description = "Tenant or site not found")
     })
+    @PreAuthorize("hasAuthority('sites:read')")
     @GetMapping("/{siteId}")
     public ResponseEntity<ApiResponse<SiteDetailResponse>> getSite(
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,

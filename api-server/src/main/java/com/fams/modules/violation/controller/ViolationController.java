@@ -22,6 +22,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
@@ -59,6 +60,7 @@ public class ViolationController {
             responseCode = "403",
             description = "Caller lacks violations:list permission")
     })
+    @PreAuthorize("hasAuthority('violations:list')")
     @GetMapping
     public ResponseEntity<ApiResponse<PageResponse<ViolationListResponse>>> listViolations(
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
@@ -113,6 +115,7 @@ public class ViolationController {
             responseCode = "404",
             description = "Violation not found in this tenant")
     })
+    @PreAuthorize("hasAuthority('violations:read')")
     @GetMapping("/{violationId}")
     public ResponseEntity<ApiResponse<ViolationDetailResponse>> getViolationDetail(
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
@@ -149,6 +152,7 @@ public class ViolationController {
             responseCode = "409",
             description = "Violation has already been resolved")
     })
+    @PreAuthorize("hasAuthority('violations:update')")
     @PostMapping("/{violationId}/confirm")
     public ResponseEntity<ApiResponse<ViolationActionResponse>> confirmViolation(
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
@@ -190,6 +194,7 @@ public class ViolationController {
             responseCode = "409",
             description = "Violation has already been resolved")
     })
+    @PreAuthorize("hasAuthority('violations:update')")
     @PostMapping("/{violationId}/dismiss")
     public ResponseEntity<ApiResponse<ViolationActionResponse>> dismissViolation(
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
@@ -228,6 +233,7 @@ public class ViolationController {
             responseCode = "404",
             description = "Violation not found in this tenant")
     })
+    @PreAuthorize("hasAuthority('violations:update')")
     @PatchMapping("/{violationId}/attendance-impact")
     public ResponseEntity<ApiResponse<AttendanceImpactResponse>> updateAttendanceImpact(
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,

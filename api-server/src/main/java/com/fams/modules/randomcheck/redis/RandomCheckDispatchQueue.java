@@ -69,4 +69,11 @@ public class RandomCheckDispatchQueue {
     public Double scheduledScore(UUID scheduledCheckId) {
         return redis.opsForZSet().score(QUEUE_KEY, scheduledCheckId.toString());
     }
+
+    /** Returns the epoch-seconds score of the oldest (lowest score) item, or null if queue is empty. */
+    public Double oldestScheduledEpoch() {
+        var entries = redis.opsForZSet().rangeWithScores(QUEUE_KEY, 0, 0);
+        if (entries == null || entries.isEmpty()) return null;
+        return entries.iterator().next().getScore();
+    }
 }

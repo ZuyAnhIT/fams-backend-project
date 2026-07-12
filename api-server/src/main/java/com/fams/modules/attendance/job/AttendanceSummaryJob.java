@@ -1,6 +1,7 @@
 package com.fams.modules.attendance.job;
 
 import com.fams.modules.attendance.service.AttendanceSummaryService;
+import com.fams.shared.monitoring.ScheduledJobMonitor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -12,10 +13,15 @@ import java.time.ZoneOffset;
 @Component
 public class AttendanceSummaryJob {
 
-    private final AttendanceSummaryService attendanceSummaryService;
+    private static final String JOB_NAME = "AttendanceSummaryJob";
 
-    public AttendanceSummaryJob(AttendanceSummaryService attendanceSummaryService) {
+    private final AttendanceSummaryService attendanceSummaryService;
+    private final ScheduledJobMonitor jobMonitor;
+
+    public AttendanceSummaryJob(AttendanceSummaryService attendanceSummaryService,
+                                ScheduledJobMonitor jobMonitor) {
         this.attendanceSummaryService = attendanceSummaryService;
+        this.jobMonitor = jobMonitor;
     }
 
     /**
@@ -30,8 +36,10 @@ public class AttendanceSummaryJob {
         try {
             attendanceSummaryService.recomputeForDate(yesterday);
             log.info("Attendance summary job completed for date={}", yesterday);
+            jobMonitor.recordSuccess(JOB_NAME);
         } catch (Exception e) {
             log.error("Attendance summary job failed for date={}: {}", yesterday, e.getMessage(), e);
+            jobMonitor.recordFailure(JOB_NAME, e);
         }
     }
 }

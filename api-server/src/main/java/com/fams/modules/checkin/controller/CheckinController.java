@@ -1,5 +1,6 @@
 package com.fams.modules.checkin.controller;
 
+import com.fams.modules.checkin.dto.request.OfflineCheckinRequest;
 import com.fams.modules.checkin.dto.request.OverrideCheckinRequest;
 import com.fams.shared.dto.ExplanationResponse;
 import com.fams.shared.dto.SubmitExplanationRequest;
@@ -8,7 +9,9 @@ import com.fams.modules.checkin.dto.request.SubmitCheckoutRequest;
 import com.fams.modules.checkin.dto.response.AvailableSiteResponse;
 import com.fams.modules.checkin.dto.response.CheckinDetailResponse;
 import com.fams.modules.checkin.dto.response.CheckinResponse;
+import com.fams.modules.checkin.dto.response.SyncResultItem;
 import com.fams.modules.checkin.service.CheckinService;
+import com.fams.modules.checkin.service.OfflineSyncService;
 import com.fams.shared.pagination.PageResponse;
 import com.fams.shared.response.ApiResponse;
 import com.fams.shared.security.FamsUserDetails;
@@ -21,6 +24,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
@@ -35,9 +39,11 @@ import java.util.UUID;
 public class CheckinController {
 
     private final CheckinService checkinService;
+    private final OfflineSyncService offlineSyncService;
 
-    public CheckinController(CheckinService checkinService) {
+    public CheckinController(CheckinService checkinService, OfflineSyncService offlineSyncService) {
         this.checkinService = checkinService;
+        this.offlineSyncService = offlineSyncService;
     }
 
     @Operation(
@@ -59,6 +65,7 @@ public class CheckinController {
             responseCode = "404",
             description = "No employee profile found for this user in the given tenant")
     })
+    @PreAuthorize("hasAuthority('checkins:read')")
     @GetMapping("/available-sites")
     public ResponseEntity<ApiResponse<List<AvailableSiteResponse>>> getAvailableSites(
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
@@ -96,6 +103,7 @@ public class CheckinController {
             responseCode = "409",
             description = "Open check-in already exists for this assignment — must check out first")
     })
+    @PreAuthorize("hasAuthority('checkins:create')")
     @PostMapping
     public ResponseEntity<ApiResponse<CheckinResponse>> submitCheckin(
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
@@ -124,6 +132,7 @@ public class CheckinController {
             responseCode = "403",
             description = "Missing checkins:list permission")
     })
+    @PreAuthorize("hasAuthority('checkins:list')")
     @GetMapping
     public ResponseEntity<ApiResponse<PageResponse<CheckinResponse>>> listCheckins(
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
@@ -173,6 +182,7 @@ public class CheckinController {
             responseCode = "404",
             description = "No employee profile found for this user in the tenant")
     })
+    @PreAuthorize("hasAuthority('checkins:read')")
     @GetMapping("/history")
     public ResponseEntity<ApiResponse<PageResponse<CheckinResponse>>> getCheckinHistory(
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
@@ -215,6 +225,7 @@ public class CheckinController {
             responseCode = "404",
             description = "Check-in record not found")
     })
+    @PreAuthorize("hasAuthority('checkins:read')")
     @GetMapping("/{checkinId}")
     public ResponseEntity<ApiResponse<CheckinResponse>> getCheckinResult(
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
@@ -247,6 +258,7 @@ public class CheckinController {
             responseCode = "404",
             description = "Check-in record not found")
     })
+    @PreAuthorize("hasAuthority('checkins:list')")
     @GetMapping("/{checkinId}/detail")
     public ResponseEntity<ApiResponse<CheckinDetailResponse>> getCheckinDetail(
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
@@ -281,6 +293,7 @@ public class CheckinController {
             responseCode = "404",
             description = "Check-in not found")
     })
+    @PreAuthorize("hasAuthority('checkins:read')")
     @PostMapping("/{checkinId}/explain")
     public ResponseEntity<ApiResponse<ExplanationResponse>> explainCheckin(
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
@@ -318,6 +331,7 @@ public class CheckinController {
             responseCode = "404",
             description = "Check-in record not found")
     })
+    @PreAuthorize("hasAuthority('checkins:list')")
     @PatchMapping("/{checkinId}/override")
     public ResponseEntity<ApiResponse<CheckinResponse>> overrideCheckin(
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
@@ -362,6 +376,7 @@ public class CheckinController {
             responseCode = "409",
             description = "Already checked out")
     })
+    @PreAuthorize("hasAuthority('checkins:create')")
     @PostMapping("/{checkinId}/checkout")
     public ResponseEntity<ApiResponse<CheckinResponse>> submitCheckout(
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
@@ -371,5 +386,41 @@ public class CheckinController {
         log.info("Submit check-out tenantId={} checkinId={} userId={}", tenantId, checkinId, userDetails.getUserId());
         CheckinResponse response = checkinService.submitCheckout(tenantId, checkinId, request, userDetails.getUserId());
         return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    @Operation(
+        summary = "Sync offline check-ins",
+        description = "Accepts a batch of offline check-in records collected while the device had no connectivity. " +
+                      "Records are processed in chronological order. Each record is matched against the same " +
+                      "business rules as a live check-in (geofence, assignment validity). " +
+                      "Per-record idempotency is guaranteed via client_nonce — replaying the same nonce returns " +
+                      "the previously accepted record without duplicating it. " +
+                      "Conflicts (a server-side record already covers the same assignment and time) are reported " +
+                      "with status='conflict'. Requires checkins:create permission."
+    )
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "200",
+            description = "Batch processed — inspect each SyncResultItem for per-record status",
+            content = @Content(schema = @Schema(implementation = SyncResultItem.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "400",
+            description = "Validation error — one or more records are malformed"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "401",
+            description = "Unauthorized"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "404",
+            description = "No employee profile found for this user in this tenant")
+    })
+    @PreAuthorize("hasAuthority('checkins:create')")
+    @PostMapping("/sync")
+    public ResponseEntity<ApiResponse<List<SyncResultItem>>> syncOfflineCheckins(
+            @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
+            @Valid @RequestBody List<@Valid OfflineCheckinRequest> requests,
+            @AuthenticationPrincipal FamsUserDetails userDetails) {
+        log.info("Offline sync tenantId={} userId={} count={}", tenantId, userDetails.getUserId(), requests.size());
+        List<SyncResultItem> results = offlineSyncService.sync(tenantId, requests, userDetails.getUserId());
+        return ResponseEntity.ok(ApiResponse.success(results));
     }
 }

@@ -57,6 +57,14 @@ public interface CheckinRepository extends JpaRepository<CheckinRecord, UUID>, J
            "AND c.checkInAt >= :from AND c.checkInAt < :to")
     List<CheckinRecord> findCheckinsBetween(@Param("from") OffsetDateTime from, @Param("to") OffsetDateTime to);
 
+    Optional<CheckinRecord> findByEmployeeIdAndClientNonceAndDeletedAtIsNull(UUID employeeId, UUID clientNonce);
+
+    /** Finds any non-deleted record for the assignment where the given timestamp falls inside the session. */
+    @Query("SELECT c FROM CheckinRecord c WHERE c.assignmentId = :assignmentId AND c.deletedAt IS NULL " +
+           "AND c.checkInAt <= :checkinAt AND (c.checkOutAt IS NULL OR c.checkOutAt >= :checkinAt)")
+    Optional<CheckinRecord> findOverlappingSession(@Param("assignmentId") UUID assignmentId,
+                                                    @Param("checkinAt") OffsetDateTime checkinAt);
+
     @Query(value = """
             SELECT ST_Within(
                 ST_SetSRID(ST_MakePoint(:lon, :lat), 4326),

@@ -94,6 +94,9 @@ public class CheckinRecord {
     @Column(name = "face_verify_score")
     private Double faceVerifyScore;
 
+    @Column(name = "client_nonce")
+    private UUID clientNonce;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
 

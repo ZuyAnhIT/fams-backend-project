@@ -67,12 +67,27 @@ app:
     expiry-days: ${INVITATION_EXPIRY_DAYS:7}
   google:
     client-id: ${GOOGLE_CLIENT_ID}
+  fcm:
+    project-id: ${FCM_PROJECT_ID:}
+    service-account-json: ${FCM_SERVICE_ACCOUNT_JSON:}
   ai:
     service:
       internal-url: ${AI_SERVICE_INTERNAL_URL:http://fams-ai:5000}
     internal-secret: ${AI_INTERNAL_SECRET}
     enroll-min-photos: ${AI_ENROLL_MIN_PHOTOS:3}
     enroll-max-photos: ${AI_ENROLL_MAX_PHOTOS:5}
+  data-retention:
+    delivery-log-days: ${DATA_RETENTION_DELIVERY_LOG_DAYS:30}
+    notification-days: ${DATA_RETENTION_NOTIFICATION_DAYS:90}
+
+management:
+  endpoint:
+    health:
+      show-details: when_authorized
+  endpoints:
+    web:
+      exposure:
+        include: health,info
 
 springdoc:
   api-docs:

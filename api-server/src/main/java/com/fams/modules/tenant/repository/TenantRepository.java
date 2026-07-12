@@ -14,4 +14,6 @@ public interface TenantRepository extends JpaRepository<Tenant, UUID>, JpaSpecif
     Optional<Tenant> findBySlugAndDeletedAtIsNull(String slug);
 
     Optional<Tenant> findByDomainAndDeletedAtIsNull(String domain);
+
+    long countByStatusAndDeletedAtIsNull(String status);
 }

@@ -24,12 +24,15 @@ public class NotificationService {
 
   private final NotificationRepository notificationRepository;
   private final UserNotificationSettingService userNotificationSettingService;
+  private final UserDeviceService userDeviceService;
 
   public NotificationService(
       NotificationRepository notificationRepository,
-      @Lazy UserNotificationSettingService userNotificationSettingService) {
+      @Lazy UserNotificationSettingService userNotificationSettingService,
+      @Lazy UserDeviceService userDeviceService) {
     this.notificationRepository = notificationRepository;
     this.userNotificationSettingService = userNotificationSettingService;
+    this.userDeviceService = userDeviceService;
   }
 
   /**
@@ -115,6 +118,12 @@ public class NotificationService {
 
     Notification saved = notificationRepository.save(notification);
     log.debug("Notification created id={}", saved.getId());
+
+    // Send FCM push if push is enabled for this user + event type
+    if (userNotificationSettingService.isPushEnabled(userId, eventType)) {
+      userDeviceService.sendPush(saved.getId(), userId, title, body);
+    }
+
     return toResponse(saved);
   }
 

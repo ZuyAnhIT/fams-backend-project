@@ -19,6 +19,7 @@ import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
@@ -59,6 +60,7 @@ public class ShiftController {
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "409",
             description = "Shift name already exists for this site")
     })
+    @PreAuthorize("hasAuthority('shifts:create')")
     @PostMapping
     public ResponseEntity<ApiResponse<ShiftResponse>> createShift(
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
@@ -87,6 +89,7 @@ public class ShiftController {
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404",
             description = "Tenant or site not found")
     })
+    @PreAuthorize("hasAuthority('shifts:list')")
     @GetMapping
     public ResponseEntity<ApiResponse<PageResponse<ShiftResponse>>> listShifts(
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
@@ -123,6 +126,7 @@ public class ShiftController {
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "409",
             description = "Shift name already exists for this site")
     })
+    @PreAuthorize("hasAuthority('shifts:update')")
     @PutMapping("/{shiftId}")
     public ResponseEntity<ApiResponse<ShiftResponse>> updateShift(
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
@@ -158,6 +162,7 @@ public class ShiftController {
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404",
             description = "Tenant, site, or shift not found")
     })
+    @PreAuthorize("hasAuthority('shifts:update')")
     @PutMapping("/{shiftId}/ot-config")
     public ResponseEntity<ApiResponse<ShiftResponse>> configureOt(
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,

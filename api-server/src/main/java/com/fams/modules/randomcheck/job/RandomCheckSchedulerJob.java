@@ -1,6 +1,7 @@
 package com.fams.modules.randomcheck.job;
 
 import com.fams.modules.randomcheck.service.ScheduledCheckGeneratorService;
+import com.fams.shared.monitoring.ScheduledJobMonitor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -11,10 +12,15 @@ import java.time.LocalDate;
 @Component
 public class RandomCheckSchedulerJob {
 
-    private final ScheduledCheckGeneratorService generatorService;
+    private static final String JOB_NAME = "RandomCheckSchedulerJob";
 
-    public RandomCheckSchedulerJob(ScheduledCheckGeneratorService generatorService) {
+    private final ScheduledCheckGeneratorService generatorService;
+    private final ScheduledJobMonitor jobMonitor;
+
+    public RandomCheckSchedulerJob(ScheduledCheckGeneratorService generatorService,
+                                   ScheduledJobMonitor jobMonitor) {
         this.generatorService = generatorService;
+        this.jobMonitor = jobMonitor;
     }
 
     /**
@@ -29,8 +35,10 @@ public class RandomCheckSchedulerJob {
         try {
             int count = generatorService.generateForDate(today);
             log.info("RandomCheckSchedulerJob — created {} scheduled checks for {}", count, today);
+            jobMonitor.recordSuccess(JOB_NAME);
         } catch (Exception e) {
             log.error("RandomCheckSchedulerJob — failed for {}: {}", today, e.getMessage(), e);
+            jobMonitor.recordFailure(JOB_NAME, e);
         }
     }
 }

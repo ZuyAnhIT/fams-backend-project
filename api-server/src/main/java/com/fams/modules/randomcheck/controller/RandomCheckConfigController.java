@@ -17,6 +17,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
@@ -63,6 +64,7 @@ public class RandomCheckConfigController {
             responseCode = "409",
             description = "Site configuration already exists — use PUT /{configId} to update")
     })
+    @PreAuthorize("hasAuthority('randomchecks:configure')")
     @PostMapping("/sites/{siteId}")
     public ResponseEntity<ApiResponse<RandomCheckConfigResponse>> createSiteOverride(
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
@@ -96,6 +98,7 @@ public class RandomCheckConfigController {
             responseCode = "404",
             description = "Site not found or no override configuration exists for this site")
     })
+    @PreAuthorize("hasAuthority('randomchecks:configure')")
     @GetMapping("/sites/{siteId}")
     public ResponseEntity<ApiResponse<RandomCheckConfigResponse>> getSiteOverride(
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
@@ -132,6 +135,7 @@ public class RandomCheckConfigController {
             responseCode = "409",
             description = "Tenant-default configuration already exists — use PUT to update")
     })
+    @PreAuthorize("hasAuthority('randomchecks:configure')")
     @PostMapping("/tenant-default")
     public ResponseEntity<ApiResponse<RandomCheckConfigResponse>> createTenantDefault(
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
@@ -164,6 +168,7 @@ public class RandomCheckConfigController {
             responseCode = "404",
             description = "No default configuration found for this tenant")
     })
+    @PreAuthorize("hasAuthority('randomchecks:configure')")
     @GetMapping("/tenant-default")
     public ResponseEntity<ApiResponse<RandomCheckConfigResponse>> getTenantDefault(
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
@@ -190,6 +195,7 @@ public class RandomCheckConfigController {
             responseCode = "403",
             description = "Missing randomchecks:configure permission")
     })
+    @PreAuthorize("hasAuthority('randomchecks:configure')")
     @GetMapping
     public ResponseEntity<ApiResponse<List<RandomCheckConfigResponse>>> listConfigs(
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
@@ -220,6 +226,7 @@ public class RandomCheckConfigController {
             responseCode = "404",
             description = "Configuration not found")
     })
+    @PreAuthorize("hasAuthority('randomchecks:configure')")
     @GetMapping("/{configId}")
     public ResponseEntity<ApiResponse<RandomCheckConfigResponse>> getConfig(
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
@@ -254,6 +261,7 @@ public class RandomCheckConfigController {
             responseCode = "404",
             description = "Configuration not found")
     })
+    @PreAuthorize("hasAuthority('randomchecks:configure')")
     @PutMapping("/{configId}")
     public ResponseEntity<ApiResponse<RandomCheckConfigResponse>> updateConfig(
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
@@ -292,6 +300,7 @@ public class RandomCheckConfigController {
             responseCode = "404",
             description = "Configuration not found")
     })
+    @PreAuthorize("hasAuthority('randomchecks:configure')")
     @PutMapping("/{configId}/applicable-roles")
     public ResponseEntity<ApiResponse<RandomCheckConfigResponse>> updateApplicableRoles(
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
@@ -331,6 +340,7 @@ public class RandomCheckConfigController {
             responseCode = "404",
             description = "Configuration not found")
     })
+    @PreAuthorize("hasAuthority('randomchecks:configure')")
     @PutMapping("/{configId}/check-mode")
     public ResponseEntity<ApiResponse<RandomCheckConfigResponse>> updateCheckMode(
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
@@ -364,6 +374,7 @@ public class RandomCheckConfigController {
             responseCode = "404",
             description = "Configuration not found")
     })
+    @PreAuthorize("hasAuthority('randomchecks:configure')")
     @DeleteMapping("/{configId}")
     public ResponseEntity<Void> deleteConfig(
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,

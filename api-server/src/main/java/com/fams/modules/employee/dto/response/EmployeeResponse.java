@@ -1,5 +1,6 @@
 package com.fams.modules.employee.dto.response;
 
+import com.fams.shared.util.Masked;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Builder;
 import lombok.Data;
@@ -31,9 +32,11 @@ public class EmployeeResponse {
     @Schema(description = "Last name", example = "Doe")
     private String lastName;
 
+    @Masked(type = Masked.MaskType.EMAIL)
     @Schema(description = "Work email", example = "john.doe@example.com")
     private String email;
 
+    @Masked(type = Masked.MaskType.PHONE)
     @Schema(description = "Phone number", example = "+84901234567")
     private String phone;
 

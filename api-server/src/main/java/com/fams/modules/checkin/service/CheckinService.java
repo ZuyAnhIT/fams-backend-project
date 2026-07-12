@@ -22,6 +22,7 @@ import com.fams.modules.shift.repository.ShiftRepository;
 import com.fams.modules.site.entity.Site;
 import com.fams.modules.site.repository.SiteRepository;
 import com.fams.modules.rbac.repository.UserRoleRepository;
+import com.fams.shared.exception.BusinessException;
 import com.fams.shared.exception.DuplicateResourceException;
 import com.fams.shared.exception.ResourceNotFoundException;
 import com.fams.shared.pagination.PageResponse;
@@ -352,9 +353,13 @@ public class CheckinService {
         }
 
         if (tooEarly) {
-            throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,
+            throw new BusinessException(
+                    "CHECKIN_TOO_EARLY",
+                    "Bạn đang chấm công quá sớm. Ca làm việc bắt đầu lúc " + shift.getStartTime()
+                            + ". Vui lòng đợi đến " + allowedFrom + " (" + siteTimezone + ") để chấm công.",
+                    HttpStatus.UNPROCESSABLE_ENTITY,
                     "Too early to check in. Shift starts at " + shift.getStartTime()
-                    + ". Check-in allowed from " + allowedFrom + " (site timezone: " + siteTimezone + ")");
+                            + ". Check-in allowed from " + allowedFrom + " (site timezone: " + siteTimezone + ")");
         }
     }
 

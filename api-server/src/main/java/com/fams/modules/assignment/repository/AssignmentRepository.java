@@ -22,6 +22,8 @@ public interface AssignmentRepository extends JpaRepository<Assignment, UUID>,
     Optional<Assignment> findByIdAndSiteIdAndTenantIdAndDeletedAtIsNull(
             UUID id, UUID siteId, UUID tenantId);
 
+    Optional<Assignment> findByIdAndTenantIdAndDeletedAtIsNull(UUID id, UUID tenantId);
+
     Page<Assignment> findBySiteIdAndTenantIdAndDeletedAtIsNull(
             UUID siteId, UUID tenantId, Pageable pageable);
 

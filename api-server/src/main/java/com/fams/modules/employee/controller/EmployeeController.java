@@ -24,6 +24,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
@@ -60,6 +61,7 @@ public class EmployeeController {
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "Tenant not found"),
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "409", description = "Employee code already exists in this tenant")
     })
+    @PreAuthorize("hasAuthority('employees:create')")
     @PostMapping
     public ResponseEntity<ApiResponse<EmployeeResponse>> createEmployee(
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
@@ -87,6 +89,7 @@ public class EmployeeController {
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "Insufficient permissions"),
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "Tenant not found")
     })
+    @PreAuthorize("hasAuthority('employees:create')")
     @PostMapping(value = "/import", consumes = "multipart/form-data")
     public ResponseEntity<ApiResponse<EmployeeImportResponse>> importEmployees(
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
@@ -111,6 +114,7 @@ public class EmployeeController {
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "Insufficient permissions"),
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "Tenant not found")
     })
+    @PreAuthorize("hasAuthority('employees:list')")
     @GetMapping
     public ResponseEntity<ApiResponse<PageResponse<EmployeeResponse>>> listEmployees(
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
@@ -143,6 +147,7 @@ public class EmployeeController {
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "Insufficient permissions"),
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "Tenant not found")
     })
+    @PreAuthorize("hasAuthority('employees:list')")
     @GetMapping("/export")
     public ResponseEntity<byte[]> exportEmployees(
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
@@ -175,6 +180,7 @@ public class EmployeeController {
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "Tenant or employee not found"),
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "409", description = "Employee code already exists in this tenant")
     })
+    @PreAuthorize("hasAuthority('employees:update')")
     @PatchMapping("/{employeeId}")
     public ResponseEntity<ApiResponse<EmployeeResponse>> updateEmployee(
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
@@ -201,6 +207,7 @@ public class EmployeeController {
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "Insufficient permissions"),
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "Tenant or employee not found")
     })
+    @PreAuthorize("hasAuthority('employees:update')")
     @PatchMapping("/{employeeId}/status")
     public ResponseEntity<ApiResponse<EmployeeResponse>> changeEmployeeStatus(
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
@@ -227,6 +234,7 @@ public class EmployeeController {
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "Insufficient permissions"),
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "Tenant or employee not found")
     })
+    @PreAuthorize("hasAuthority('employees:read')")
     @GetMapping("/{employeeId}")
     public ResponseEntity<ApiResponse<EmployeeDetailResponse>> getEmployee(
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,

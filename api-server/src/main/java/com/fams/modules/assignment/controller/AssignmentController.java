@@ -16,6 +16,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
@@ -46,6 +47,7 @@ public class AssignmentController {
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404",
             description = "Tenant or site not found")
     })
+    @PreAuthorize("hasAuthority('assignments:list')")
     @GetMapping
     public ResponseEntity<ApiResponse<PageResponse<AssignmentResponse>>> listAssignments(
             @PathVariable UUID tenantId,
@@ -83,6 +85,7 @@ public class AssignmentController {
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404",
             description = "Tenant, site, assignment, or shift not found")
     })
+    @PreAuthorize("hasAuthority('assignments:update')")
     @PutMapping("/{assignmentId}")
     public ResponseEntity<ApiResponse<AssignmentResponse>> updateAssignment(
             @PathVariable UUID tenantId,
@@ -111,6 +114,7 @@ public class AssignmentController {
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404",
             description = "Tenant, site, or assignment not found")
     })
+    @PreAuthorize("hasAuthority('assignments:delete')")
     @DeleteMapping("/{assignmentId}")
     public ResponseEntity<Void> cancelAssignment(
             @PathVariable UUID tenantId,
@@ -147,6 +151,7 @@ public class AssignmentController {
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "409",
             description = "Employee already has an active assignment at this site")
     })
+    @PreAuthorize("hasAuthority('assignments:create')")
     @PostMapping
     public ResponseEntity<ApiResponse<AssignmentResponse>> createAssignment(
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,

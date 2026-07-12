@@ -12,6 +12,7 @@ import com.fams.modules.site.repository.SiteRepository;
 import com.fams.modules.subscription.service.PlanLimitEnforcementService;
 import com.fams.shared.exception.ResourceNotFoundException;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -32,17 +33,20 @@ public class ManualCheckService {
     private final ScheduledCheckRepository scheduledCheckRepository;
     private final SiteRepository siteRepository;
     private final PlanLimitEnforcementService planLimitEnforcementService;
+    private final RandomCheckDispatchService randomCheckDispatchService;
 
     public ManualCheckService(AssignmentRepository assignmentRepository,
                               RandomCheckConfigRepository configRepository,
                               ScheduledCheckRepository scheduledCheckRepository,
                               SiteRepository siteRepository,
-                              PlanLimitEnforcementService planLimitEnforcementService) {
+                              PlanLimitEnforcementService planLimitEnforcementService,
+                              @Lazy RandomCheckDispatchService randomCheckDispatchService) {
         this.assignmentRepository = assignmentRepository;
         this.configRepository = configRepository;
         this.scheduledCheckRepository = scheduledCheckRepository;
         this.siteRepository = siteRepository;
         this.planLimitEnforcementService = planLimitEnforcementService;
+        this.randomCheckDispatchService = randomCheckDispatchService;
     }
 
     /**
@@ -113,6 +117,8 @@ public class ManualCheckService {
 
         log.info("Manual check triggered: checkId={} employeeId={} siteId={} mode={} by={}",
                 check.getId(), employeeId, siteId, checkMode, triggeredBy);
+
+        randomCheckDispatchService.sendNotification(check);
 
         return check;
     }

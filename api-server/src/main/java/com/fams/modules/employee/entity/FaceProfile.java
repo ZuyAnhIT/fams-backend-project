@@ -42,6 +42,9 @@ public class FaceProfile {
     @Column(name = "revoked_at")
     private OffsetDateTime revokedAt;
 
+    @Column(name = "embedding_deleted", nullable = false)
+    private boolean embeddingDeleted;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
 

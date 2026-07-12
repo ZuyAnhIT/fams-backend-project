@@ -37,6 +37,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
@@ -113,6 +114,7 @@ public class ScheduledCheckController {
             responseCode = "403",
             description = "Missing randomchecks:configure permission")
     })
+    @PreAuthorize("hasAuthority('randomchecks:configure')")
     @PostMapping("/generate")
     public ResponseEntity<ApiResponse<Map<String, Object>>> generate(
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
@@ -151,6 +153,7 @@ public class ScheduledCheckController {
             responseCode = "403",
             description = "Missing randomchecks:list permission")
     })
+    @PreAuthorize("hasAnyAuthority('randomchecks:list', 'randomchecks:configure')")
     @GetMapping
     public ResponseEntity<ApiResponse<PageResponse<ScheduledCheckResponse>>> list(
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
@@ -261,6 +264,7 @@ public class ScheduledCheckController {
             responseCode = "403",
             description = "Missing randomchecks:list permission")
     })
+    @PreAuthorize("hasAnyAuthority('randomchecks:list', 'randomchecks:configure')")
     @GetMapping("/summary")
     public ResponseEntity<ApiResponse<Map<String, Object>>> summary(
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
@@ -317,6 +321,7 @@ public class ScheduledCheckController {
             responseCode = "403",
             description = "Missing randomchecks:list permission")
     })
+    @PreAuthorize("hasAnyAuthority('randomchecks:list', 'randomchecks:configure')")
     @GetMapping("/{checkId}")
     public ResponseEntity<ApiResponse<ScheduledCheckDetailResponse>> getDetail(
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
@@ -405,6 +410,7 @@ public class ScheduledCheckController {
             responseCode = "403",
             description = "Missing randomchecks:configure permission")
     })
+    @PreAuthorize("hasAuthority('randomchecks:configure')")
     @PostMapping("/{checkId}/cancel")
     public ResponseEntity<ApiResponse<Map<String, Object>>> cancelCheck(
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
@@ -435,6 +441,7 @@ public class ScheduledCheckController {
             responseCode = "403",
             description = "Missing randomchecks:configure permission")
     })
+    @PreAuthorize("hasAuthority('randomchecks:configure')")
     @PostMapping("/{checkId}/dispatch")
     public ResponseEntity<ApiResponse<Map<String, Object>>> dispatchCheck(
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
@@ -461,6 +468,7 @@ public class ScheduledCheckController {
             responseCode = "200",
             description = "Queue status returned")
     })
+    @PreAuthorize("hasAuthority('randomchecks:configure')")
     @GetMapping("/dispatch-queue")
     public ResponseEntity<ApiResponse<Map<String, Object>>> queueStatus(
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
@@ -502,6 +510,7 @@ public class ScheduledCheckController {
             responseCode = "403",
             description = "Missing randomchecks:configure permission")
     })
+    @PreAuthorize("hasAuthority('randomchecks:configure')")
     @PostMapping("/manual")
     public ResponseEntity<ApiResponse<ScheduledCheckResponse>> triggerManualCheck(
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
@@ -529,6 +538,7 @@ public class ScheduledCheckController {
             responseCode = "403",
             description = "Missing randomchecks:configure permission")
     })
+    @PreAuthorize("hasAuthority('randomchecks:configure')")
     @PostMapping("/process-expired")
     public ResponseEntity<ApiResponse<Map<String, Object>>> processExpired(
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,

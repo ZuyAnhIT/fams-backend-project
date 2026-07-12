@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.OffsetDateTime;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -53,4 +54,8 @@ public interface NotificationRepository extends JpaRepository<Notification, UUID
           + "WHERE n.tenantId = :tenantId AND n.userId = :userId "
           + "AND n.isRead = false AND n.deletedAt IS NULL")
   int markAllAsRead(@Param("tenantId") UUID tenantId, @Param("userId") UUID userId);
+
+  @Modifying
+  @Query("DELETE FROM Notification n WHERE n.createdAt < :cutoff AND n.isRead = true")
+  int deleteReadNotificationsOlderThan(@Param("cutoff") OffsetDateTime cutoff);
 }

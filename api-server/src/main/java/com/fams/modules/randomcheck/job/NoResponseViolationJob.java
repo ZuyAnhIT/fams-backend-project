@@ -1,6 +1,7 @@
 package com.fams.modules.randomcheck.job;
 
 import com.fams.modules.randomcheck.service.NoResponseViolationService;
+import com.fams.shared.monitoring.ScheduledJobMonitor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -13,17 +14,28 @@ import org.springframework.stereotype.Component;
 @Component
 public class NoResponseViolationJob {
 
-    private final NoResponseViolationService noResponseViolationService;
+    private static final String JOB_NAME = "NoResponseViolationJob";
 
-    public NoResponseViolationJob(NoResponseViolationService noResponseViolationService) {
+    private final NoResponseViolationService noResponseViolationService;
+    private final ScheduledJobMonitor jobMonitor;
+
+    public NoResponseViolationJob(NoResponseViolationService noResponseViolationService,
+                                  ScheduledJobMonitor jobMonitor) {
         this.noResponseViolationService = noResponseViolationService;
+        this.jobMonitor = jobMonitor;
     }
 
     @Scheduled(fixedRateString = "${fams.randomcheck.noresponse.poll-rate-ms:120000}")
     public void processExpiredChecks() {
-        int count = noResponseViolationService.processAllExpired();
-        if (count > 0) {
-            log.info("NoResponseViolationJob — created {} no_response violation(s)", count);
+        try {
+            int count = noResponseViolationService.processAllExpired();
+            if (count > 0) {
+                log.info("NoResponseViolationJob — created {} no_response violation(s)", count);
+            }
+            jobMonitor.recordSuccess(JOB_NAME);
+        } catch (Exception e) {
+            log.error("NoResponseViolationJob failed: {}", e.getMessage(), e);
+            jobMonitor.recordFailure(JOB_NAME, e);
         }
     }
 }

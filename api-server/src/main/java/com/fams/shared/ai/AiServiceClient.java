@@ -91,6 +91,21 @@ public class AiServiceClient {
         log.info("fams-ai revoked employeeId={}", employeeId);
     }
 
+    public void deleteEmbedding(UUID faceProfileId) {
+        try {
+            restClient.delete()
+                    .uri("/embeddings/{faceProfileId}", faceProfileId)
+                    .header(HEADER_SECRET, secret)
+                    .retrieve()
+                    .toBodilessEntity();
+        } catch (HttpClientErrorException e) {
+            log.warn("fams-ai delete embedding rejected faceProfileId={} status={}", faceProfileId, e.getStatusCode());
+            throw new AiServiceException(e.getResponseBodyAsString(), e.getStatusCode().value());
+        }
+
+        log.info("fams-ai deleted embedding faceProfileId={}", faceProfileId);
+    }
+
     public FaceStatusDto getFaceStatus(UUID tenantId, UUID employeeId) {
         try {
             return restClient.get()
