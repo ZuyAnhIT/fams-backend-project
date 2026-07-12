@@ -272,11 +272,24 @@ public class EmployeeInvitationService {
         boolean hasProfile = employeeRepository
                 .existsByTenantIdAndUserIdAndDeletedAtIsNull(invitation.getTenantId(), user.getId());
         if (!hasProfile) {
+            String firstName;
+            String lastName;
+            if (StringUtils.hasText(invitation.getFirstName())) {
+                firstName = invitation.getFirstName();
+                lastName = StringUtils.hasText(invitation.getLastName()) ? invitation.getLastName() : "";
+            } else {
+                String displayName = StringUtils.hasText(request.getDisplayName())
+                        ? request.getDisplayName().trim()
+                        : user.getDisplayName();
+                int spaceIdx = displayName != null ? displayName.indexOf(' ') : -1;
+                firstName = (spaceIdx > 0) ? displayName.substring(0, spaceIdx) : (displayName != null ? displayName : "");
+                lastName  = (spaceIdx > 0) ? displayName.substring(spaceIdx + 1).trim() : "";
+            }
             Employee employee = Employee.builder()
                     .tenantId(invitation.getTenantId())
                     .userId(user.getId())
-                    .firstName(StringUtils.hasText(invitation.getFirstName()) ? invitation.getFirstName() : "Unknown")
-                    .lastName(StringUtils.hasText(invitation.getLastName()) ? invitation.getLastName() : "")
+                    .firstName(firstName)
+                    .lastName(lastName)
                     .email(invitation.getEmail())
                     .status("active")
                     .build();

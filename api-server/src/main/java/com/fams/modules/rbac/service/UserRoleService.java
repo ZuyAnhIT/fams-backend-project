@@ -11,7 +11,9 @@ import com.fams.modules.rbac.repository.UserRoleRepository;
 import com.fams.modules.tenant.repository.TenantRepository;
 import com.fams.shared.exception.DuplicateResourceException;
 import com.fams.shared.exception.ResourceNotFoundException;
+import com.fams.shared.security.JwtAuthFilter;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -30,15 +32,22 @@ public class UserRoleService {
     private final UserRepository userRepository;
     private final RoleRepository roleRepository;
     private final TenantRepository tenantRepository;
+    private final StringRedisTemplate redis;
 
     public UserRoleService(UserRoleRepository userRoleRepository,
                            UserRepository userRepository,
                            RoleRepository roleRepository,
-                           TenantRepository tenantRepository) {
+                           TenantRepository tenantRepository,
+                           StringRedisTemplate redis) {
         this.userRoleRepository = userRoleRepository;
         this.userRepository = userRepository;
         this.roleRepository = roleRepository;
         this.tenantRepository = tenantRepository;
+        this.redis = redis;
+    }
+
+    private void evictPermissionCache(UUID userId, UUID tenantId) {
+        redis.delete(JwtAuthFilter.PERMS_CACHE_PREFIX + userId + ":" + tenantId);
     }
 
     @Transactional(readOnly = true)
@@ -107,6 +116,7 @@ public class UserRoleService {
             latest.setDeletedAt(null);
             latest.setAssignedBy(callerUserId);
             UserRole saved = userRoleRepository.save(latest);
+            evictPermissionCache(targetUserId, tenantId);
             log.info("Reactivated role assignment: userRoleId={} userId={} roleId={} tenantId={} by={}",
                     saved.getId(), targetUserId, roleId, tenantId, callerUserId);
             return toResponse(saved);
@@ -120,7 +130,7 @@ public class UserRoleService {
                 .build();
 
         assignment = userRoleRepository.save(assignment);
-
+        evictPermissionCache(targetUserId, tenantId);
         log.info("Assigned role: userRoleId={} userId={} roleId={} tenantId={} by={}",
                 assignment.getId(), targetUserId, roleId, tenantId, callerUserId);
 
@@ -145,7 +155,7 @@ public class UserRoleService {
 
         assignment.setDeletedAt(OffsetDateTime.now());
         userRoleRepository.save(assignment);
-
+        evictPermissionCache(assignment.getUserId(), tenantId);
         log.info("Revoked role assignment: userRoleId={} userId={} role={} tenantId={} by={}",
                 userRoleId, assignment.getUserId(), assignment.getRole().getName(), tenantId, callerUserId);
     }

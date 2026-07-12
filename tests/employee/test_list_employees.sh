@@ -111,6 +111,22 @@ else
     FAIL=$((FAIL + 1))
 fi
 
+# Test 1b: faceId field present and defaults to not_enrolled for new employees
+echo ""
+echo "--- Test 1b: faceId field present in list response ---"
+faceid_resp=$(curl -s \
+    -X GET "$LIST_URL" \
+    -H "Authorization: Bearer $ADMIN_TOKEN")
+face_status=$(echo "$faceid_resp" | grep -o '"status":"not_enrolled"' | head -1 || true)
+if [ -n "$face_status" ]; then
+    echo "PASS: faceId present and status=not_enrolled for new employees"
+    PASS=$((PASS + 1))
+else
+    echo "FAIL: faceId field missing or status not 'not_enrolled' in list response"
+    echo "Body: $faceid_resp"
+    FAIL=$((FAIL + 1))
+fi
+
 # Test 2: Search by name — should find Alice
 echo ""
 echo "--- Test 2: Search by name ---"

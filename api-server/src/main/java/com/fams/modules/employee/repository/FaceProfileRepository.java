@@ -11,6 +11,8 @@ public interface FaceProfileRepository extends JpaRepository<FaceProfile, UUID> 
 
     Optional<FaceProfile> findByEmployeeIdAndTenantId(UUID employeeId, UUID tenantId);
 
+    List<FaceProfile> findAllByEmployeeIdInAndTenantId(List<UUID> employeeIds, UUID tenantId);
+
     List<FaceProfile> findAllByTenantId(UUID tenantId);
 
     List<FaceProfile> findAllByRevokedAtIsNotNullAndEmbeddingDeletedFalse();

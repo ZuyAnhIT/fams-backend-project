@@ -117,6 +117,46 @@ else
     FAIL=$((FAIL + 1))
 fi
 
+# Test 1b: Accept invitation without firstName/lastName — name parsed from displayName
+echo ""
+echo "--- Test 1b: displayName parsed when invitation has no firstName/lastName ---"
+INVITE_EMAIL_NONAME="noname.${TS}@example.com"
+noname_inv_resp=$(curl -s -w "\n%{http_code}" \
+    -X POST "$BASE_URL/api/v1/tenants/$TENANT_ID/invitations" \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer $ADMIN_TOKEN" \
+    -d "{\"email\":\"$INVITE_EMAIL_NONAME\"}")
+noname_inv_status=$(echo "$noname_inv_resp" | tail -n 1)
+if [ "$noname_inv_status" -eq 201 ]; then
+    NONAME_TOKEN=$(docker exec fams-postgres psql -U fams_user -d fams_db -t -c \
+        "SELECT token FROM employee_invitations WHERE email='$INVITE_EMAIL_NONAME' AND status='pending' LIMIT 1;" \
+        | tr -d ' \n')
+    accept_noname_resp=$(curl -s \
+        -X POST "$ACCEPT_URL" \
+        -H "Content-Type: application/json" \
+        -d "{\"token\":\"$NONAME_TOKEN\",\"password\":\"NewPass@1234\",\"displayName\":\"John Doe\"}")
+    accept_noname_http=$(curl -s -o /dev/null -w "%{http_code}" \
+        -X POST "$BASE_URL/api/v1/tenants/$TENANT_ID/invitations" \
+        -H "Content-Type: application/json" \
+        -H "Authorization: Bearer $ADMIN_TOKEN" \
+        -d "{\"email\":\"dummy.check.${TS}@example.com\"}" 2>/dev/null || echo "0")
+    # Check employee was created with correct name, not "Unknown"
+    emp_list=$(curl -s \
+        -H "Authorization: Bearer $ADMIN_TOKEN" \
+        "$BASE_URL/api/v1/tenants/$TENANT_ID/employees?search=John")
+    emp_first=$(echo "$emp_list" | grep -o '"firstName":"[^"]*"' | head -1 | cut -d'"' -f4 || true)
+    emp_last=$(echo "$emp_list" | grep -o '"lastName":"[^"]*"' | head -1 | cut -d'"' -f4 || true)
+    if [ "$emp_first" = "John" ] && [ "$emp_last" = "Doe" ]; then
+        echo "PASS: displayName parsed correctly (firstName=$emp_first, lastName=$emp_last)"
+        PASS=$((PASS + 1))
+    else
+        echo "FAIL: displayName not parsed — firstName='$emp_first', lastName='$emp_last' (expected John/Doe)"
+        FAIL=$((FAIL + 1))
+    fi
+else
+    echo "SKIP: Could not create no-name invitation (HTTP $noname_inv_status)"
+fi
+
 # Test 2: Same token reused — 422 (already accepted)
 echo ""
 echo "--- Test 2: Token already accepted ---"

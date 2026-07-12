@@ -9,6 +9,7 @@ import com.fams.modules.employee.dto.response.EmployeeImportResponse;
 import com.fams.modules.employee.dto.response.EmployeeResponse;
 import com.fams.modules.employee.dto.response.FaceIdStatusDto;
 import com.fams.modules.employee.entity.Employee;
+import com.fams.modules.employee.entity.FaceProfile;
 import com.fams.modules.employee.repository.EmployeeRepository;
 import com.fams.modules.employee.repository.FaceProfileRepository;
 import com.fams.modules.employee.service.FaceIdService;
@@ -40,6 +41,7 @@ import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
 import java.util.*;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -130,7 +132,24 @@ public class EmployeeService {
         Pageable pageable = PageRequest.of(page, size, Sort.by(direction, resolvedSortBy));
 
         Specification<Employee> spec = EmployeeSpecification.build(tenantId, search, status, department);
-        Page<EmployeeResponse> resultPage = employeeRepository.findAll(spec, pageable).map(this::toResponse);
+        Page<Employee> employeePage = employeeRepository.findAll(spec, pageable);
+
+        List<UUID> employeeIds = employeePage.getContent().stream().map(Employee::getId).toList();
+        Map<UUID, FaceIdStatusDto> faceIdMap = faceProfileRepository
+                .findAllByEmployeeIdInAndTenantId(employeeIds, tenantId)
+                .stream()
+                .collect(Collectors.toMap(
+                        FaceProfile::getEmployeeId,
+                        FaceIdService::toDto));
+
+        Page<EmployeeResponse> resultPage = employeePage.map(e ->
+                toResponse(e, faceIdMap.getOrDefault(e.getId(), FaceIdStatusDto.builder()
+                        .status("not_enrolled")
+                        .consentGiven(false)
+                        .consentGivenAt(null)
+                        .enrolledAt(null)
+                        .revokedAt(null)
+                        .build())));
 
         return PageResponse.from(resultPage);
     }
@@ -424,6 +443,10 @@ public class EmployeeService {
     }
 
     public EmployeeResponse toResponse(Employee e) {
+        return toResponse(e, null);
+    }
+
+    public EmployeeResponse toResponse(Employee e, FaceIdStatusDto faceId) {
         return EmployeeResponse.builder()
                 .id(e.getId())
                 .tenantId(e.getTenantId())
@@ -440,6 +463,7 @@ public class EmployeeService {
                 .avatarUrl(e.getAvatarUrl())
                 .createdAt(e.getCreatedAt())
                 .updatedAt(e.getUpdatedAt())
+                .faceId(faceId)
                 .build();
     }
 }

@@ -60,4 +60,7 @@ public class EmployeeResponse {
 
     @Schema(description = "Last update timestamp (UTC)")
     private OffsetDateTime updatedAt;
+
+    @Schema(description = "Face ID enrollment status for this employee")
+    private FaceIdStatusDto faceId;
 }
