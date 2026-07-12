@@ -105,10 +105,26 @@ After seeding, the following data is available:
 
 **Demo tenants**
 
-| Tenant | Slug | Employees |
+| Tenant | Slug | Plan | Sites | Employees |
+|---|---|---|---|---|
+| Acme Corp | `acme-corp` | Pro | 3 | 12 (Alice Walker, Bob Smith, Charlie Jones…) |
+| Beta Industries | `beta-industries` | Basic | 2 | 10 (Eve Taylor, Frank Wilson…) |
+| Gamma Logistics | `gamma-logistics` | Enterprise | 3 | 12 (Oscar Martinez, Patricia Chen…) |
+
+**Historical data (past 30 days)**
+
+| Table | Count | Notes |
 |---|---|---|
-| Acme Corp | `acme-corp` | Alice Walker, Bob Smith, Charlie Jones (inactive), Diana Prince |
-| Beta Industries | `beta-industries` | Eve Taylor, Frank Wilson |
+| `checkins` | ~672 | valid + pending_review; GPS coords, work minutes |
+| `attendance_summaries` | ~672 | late flags, OT minutes |
+| `scheduled_checks` | ~240 | responded + no_response statuses |
+| `check_responses` | ~182 | GPS + outcome |
+| `violations` | ~82 | no_response + location_fail; ~60% resolved |
+| `face_profiles` | 34 | enrolled / pending / revoked / not_enrolled |
+| `notifications` | 39 | 13 event types × 3 tenants |
+| `audit_logs` | 30 | 10 action types × 3 tenants |
+
+The seed script is fully idempotent — safe to run multiple times.
 
 To reset and re-seed from scratch:
 
