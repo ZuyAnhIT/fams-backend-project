@@ -17,8 +17,14 @@ public class AttendanceHrMonthlyResponse {
     @Schema(description = "Employee ID")
     private UUID employeeId;
 
+    @Schema(description = "Employee full name (firstName + lastName)", example = "Nguyen Van A")
+    private String employeeName;
+
     @Schema(description = "Site ID")
     private UUID siteId;
+
+    @Schema(description = "Site name", example = "Headquarters")
+    private String siteName;
 
     @Schema(description = "Year", example = "2026")
     private int year;

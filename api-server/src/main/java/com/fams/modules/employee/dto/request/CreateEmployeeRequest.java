@@ -8,6 +8,7 @@ import jakarta.validation.constraints.Size;
 import lombok.Data;
 
 import java.time.LocalDate;
+import java.util.UUID;
 
 @Data
 public class CreateEmployeeRequest {
@@ -48,4 +49,7 @@ public class CreateEmployeeRequest {
 
     @Schema(description = "Avatar image URL (optional)")
     private String avatarUrl;
+
+    @Schema(description = "Managed department UUID (optional — links employee to a predefined department and syncs the department name field)", example = "3fa85f64-5717-4562-b3fc-2c963f66afa6")
+    private UUID departmentId;
 }

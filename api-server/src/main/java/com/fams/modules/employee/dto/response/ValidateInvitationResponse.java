@@ -13,9 +13,17 @@ public class ValidateInvitationResponse {
     @Schema(description = "Email address the invitation was sent to", example = "employee@example.com")
     private String email;
 
+    @Schema(description = "Phone number recorded on the invitation, if any", example = "0987654321")
+    private String phone;
+
     @Schema(description = "Whether this email already has an account; if true, frontend should show login form instead of password creation")
     @JsonProperty("isExistingUser")
     private boolean existingUser;
+
+    @Schema(description = "Whether a user account already exists for the phone number recorded on this invitation. " +
+            "If true, the frontend may offer a 'link to existing account' flow using existingPhone + existingPassword.")
+    @JsonProperty("isExistingPhoneUser")
+    private boolean existingPhoneUser;
 
     @Schema(description = "Display name of the tenant the user is being invited to", example = "Công ty ABC")
     private String tenantName;

@@ -63,5 +63,9 @@ public class WorkspaceMemberResponse {
 
         @Schema(description = "Work email", example = "john.doe@example.com")
         private String email;
+
+        @Schema(description = "Employment status", example = "active",
+                allowableValues = {"active", "inactive", "terminated"})
+        private String status;
     }
 }

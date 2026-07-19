@@ -50,6 +50,10 @@ public class TenantSettingsService {
         if (request.getBrandPrimaryColor() != null)            settings.setBrandPrimaryColor(nullIfBlank(request.getBrandPrimaryColor()));
         if (request.getBrandSecondaryColor() != null)          settings.setBrandSecondaryColor(nullIfBlank(request.getBrandSecondaryColor()));
         if (request.getBrandAccentColor() != null)             settings.setBrandAccentColor(nullIfBlank(request.getBrandAccentColor()));
+        if (request.getEmployeeCodePrefix() != null)
+            settings.setEmployeeCodePrefix(request.getEmployeeCodePrefix().isBlank() ? null : request.getEmployeeCodePrefix().trim().toUpperCase());
+        if (request.getEmployeeCodePadding() != null)
+            settings.setEmployeeCodePadding(request.getEmployeeCodePadding().shortValue());
 
         settingsRepository.save(settings);
         log.info("Tenant settings updated: tenantId={} by userId={}", tenantId, userId);
@@ -75,6 +79,25 @@ public class TenantSettingsService {
         return settingsRepository.save(defaults);
     }
 
+    /**
+     * Atomically increments the employee code sequence and returns the formatted code.
+     * Returns null if no prefix is configured for this tenant.
+     */
+    @Transactional
+    public String generateNextEmployeeCode(UUID tenantId) {
+        TenantSettings settings = settingsRepository.findByTenantIdForUpdate(tenantId)
+                .orElse(null);
+        if (settings == null || !StringUtils.hasText(settings.getEmployeeCodePrefix())) {
+            return null;
+        }
+        long next = settings.getEmployeeCodeSeq() + 1;
+        settings.setEmployeeCodeSeq(next);
+        settingsRepository.save(settings);
+
+        String format = "%0" + settings.getEmployeeCodePadding() + "d";
+        return settings.getEmployeeCodePrefix() + "-" + String.format(format, next);
+    }
+
     private TenantSettingsResponse toResponse(TenantSettings s) {
         return TenantSettingsResponse.builder()
                 .id(s.getId())
@@ -84,6 +107,8 @@ public class TenantSettingsService {
                 .brandPrimaryColor(s.getBrandPrimaryColor())
                 .brandSecondaryColor(s.getBrandSecondaryColor())
                 .brandAccentColor(s.getBrandAccentColor())
+                .employeeCodePrefix(s.getEmployeeCodePrefix())
+                .employeeCodePadding(s.getEmployeeCodePadding())
                 .updatedAt(s.getUpdatedAt())
                 .build();
     }

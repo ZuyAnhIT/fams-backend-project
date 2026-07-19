@@ -109,12 +109,17 @@ public class EmployeeInvitationService {
         boolean isExistingUser = userRepository
                 .findByEmailAndDeletedAtIsNull(invitation.getEmail()).isPresent();
 
+        boolean isExistingPhoneUser = invitation.getPhone() != null
+                && userRepository.findByPhoneAndDeletedAtIsNull(invitation.getPhone()).isPresent();
+
         Tenant tenant = tenantRepository.findByIdAndDeletedAtIsNull(invitation.getTenantId())
                 .orElseThrow(() -> new ResourceNotFoundException("Tenant not found"));
 
         return ValidateInvitationResponse.builder()
                 .email(invitation.getEmail())
+                .phone(invitation.getPhone())
                 .existingUser(isExistingUser)
+                .existingPhoneUser(isExistingPhoneUser)
                 .tenantName(tenant.getName())
                 .build();
     }
@@ -155,6 +160,7 @@ public class EmployeeInvitationService {
         }
 
         String normalizedEmail = request.getEmail().trim().toLowerCase();
+        String normalizedPhone = (request.getPhone() != null) ? request.getPhone().trim() : null;
 
         invitationRepository.findPendingByTenantAndEmail(tenantId, normalizedEmail)
                 .ifPresent(existing -> {
@@ -162,9 +168,18 @@ public class EmployeeInvitationService {
                             "A pending invitation already exists for " + normalizedEmail + " in this tenant");
                 });
 
+        if (normalizedPhone != null) {
+            invitationRepository.findPendingByTenantAndPhone(tenantId, normalizedPhone)
+                    .ifPresent(existing -> {
+                        throw new DuplicateResourceException(
+                                "A pending invitation already exists for phone " + normalizedPhone + " in this tenant");
+                    });
+        }
+
         EmployeeInvitation invitation = EmployeeInvitation.builder()
                 .tenantId(tenantId)
                 .email(normalizedEmail)
+                .phone(normalizedPhone)
                 .token(UUID.randomUUID())
                 .status("pending")
                 .invitedBy(callerUserId)
@@ -229,29 +244,62 @@ public class EmployeeInvitationService {
             throw new InvalidInvitationException("Invitation has expired");
         }
 
-        User user = userRepository.findByEmailAndDeletedAtIsNull(invitation.getEmail())
-                .orElse(null);
+        User user;
 
-        if (user == null) {
-            if (!StringUtils.hasText(request.getPassword())) {
-                throw new IllegalArgumentException("Password is required to create a new account");
+        if (StringUtils.hasText(request.getExistingPhone())) {
+            // Account-linking path: link invitation email to an existing phone-based account.
+            if (!StringUtils.hasText(request.getExistingPassword())) {
+                throw new IllegalArgumentException("existingPassword is required when existingPhone is provided");
             }
-            String displayName = resolveDisplayName(request.getDisplayName(), invitation);
-            user = User.builder()
-                    .email(invitation.getEmail())
-                    .passwordHash(passwordEncoder.encode(request.getPassword()))
-                    .displayName(displayName)
-                    .isActive(true)
-                    .emailVerified(true)
-                    .failedLoginAttempts(0)
-                    .build();
-            userRepository.save(user);
-            log.info("New user created via invitation: userId={} email={}", user.getId(), user.getEmail());
-        } else {
+            User phoneUser = userRepository.findByPhoneAndDeletedAtIsNull(request.getExistingPhone())
+                    .orElseThrow(() -> new ResourceNotFoundException("No active account found for that phone number"));
+
+            if (!passwordEncoder.matches(request.getExistingPassword(), phoneUser.getPasswordHash())) {
+                throw new IllegalArgumentException("Invalid credentials for the phone account");
+            }
+            if (phoneUser.getEmail() != null) {
+                throw new DuplicateResourceException("That phone account already has an email address linked to it");
+            }
+
+            // Check existing tenant membership before linking
             List<UserRole> existingRoles = userRoleRepository
-                    .findActiveByUserIdAndTenantId(user.getId(), invitation.getTenantId());
+                    .findActiveByUserIdAndTenantId(phoneUser.getId(), invitation.getTenantId());
             if (!existingRoles.isEmpty()) {
                 throw new DuplicateResourceException("User is already a member of this tenant");
+            }
+
+            phoneUser.setEmail(invitation.getEmail());
+            phoneUser.setEmailVerified(true);
+            userRepository.save(phoneUser);
+            user = phoneUser;
+            log.info("Invitation email linked to existing phone account: userId={} email={} phone={}",
+                    user.getId(), invitation.getEmail(), request.getExistingPhone());
+
+        } else {
+            // Standard path: look up by email or create a new account.
+            user = userRepository.findByEmailAndDeletedAtIsNull(invitation.getEmail()).orElse(null);
+
+            if (user == null) {
+                if (!StringUtils.hasText(request.getPassword())) {
+                    throw new IllegalArgumentException("Password is required to create a new account");
+                }
+                String displayName = resolveDisplayName(request.getDisplayName(), invitation);
+                user = User.builder()
+                        .email(invitation.getEmail())
+                        .passwordHash(passwordEncoder.encode(request.getPassword()))
+                        .displayName(displayName)
+                        .isActive(true)
+                        .emailVerified(true)
+                        .failedLoginAttempts(0)
+                        .build();
+                userRepository.save(user);
+                log.info("New user created via invitation: userId={} email={}", user.getId(), user.getEmail());
+            } else {
+                List<UserRole> existingRoles = userRoleRepository
+                        .findActiveByUserIdAndTenantId(user.getId(), invitation.getTenantId());
+                if (!existingRoles.isEmpty()) {
+                    throw new DuplicateResourceException("User is already a member of this tenant");
+                }
             }
         }
 
@@ -348,6 +396,7 @@ public class EmployeeInvitationService {
                 .id(inv.getId())
                 .tenantId(inv.getTenantId())
                 .email(inv.getEmail())
+                .phone(inv.getPhone())
                 .status(inv.getStatus())
                 .invitedBy(inv.getInvitedBy())
                 .roleId(inv.getRoleId())

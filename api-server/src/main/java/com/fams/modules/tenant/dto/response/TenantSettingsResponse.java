@@ -33,6 +33,12 @@ public class TenantSettingsResponse {
     @Schema(description = "Brand accent color as hex", example = "#34A853")
     private String brandAccentColor;
 
+    @Schema(description = "Prefix used for auto-generated employee codes (null = disabled)", example = "EMP")
+    private String employeeCodePrefix;
+
+    @Schema(description = "Zero-padding width for the auto-generated sequence number", example = "4")
+    private int employeeCodePadding;
+
     @Schema(description = "Last update timestamp (UTC)")
     private OffsetDateTime updatedAt;
 }

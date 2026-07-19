@@ -46,6 +46,9 @@ public class EmployeeResponse {
     @Schema(description = "Department or team", example = "Construction")
     private String department;
 
+    @Schema(description = "Managed department UUID (null if not linked to a predefined department)")
+    private UUID departmentId;
+
     @Schema(description = "Employment status: active, inactive, terminated")
     private String status;
 

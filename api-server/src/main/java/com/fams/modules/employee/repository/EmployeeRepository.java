@@ -7,6 +7,8 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.OffsetDateTime;
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -26,4 +28,8 @@ public interface EmployeeRepository extends JpaRepository<Employee, UUID>, JpaSp
 
     @Query("SELECT COUNT(e) FROM Employee e WHERE e.tenantId = :tenantId AND e.deletedAt IS NULL AND e.createdAt >= :since")
     long countNewSince(@Param("tenantId") UUID tenantId, @Param("since") OffsetDateTime since);
+
+    @Query("SELECT e FROM Employee e WHERE e.tenantId = :tenantId AND e.id IN :ids AND e.deletedAt IS NULL")
+    List<Employee> findAllByTenantIdAndIdInAndDeletedAtIsNull(
+            @Param("tenantId") UUID tenantId, @Param("ids") Collection<UUID> ids);
 }

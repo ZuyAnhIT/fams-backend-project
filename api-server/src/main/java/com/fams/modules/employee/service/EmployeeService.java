@@ -8,8 +8,10 @@ import com.fams.modules.employee.dto.response.EmployeeImportError;
 import com.fams.modules.employee.dto.response.EmployeeImportResponse;
 import com.fams.modules.employee.dto.response.EmployeeResponse;
 import com.fams.modules.employee.dto.response.FaceIdStatusDto;
+import com.fams.modules.employee.entity.Department;
 import com.fams.modules.employee.entity.Employee;
 import com.fams.modules.employee.entity.FaceProfile;
+import com.fams.modules.employee.repository.DepartmentRepository;
 import com.fams.modules.employee.repository.EmployeeRepository;
 import com.fams.modules.employee.repository.FaceProfileRepository;
 import com.fams.modules.employee.service.FaceIdService;
@@ -19,6 +21,7 @@ import com.fams.modules.rbac.entity.UserRole;
 import com.fams.modules.rbac.repository.UserRoleRepository;
 import com.fams.modules.subscription.service.PlanLimitEnforcementService;
 import com.fams.modules.tenant.repository.TenantRepository;
+import com.fams.modules.tenant.service.TenantSettingsService;
 import com.fams.shared.exception.DuplicateResourceException;
 import com.fams.shared.exception.ResourceNotFoundException;
 import com.fams.shared.pagination.PageResponse;
@@ -55,17 +58,23 @@ public class EmployeeService {
     private final TenantRepository tenantRepository;
     private final PlanLimitEnforcementService planLimitEnforcementService;
     private final FaceProfileRepository faceProfileRepository;
+    private final TenantSettingsService tenantSettingsService;
+    private final DepartmentRepository departmentRepository;
 
     public EmployeeService(EmployeeRepository employeeRepository,
                            UserRoleRepository userRoleRepository,
                            TenantRepository tenantRepository,
                            PlanLimitEnforcementService planLimitEnforcementService,
-                           FaceProfileRepository faceProfileRepository) {
+                           FaceProfileRepository faceProfileRepository,
+                           TenantSettingsService tenantSettingsService,
+                           DepartmentRepository departmentRepository) {
         this.employeeRepository = employeeRepository;
         this.userRoleRepository = userRoleRepository;
         this.tenantRepository = tenantRepository;
         this.planLimitEnforcementService = planLimitEnforcementService;
         this.faceProfileRepository = faceProfileRepository;
+        this.tenantSettingsService = tenantSettingsService;
+        this.departmentRepository = departmentRepository;
     }
 
     @Transactional
@@ -84,11 +93,24 @@ public class EmployeeService {
 
         planLimitEnforcementService.assertEmployeeLimit(tenantId);
 
-        if (org.springframework.util.StringUtils.hasText(request.getEmployeeCode())
-                && employeeRepository.existsByTenantIdAndEmployeeCodeAndDeletedAtIsNull(
-                        tenantId, request.getEmployeeCode())) {
-            throw new DuplicateResourceException(
-                    "Employee code '" + request.getEmployeeCode() + "' already exists in this tenant");
+        // Auto-generate employee code if not provided and prefix is configured
+        String resolvedCode = request.getEmployeeCode();
+        if (!org.springframework.util.StringUtils.hasText(resolvedCode)) {
+            resolvedCode = tenantSettingsService.generateNextEmployeeCode(tenantId);
+        }
+        // Duplicate check (resolvedCode may still be null if no prefix)
+        if (org.springframework.util.StringUtils.hasText(resolvedCode)
+                && employeeRepository.existsByTenantIdAndEmployeeCodeAndDeletedAtIsNull(tenantId, resolvedCode)) {
+            throw new DuplicateResourceException("Employee code '" + resolvedCode + "' already exists in this tenant");
+        }
+
+        // Validate departmentId if provided
+        UUID deptId = request.getDepartmentId();
+        String deptName = request.getDepartment();
+        if (deptId != null) {
+            Department dept = departmentRepository.findByIdAndTenantIdAndDeletedAtIsNull(deptId, tenantId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Department not found: " + deptId));
+            deptName = dept.getName();  // sync text field
         }
 
         Employee employee = Employee.builder()
@@ -98,9 +120,10 @@ public class EmployeeService {
                 .email(org.springframework.util.StringUtils.hasText(request.getEmail())
                         ? request.getEmail().trim().toLowerCase() : null)
                 .phone(request.getPhone())
-                .employeeCode(request.getEmployeeCode())
+                .employeeCode(resolvedCode)
                 .position(request.getPosition())
-                .department(request.getDepartment())
+                .department(deptName)
+                .departmentId(deptId)
                 .hiredDate(request.getHiredDate())
                 .avatarUrl(request.getAvatarUrl())
                 .status("active")
@@ -197,6 +220,12 @@ public class EmployeeService {
             employee.setHiredDate(request.getHiredDate());
         if (request.getAvatarUrl() != null)
             employee.setAvatarUrl(request.getAvatarUrl().isBlank() ? null : request.getAvatarUrl());
+        if (request.getDepartmentId() != null) {
+            Department dept = departmentRepository.findByIdAndTenantIdAndDeletedAtIsNull(request.getDepartmentId(), tenantId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Department not found: " + request.getDepartmentId()));
+            employee.setDepartmentId(dept.getId());
+            employee.setDepartment(dept.getName());
+        }
 
         employeeRepository.save(employee);
         log.info("Employee updated: id={} tenantId={} by={}", employeeId, tenantId, callerUserId);
@@ -271,6 +300,7 @@ public class EmployeeService {
                 .phone(employee.getPhone())
                 .position(employee.getPosition())
                 .department(employee.getDepartment())
+                .departmentId(employee.getDepartmentId())
                 .status(employee.getStatus())
                 .hiredDate(employee.getHiredDate())
                 .avatarUrl(employee.getAvatarUrl())
@@ -458,6 +488,7 @@ public class EmployeeService {
                 .phone(e.getPhone())
                 .position(e.getPosition())
                 .department(e.getDepartment())
+                .departmentId(e.getDepartmentId())
                 .status(e.getStatus())
                 .hiredDate(e.getHiredDate())
                 .avatarUrl(e.getAvatarUrl())

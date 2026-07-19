@@ -20,6 +20,9 @@ public class InvitationResponse {
     @Schema(description = "Invited email address")
     private String email;
 
+    @Schema(description = "Phone number recorded on the invitation (optional)")
+    private String phone;
+
     @Schema(description = "Invitation status: pending, accepted, cancelled, expired")
     private String status;
 

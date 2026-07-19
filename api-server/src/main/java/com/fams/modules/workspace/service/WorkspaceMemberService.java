@@ -218,6 +218,7 @@ public class WorkspaceMemberService {
                         .fullName(e.getFirstName() + " " + e.getLastName())
                         .position(e.getPosition())
                         .email(e.getEmail())
+                        .status(e.getStatus())
                         .build())
                 .orElse(null);
 

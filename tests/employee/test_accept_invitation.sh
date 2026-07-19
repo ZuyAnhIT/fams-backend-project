@@ -245,6 +245,159 @@ else
     echo "SKIP: Could not create invitation for test 6 (HTTP $inv4_status)"
 fi
 
+# ---------------------------------------------------------------------------
+# Phone account linking tests (Issue 1 fix)
+# ---------------------------------------------------------------------------
+echo ""
+echo "=== Phone Account Linking Tests ==="
+
+# Setup: register a user with phone only (no email)
+PHONE_USER_PHONE="+849${TS: -8}"
+PHONE_USER_PASS="PhonePass@1234"
+
+echo "--- Setup: Register phone-only account ---"
+# Use the phone registration endpoint to create a phone-only user
+phone_reg_resp=$(curl -s -w "\n%{http_code}" \
+    -X POST "$BASE_URL/api/v1/auth/register" \
+    -H "Content-Type: application/json" \
+    -d "{\"phone\":\"$PHONE_USER_PHONE\",\"password\":\"$PHONE_USER_PASS\",\"displayName\":\"Phone Only User\"}")
+phone_reg_body=$(echo "$phone_reg_resp" | head -n -1)
+phone_reg_status=$(echo "$phone_reg_resp" | tail -n 1)
+if [ "$phone_reg_status" -ne 201 ] && [ "$phone_reg_status" -ne 200 ]; then
+    echo "SKIP: Phone-only registration returned HTTP $phone_reg_status — skipping phone-linking tests"
+    echo "Body: $phone_reg_body"
+else
+    # Send invitation with phone hint
+    INVITE_PHONE_EMAIL="phone.link.${TS}@example.com"
+    inv_phone_resp=$(curl -s -w "\n%{http_code}" \
+        -X POST "$BASE_URL/api/v1/tenants/$TENANT_ID/invitations" \
+        -H "Content-Type: application/json" \
+        -H "Authorization: Bearer $ADMIN_TOKEN" \
+        -d "{\"email\":\"$INVITE_PHONE_EMAIL\",\"phone\":\"$PHONE_USER_PHONE\"}")
+    inv_phone_body=$(echo "$inv_phone_resp" | head -n -1)
+    inv_phone_status=$(echo "$inv_phone_resp" | tail -n 1)
+
+    if [ "$inv_phone_status" -ne 201 ]; then
+        echo "SKIP: Could not create phone-hinted invitation (HTTP $inv_phone_status)"
+        echo "Body: $inv_phone_body"
+    else
+        PHONE_INV_TOKEN=$(echo "$inv_phone_body" | grep -o '"token":"[^"]*"' | head -1 | cut -d'"' -f4)
+        echo "Invitation with phone hint created, token=$PHONE_INV_TOKEN"
+
+        # Test: validate shows existingPhoneUser = true
+        echo ""
+        echo "--- Test: validate returns existingPhoneUser=true ---"
+        validate_resp=$(curl -s "$BASE_URL/api/v1/invitations/validate?token=$PHONE_INV_TOKEN")
+        phone_flag=$(echo "$validate_resp" | grep -o '"isExistingPhoneUser":true' || true)
+        if [ -n "$phone_flag" ]; then
+            echo "PASS: validate returns isExistingPhoneUser=true"
+            PASS=$((PASS + 1))
+        else
+            echo "FAIL: validate did not return isExistingPhoneUser=true"
+            echo "Body: $validate_resp"
+            FAIL=$((FAIL + 1))
+        fi
+
+        # Test: link invitation to existing phone account — happy path
+        echo ""
+        echo "--- Test: Accept invitation by linking to existing phone account ---"
+        link_resp=$(curl -s -w "\n%{http_code}" \
+            -X POST "$ACCEPT_URL" \
+            -H "Content-Type: application/json" \
+            -d "{\"token\":\"$PHONE_INV_TOKEN\",\"existingPhone\":\"$PHONE_USER_PHONE\",\"existingPassword\":\"$PHONE_USER_PASS\"}")
+        link_body=$(echo "$link_resp" | head -n -1)
+        link_status=$(echo "$link_resp" | tail -n 1)
+        if [ "$link_status" -eq 200 ]; then
+            token_present=$(echo "$link_body" | grep -o '"accessToken":"[^"]*"' | head -1 || true)
+            if [ -n "$token_present" ]; then
+                echo "PASS: Phone account linking returned HTTP 200 with tokens"
+                PASS=$((PASS + 1))
+            else
+                echo "FAIL: HTTP 200 but no accessToken in response"
+                echo "Body: $link_body"
+                FAIL=$((FAIL + 1))
+            fi
+        else
+            echo "FAIL: Phone account linking — expected HTTP 200, got HTTP $link_status"
+            echo "Body: $link_body"
+            FAIL=$((FAIL + 1))
+        fi
+
+        # Test: wrong password for phone account → 400
+        echo ""
+        echo "--- Test: Wrong password for phone account ---"
+        INVITE_PHONE_EMAIL2="phone.link2.${TS}@example.com"
+        inv_phone2_resp=$(curl -s -w "\n%{http_code}" \
+            -X POST "$BASE_URL/api/v1/tenants/$TENANT_ID/invitations" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $ADMIN_TOKEN" \
+            -d "{\"email\":\"$INVITE_PHONE_EMAIL2\",\"phone\":\"$PHONE_USER_PHONE\"}")
+        inv_phone2_body=$(echo "$inv_phone2_resp" | head -n -1)
+        inv_phone2_status=$(echo "$inv_phone2_resp" | tail -n 1)
+        if [ "$inv_phone2_status" -eq 201 ]; then
+            PHONE_INV_TOKEN2=$(echo "$inv_phone2_body" | grep -o '"token":"[^"]*"' | head -1 | cut -d'"' -f4)
+            run_test "Wrong phone account password" 400 \
+                -X POST "$ACCEPT_URL" \
+                -H "Content-Type: application/json" \
+                -d "{\"token\":\"$PHONE_INV_TOKEN2\",\"existingPhone\":\"$PHONE_USER_PHONE\",\"existingPassword\":\"WrongPass@999\"}"
+        else
+            echo "SKIP: Could not create second phone invitation for wrong-password test"
+        fi
+
+        # Test: existingPhone without existingPassword → 400
+        echo ""
+        echo "--- Test: existingPhone without existingPassword ---"
+        if [ -n "${PHONE_INV_TOKEN2:-}" ]; then
+            run_test "existingPhone without existingPassword" 400 \
+                -X POST "$ACCEPT_URL" \
+                -H "Content-Type: application/json" \
+                -d "{\"token\":\"$PHONE_INV_TOKEN2\",\"existingPhone\":\"$PHONE_USER_PHONE\"}"
+        else
+            echo "SKIP: No available token for this test"
+        fi
+
+        # Test: non-existent phone number → 404
+        echo ""
+        echo "--- Test: Non-existent phone account ---"
+        INVITE_PHONE_EMAIL3="phone.link3.${TS}@example.com"
+        inv_phone3_resp=$(curl -s -w "\n%{http_code}" \
+            -X POST "$BASE_URL/api/v1/tenants/$TENANT_ID/invitations" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $ADMIN_TOKEN" \
+            -d "{\"email\":\"$INVITE_PHONE_EMAIL3\"}")
+        inv_phone3_body=$(echo "$inv_phone3_resp" | head -n -1)
+        inv_phone3_status=$(echo "$inv_phone3_resp" | tail -n 1)
+        if [ "$inv_phone3_status" -eq 201 ]; then
+            PHONE_INV_TOKEN3=$(echo "$inv_phone3_body" | grep -o '"token":"[^"]*"' | head -1 | cut -d'"' -f4)
+            run_test "Non-existent phone account" 404 \
+                -X POST "$ACCEPT_URL" \
+                -H "Content-Type: application/json" \
+                -d "{\"token\":\"$PHONE_INV_TOKEN3\",\"existingPhone\":\"+84000000000\",\"existingPassword\":\"SomePass@1\"}"
+        else
+            echo "SKIP: Could not create invitation for non-existent-phone test"
+        fi
+
+        # Test: duplicate phone hint invitation → 409
+        echo ""
+        echo "--- Test: Duplicate pending phone invitation ---"
+        dup_resp=$(curl -s -w "\n%{http_code}" \
+            -X POST "$BASE_URL/api/v1/tenants/$TENANT_ID/invitations" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $ADMIN_TOKEN" \
+            -d "{\"email\":\"dup.phone.${TS}@example.com\",\"phone\":\"$PHONE_USER_PHONE\"}")
+        dup_status=$(echo "$dup_resp" | tail -n 1)
+        if [ "$dup_status" -eq 201 ]; then
+            run_test "Duplicate phone invitation" 409 \
+                -X POST "$BASE_URL/api/v1/tenants/$TENANT_ID/invitations" \
+                -H "Content-Type: application/json" \
+                -H "Authorization: Bearer $ADMIN_TOKEN" \
+                -d "{\"email\":\"dup.phone2.${TS}@example.com\",\"phone\":\"$PHONE_USER_PHONE\"}"
+        else
+            echo "SKIP: Could not create initial phone invitation for duplicate test"
+        fi
+    fi
+fi
+
 echo ""
 echo "=== Results ==="
 echo "PASSED: $PASS"

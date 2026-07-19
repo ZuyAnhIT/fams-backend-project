@@ -47,6 +47,9 @@ public class Employee {
     @Column(length = 100)
     private String department;
 
+    @Column(name = "department_id")
+    private UUID departmentId;
+
     @Column(nullable = false, length = 20)
     private String status;
 

@@ -25,6 +25,17 @@ public interface EmployeeInvitationRepository extends JpaRepository<EmployeeInvi
 
     @Query("""
             SELECT i FROM EmployeeInvitation i
+            WHERE i.tenantId = :tenantId
+              AND i.phone = :phone
+              AND i.status = 'pending'
+              AND i.deletedAt IS NULL
+            """)
+    Optional<EmployeeInvitation> findPendingByTenantAndPhone(
+            @Param("tenantId") UUID tenantId,
+            @Param("phone") String phone);
+
+    @Query("""
+            SELECT i FROM EmployeeInvitation i
             WHERE i.token = :token
               AND i.deletedAt IS NULL
             """)

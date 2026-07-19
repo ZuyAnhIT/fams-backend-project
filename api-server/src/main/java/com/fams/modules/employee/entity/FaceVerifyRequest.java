@@ -12,8 +12,8 @@ import java.util.UUID;
 @NoArgsConstructor
 @AllArgsConstructor
 @Entity
-@Table(name = "employee_invitations")
-public class EmployeeInvitation {
+@Table(name = "face_verify_requests")
+public class FaceVerifyRequest {
 
     @Id
     @GeneratedValue(strategy = GenerationType.AUTO)
@@ -22,29 +22,26 @@ public class EmployeeInvitation {
     @Column(name = "tenant_id", nullable = false)
     private UUID tenantId;
 
-    @Column(nullable = false, length = 255)
-    private String email;
+    @Column(name = "employee_id", nullable = false)
+    private UUID employeeId;
 
-    @Column(nullable = false, unique = true)
-    private UUID token;
-
-    @Column(nullable = false, length = 20)
+    @Column(name = "status", nullable = false, length = 10)
     private String status;
 
-    @Column(name = "invited_by", nullable = false)
-    private UUID invitedBy;
+    @Column(name = "face_verified")
+    private Boolean faceVerified;
 
-    @Column(name = "role_id")
-    private UUID roleId;
+    @Column(name = "liveness_verified")
+    private Boolean livenessVerified;
 
-    @Column(length = 20)
-    private String phone;
+    @Column(name = "face_verify_score")
+    private Double faceVerifyScore;
 
-    @Column(name = "first_name", length = 100)
-    private String firstName;
+    @Column(name = "error_code", length = 30)
+    private String errorCode;
 
-    @Column(name = "last_name", length = 100)
-    private String lastName;
+    @Column(name = "requires_liveness", nullable = false)
+    private boolean requiresLiveness;
 
     @Column(name = "expires_at", nullable = false)
     private OffsetDateTime expiresAt;
@@ -55,16 +52,12 @@ public class EmployeeInvitation {
     @Column(name = "updated_at", nullable = false)
     private OffsetDateTime updatedAt;
 
-    @Column(name = "deleted_at")
-    private OffsetDateTime deletedAt;
-
     @PrePersist
     protected void onCreate() {
         OffsetDateTime now = OffsetDateTime.now();
         if (createdAt == null) createdAt = now;
         if (updatedAt == null) updatedAt = now;
         if (status == null) status = "pending";
-        if (token == null) token = UUID.randomUUID();
     }
 
     @PreUpdate

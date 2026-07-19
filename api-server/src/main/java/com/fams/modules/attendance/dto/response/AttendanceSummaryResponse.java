@@ -22,8 +22,14 @@ public class AttendanceSummaryResponse {
     @Schema(description = "Employee ID", example = "550e8400-e29b-41d4-a716-446655440000")
     private UUID employeeId;
 
+    @Schema(description = "Employee full name (firstName + lastName)", example = "Nguyen Van A")
+    private String employeeName;
+
     @Schema(description = "Site ID", example = "550e8400-e29b-41d4-a716-446655440000")
     private UUID siteId;
+
+    @Schema(description = "Site name", example = "Headquarters")
+    private String siteName;
 
     @Schema(description = "Shift ID (nullable)", example = "550e8400-e29b-41d4-a716-446655440000")
     private UUID shiftId;

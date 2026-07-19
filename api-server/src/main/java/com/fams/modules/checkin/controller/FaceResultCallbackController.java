@@ -2,6 +2,7 @@ package com.fams.modules.checkin.controller;
 
 import com.fams.modules.checkin.dto.request.FaceResultCallbackRequest;
 import com.fams.modules.checkin.repository.CheckinRepository;
+import com.fams.modules.employee.service.FaceIdService;
 import com.fams.modules.randomcheck.service.CheckResponseService;
 import io.swagger.v3.oas.annotations.Hidden;
 import lombok.extern.slf4j.Slf4j;
@@ -21,14 +22,17 @@ public class FaceResultCallbackController {
     private final String internalSecret;
     private final CheckinRepository checkinRepository;
     private final CheckResponseService checkResponseService;
+    private final FaceIdService faceIdService;
 
     public FaceResultCallbackController(
             @Value("${app.ai.internal-secret}") String internalSecret,
             CheckinRepository checkinRepository,
-            CheckResponseService checkResponseService) {
+            CheckResponseService checkResponseService,
+            FaceIdService faceIdService) {
         this.internalSecret = internalSecret;
         this.checkinRepository = checkinRepository;
         this.checkResponseService = checkResponseService;
+        this.faceIdService = faceIdService;
     }
 
     @PostMapping("/face-result")
@@ -59,6 +63,14 @@ public class FaceResultCallbackController {
                     request.getFaceVerified(),
                     request.getLivenessVerified(),
                     request.getFaceVerifyScore());
+        } else if ("standalone_verify".equals(request.getSourceType())) {
+            faceIdService.applyVerifyResult(
+                    request.getSourceId(),
+                    request.getTenantId(),
+                    request.getFaceVerified(),
+                    request.getLivenessVerified(),
+                    request.getFaceVerifyScore(),
+                    request.getErrorCode());
         } else {
             log.warn("Unhandled callback sourceType={} sourceId={}",
                     request.getSourceType(), request.getSourceId());

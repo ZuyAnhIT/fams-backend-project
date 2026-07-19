@@ -1,6 +1,8 @@
 package com.fams.modules.tenant.dto.request;
 
 import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
@@ -31,4 +33,13 @@ public class UpdateTenantSettingsRequest {
     @Pattern(regexp = "^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$",
              message = "Brand accent color must be a valid hex color (e.g. #RRGGBB)")
     private String brandAccentColor;
+
+    @Schema(description = "Prefix for auto-generated employee codes (max 20 chars, alphanumeric + hyphens). Set to empty string to disable auto-generation.", example = "EMP")
+    @Size(max = 20)
+    @Pattern(regexp = "^[A-Za-z0-9\\-]*$", message = "Prefix may only contain letters, digits, and hyphens")
+    private String employeeCodePrefix;
+
+    @Schema(description = "Number of zero-padded digits in the auto-generated sequence (1–8)", example = "4")
+    @Min(1) @Max(8)
+    private Integer employeeCodePadding;
 }

@@ -37,6 +37,15 @@ public class TenantSettings {
     @Column(name = "brand_accent_color", length = 7)
     private String brandAccentColor;
 
+    @Column(name = "employee_code_prefix", length = 20)
+    private String employeeCodePrefix;
+
+    @Column(name = "employee_code_padding", nullable = false)
+    private short employeeCodePadding;
+
+    @Column(name = "employee_code_seq", nullable = false)
+    private long employeeCodeSeq;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
 
@@ -50,6 +59,7 @@ public class TenantSettings {
         if (updatedAt == null) updatedAt = now;
         if (dateFormat == null) dateFormat = "DD/MM/YYYY";
         if (timeFormat == null) timeFormat = "HH:mm";
+        if (employeeCodePadding == 0) employeeCodePadding = 4;
     }
 
     @PreUpdate

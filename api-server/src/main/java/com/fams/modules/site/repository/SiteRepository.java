@@ -6,6 +6,8 @@ import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -28,4 +30,8 @@ public interface SiteRepository extends JpaRepository<Site, UUID>, JpaSpecificat
     boolean existsByTenantIdAndCodeAndDeletedAtIsNullAndIdNot(UUID tenantId, String code, UUID excludeId);
 
     long countByTenantIdAndDeletedAtIsNull(UUID tenantId);
+
+    @Query("SELECT s FROM Site s WHERE s.tenantId = :tenantId AND s.id IN :ids AND s.deletedAt IS NULL")
+    List<Site> findAllByTenantIdAndIdInAndDeletedAtIsNull(
+            @Param("tenantId") UUID tenantId, @Param("ids") Collection<UUID> ids);
 }

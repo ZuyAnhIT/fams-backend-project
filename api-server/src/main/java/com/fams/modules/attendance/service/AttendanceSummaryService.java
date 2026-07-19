@@ -285,9 +285,15 @@ public class AttendanceSummaryService {
         PageRequest pageable = PageRequest.of(page, size,
                 Sort.by(Sort.Direction.DESC, "attendanceDate"));
 
-        Page<AttendanceSummaryResponse> resultPage = summaryRepository
-                .findAll(spec, pageable)
-                .map(this::toResponse);
+        Page<AttendanceSummary> rawPage = summaryRepository.findAll(spec, pageable);
+
+        Set<UUID> empIds  = rawPage.stream().map(AttendanceSummary::getEmployeeId).collect(Collectors.toSet());
+        Set<UUID> siteIds = rawPage.stream().map(AttendanceSummary::getSiteId).collect(Collectors.toSet());
+        Map<UUID, String> empNames  = buildEmployeeNameMap(tenantId, empIds);
+        Map<UUID, String> siteNames = buildSiteNameMap(tenantId, siteIds);
+
+        Page<AttendanceSummaryResponse> resultPage = rawPage.map(a ->
+                toResponse(a, empNames.get(a.getEmployeeId()), siteNames.get(a.getSiteId())));
 
         log.info("HR attendance list: tenantId={} employeeId={} siteId={} total={}",
                 tenantId, employeeId, siteId, resultPage.getTotalElements());
@@ -310,7 +316,9 @@ public class AttendanceSummaryService {
                 .findByIdAndTenantIdAndDeletedAtIsNull(summaryId, tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Attendance summary not found: " + summaryId));
 
-        return toResponse(summary);
+        String empName  = resolveEmployeeName(tenantId, summary.getEmployeeId());
+        String siteName = resolveSiteName(tenantId, summary.getSiteId());
+        return toResponse(summary, empName, siteName);
     }
 
     @Transactional(readOnly = true)
@@ -327,9 +335,15 @@ public class AttendanceSummaryService {
         PageRequest pageable = PageRequest.of(page, size,
                 Sort.by(Sort.Direction.DESC, "attendanceDate"));
 
-        Page<AttendanceSummaryResponse> resultPage = summaryRepository
-                .findAll(spec, pageable)
-                .map(this::toResponse);
+        String employeeName = (employee.getFirstName() + " " + employee.getLastName()).trim();
+
+        Page<AttendanceSummary> rawPage = summaryRepository.findAll(spec, pageable);
+
+        Set<UUID> siteIds = rawPage.stream().map(AttendanceSummary::getSiteId).collect(Collectors.toSet());
+        Map<UUID, String> siteNames = buildSiteNameMap(tenantId, siteIds);
+
+        Page<AttendanceSummaryResponse> resultPage = rawPage.map(a ->
+                toResponse(a, employeeName, siteNames.get(a.getSiteId())));
 
         log.info("Employee attendance: tenantId={} employeeId={} total={}",
                 tenantId, employee.getId(), resultPage.getTotalElements());
@@ -360,7 +374,12 @@ public class AttendanceSummaryService {
         int totalOtMinutes       = rows.stream().mapToInt(AttendanceSummary::getOtMinutes).sum();
         int missingCheckoutDays  = (int) rows.stream().filter(AttendanceSummary::isMissingCheckout).count();
 
-        List<AttendanceSummaryResponse> daily = rows.stream().map(this::toResponse).collect(Collectors.toList());
+        String employeeName = (employee.getFirstName() + " " + employee.getLastName()).trim();
+        Set<UUID> siteIds = rows.stream().map(AttendanceSummary::getSiteId).collect(Collectors.toSet());
+        Map<UUID, String> siteNames = buildSiteNameMap(tenantId, siteIds);
+        List<AttendanceSummaryResponse> daily = rows.stream()
+                .map(a -> toResponse(a, employeeName, siteNames.get(a.getSiteId())))
+                .collect(Collectors.toList());
 
         log.info("Monthly attendance: tenantId={} employeeId={} {}/{} presentDays={}",
                 tenantId, employee.getId(), year, month, presentDays);
@@ -403,6 +422,12 @@ public class AttendanceSummaryService {
 
         List<AttendanceSummary> rows = summaryRepository.findAll(spec);
 
+        // Batch-load names to avoid N+1 queries
+        Set<UUID> empIds  = rows.stream().map(AttendanceSummary::getEmployeeId).collect(Collectors.toSet());
+        Set<UUID> siteIds = rows.stream().map(AttendanceSummary::getSiteId).collect(Collectors.toSet());
+        Map<UUID, String> empNames  = buildEmployeeNameMap(tenantId, empIds);
+        Map<UUID, String> siteNames = buildSiteNameMap(tenantId, siteIds);
+
         // Group by employeeId+siteId, preserving insertion order for stable pagination
         Map<String, List<AttendanceSummary>> grouped = new LinkedHashMap<>();
         for (AttendanceSummary row : rows) {
@@ -416,7 +441,9 @@ public class AttendanceSummaryService {
                     return AttendanceHrMonthlyResponse.builder()
                             .tenantId(tenantId)
                             .employeeId(first.getEmployeeId())
+                            .employeeName(empNames.get(first.getEmployeeId()))
                             .siteId(first.getSiteId())
+                            .siteName(siteNames.get(first.getSiteId()))
                             .year(year)
                             .month(month)
                             .presentDays(group.size())
@@ -478,17 +505,21 @@ public class AttendanceSummaryService {
         log.info("HR adjusted attendance summary: summaryId={} by={} reason={}",
                 summaryId, callerUserId, request.getReason());
 
-        return toResponse(summary);
+        String empName  = resolveEmployeeName(tenantId, summary.getEmployeeId());
+        String siteName = resolveSiteName(tenantId, summary.getSiteId());
+        return toResponse(summary, empName, siteName);
     }
 
     // ── Mapper ─────────────────────────────────────────────────────────────────
 
-    private AttendanceSummaryResponse toResponse(AttendanceSummary a) {
+    private AttendanceSummaryResponse toResponse(AttendanceSummary a, String employeeName, String siteName) {
         return AttendanceSummaryResponse.builder()
                 .id(a.getId())
                 .tenantId(a.getTenantId())
                 .employeeId(a.getEmployeeId())
+                .employeeName(employeeName)
                 .siteId(a.getSiteId())
+                .siteName(siteName)
                 .shiftId(a.getShiftId())
                 .assignmentId(a.getAssignmentId())
                 .attendanceDate(a.getAttendanceDate())
@@ -507,5 +538,35 @@ public class AttendanceSummaryService {
                 .updatedAt(a.getUpdatedAt())
                 .adjustmentReason(a.getAdjustmentReason())
                 .build();
+    }
+
+    // ── Name hydration helpers ─────────────────────────────────────────────────
+
+    private Map<UUID, String> buildEmployeeNameMap(UUID tenantId, Set<UUID> ids) {
+        if (ids.isEmpty()) return Map.of();
+        return employeeRepository.findAllByTenantIdAndIdInAndDeletedAtIsNull(tenantId, ids)
+                .stream()
+                .collect(Collectors.toMap(
+                        Employee::getId,
+                        e -> (e.getFirstName() + " " + e.getLastName()).trim()));
+    }
+
+    private Map<UUID, String> buildSiteNameMap(UUID tenantId, Set<UUID> ids) {
+        if (ids.isEmpty()) return Map.of();
+        return siteRepository.findAllByTenantIdAndIdInAndDeletedAtIsNull(tenantId, ids)
+                .stream()
+                .collect(Collectors.toMap(Site::getId, Site::getName));
+    }
+
+    private String resolveEmployeeName(UUID tenantId, UUID employeeId) {
+        return employeeRepository.findByIdAndTenantIdAndDeletedAtIsNull(employeeId, tenantId)
+                .map(e -> (e.getFirstName() + " " + e.getLastName()).trim())
+                .orElse(null);
+    }
+
+    private String resolveSiteName(UUID tenantId, UUID siteId) {
+        return siteRepository.findByIdAndTenantIdAndDeletedAtIsNull(siteId, tenantId)
+                .map(Site::getName)
+                .orElse(null);
     }
 }
