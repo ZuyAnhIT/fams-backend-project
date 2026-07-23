@@ -75,12 +75,14 @@ run_test "Register - existing admin email" 409 \
     -H "Content-Type: application/json" \
     -d '{"email":"admin@fams.com","password":"TestPass1","displayName":"Admin Copy"}'
 
-# Test 4: Phone registration WITHOUT a Firebase ID token → 400 PHONE_NOT_VERIFIED
+# Test 4: Phone registration WITHOUT an otpCode → 400 INVALID_ARGUMENT
 # (Issue #1, docs/issues/ISSUES.md: phone registration used to activate the account
-# immediately with no proof the phone number was real. See tests/auth/test_register_phone_otp.sh
-# for the full happy-path test that actually goes through Firebase OTP.)
+# immediately with no proof the phone number was real. Current flow: POST
+# /auth/register/send-otp sends a 6-digit code — logged to the server console in
+# app.sms.dev-mode — then POST /auth/register must include that code as `otpCode`.
+# See tests/auth/test_register_phone_otp.sh for the full happy-path test.)
 echo ""
-echo "--- Test 4: Register with phone only, no firebaseIdToken → 400 PHONE_NOT_VERIFIED ---"
+echo "--- Test 4: Register with phone only, no otpCode → 400 INVALID_ARGUMENT ---"
 response=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/auth/register" \
     -H "Content-Type: application/json" \
@@ -88,40 +90,36 @@ response=$(curl -s -w "\n%{http_code}" \
 body=$(echo "$response" | head -n -1)
 status=$(echo "$response" | tail -n 1)
 if [ "$status" -eq 400 ]; then
-    error_code=$(echo "$body" | grep -o '"errorCode":"PHONE_NOT_VERIFIED"' | head -1)
+    error_code=$(echo "$body" | grep -o '"errorCode":"INVALID_ARGUMENT"' | head -1)
     if [ -n "$error_code" ]; then
-        echo "PASS: Phone registration without OTP rejected (HTTP 400, PHONE_NOT_VERIFIED)"
+        echo "PASS: Phone registration without OTP rejected (HTTP 400, INVALID_ARGUMENT)"
         PASS=$((PASS + 1))
     else
-        echo "FAIL: HTTP 400 but errorCode is not PHONE_NOT_VERIFIED"
+        echo "FAIL: HTTP 400 but errorCode is not INVALID_ARGUMENT"
         echo "Body: $body"
         FAIL=$((FAIL + 1))
     fi
 else
-    echo "FAIL: Register with phone (no token) — expected HTTP 400, got HTTP $status"
+    echo "FAIL: Register with phone (no otpCode) — expected HTTP 400, got HTTP $status"
     echo "Body: $body"
     FAIL=$((FAIL + 1))
 fi
 
-# Test 4b: Phone registration with an obviously-invalid firebaseIdToken.
-# Expected 401 INVALID_OTP when Firebase is configured on the server (real
-# FCM_SERVICE_ACCOUNT_JSON); this dev environment has no real Firebase project
-# wired up, so the server correctly reports 503 (Firebase not configured)
-# before it ever gets to validate the token — same environmental gap as
-# tests/auth/test_otp_login.sh, not a regression from this fix.
+# Test 4b: Phone registration with a wrong otpCode, after a real send-otp call.
 echo ""
-echo "--- Test 4b: Register with phone + garbage firebaseIdToken ---"
+echo "--- Test 4b: Register with phone + wrong otpCode ---"
+curl -s -o /dev/null -X POST "$BASE_URL/api/v1/auth/register/send-otp" \
+    -H "Content-Type: application/json" \
+    -d "{\"phone\":\"$TEST_PHONE\"}"
 status4b=$(curl -s -o /dev/null -w "%{http_code}" \
     -X POST "$BASE_URL/api/v1/auth/register" \
     -H "Content-Type: application/json" \
-    -d "{\"phone\":\"$TEST_PHONE\",\"password\":\"$TEST_PASS\",\"displayName\":\"$TEST_NAME Phone\",\"firebaseIdToken\":\"not-a-real-token\"}")
-if [ "$status4b" -eq 401 ]; then
-    echo "PASS: Invalid firebaseIdToken rejected (HTTP 401 INVALID_OTP)"
+    -d "{\"phone\":\"$TEST_PHONE\",\"password\":\"$TEST_PASS\",\"displayName\":\"$TEST_NAME Phone\",\"otpCode\":\"000000\"}")
+if [ "$status4b" -eq 400 ]; then
+    echo "PASS: Wrong otpCode rejected (HTTP 400 INVALID_ARGUMENT)"
     PASS=$((PASS + 1))
-elif [ "$status4b" -eq 503 ]; then
-    echo "INFO: Firebase not configured in this environment (HTTP 503) — cannot validate token rejection here, skipping"
 else
-    echo "FAIL: Register - invalid firebaseIdToken — expected HTTP 401 (or 503 if Firebase unconfigured), got HTTP $status4b"
+    echo "FAIL: Register - wrong otpCode — expected HTTP 400, got HTTP $status4b"
     FAIL=$((FAIL + 1))
 fi
 
@@ -187,7 +185,7 @@ echo "--- Test 11: Login with unverified email → 403 ---"
 run_test "Login - unverified email blocked" 403 \
     -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d "{\"email\":\"$TEST_EMAIL\",\"password\":\"$TEST_PASS\"}"
+    -d "{\"identifier\":\"$TEST_EMAIL\",\"password\":\"$TEST_PASS\"}"
 
 echo ""
 echo "=== Results ==="

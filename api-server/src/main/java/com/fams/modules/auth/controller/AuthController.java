@@ -1,6 +1,7 @@
 package com.fams.modules.auth.controller;
 
 import com.fams.modules.auth.dto.request.ChangePasswordRequest;
+import com.fams.modules.auth.dto.request.SendOtpRequest;
 import com.fams.modules.auth.dto.request.DisableTotpRequest;
 import com.fams.modules.auth.dto.request.FirebasePhoneLoginRequest;
 import com.fams.modules.auth.dto.request.ForgotPasswordRequest;
@@ -121,25 +122,85 @@ public class AuthController {
         return healthCheckRepository.findAll().get(0).getMessage();
     }
 
-    @Operation(summary = "Register a new account",
-        description = "Creates a user account with email+password or phone. Sends a verification email when an "
-            + "email is provided. Phone-only registration requires `firebaseIdToken`: the client must complete "
-            + "Firebase's phone OTP flow first and pass the resulting ID token to prove the phone number is real.")
+    @Operation(
+        summary = "Đăng ký tài khoản mới",
+        description = """
+            **Đăng ký bằng Email:**
+            - Gửi `email` + `password` + `displayName`
+            - Hệ thống gửi link xác thực đến email
+            - User phải click link trước khi đăng nhập được
+            - `phone` và `otpCode` không cần thiết
+ 
+            **Đăng ký bằng Số điện thoại:**
+            - Bước 1: Gọi `POST /auth/register/send-otp` để nhận OTP qua SMS
+            - Bước 2: Gửi `phone` + `password` + `displayName` + `otpCode` (6 số)
+            - Tài khoản được kích hoạt ngay sau khi OTP đúng
+            - `email` không cần thiết
+ 
+            Không yêu cầu xác thực (public endpoint).
+            """)
     @ApiResponses({
-        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "201", description = "Account created",
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "201",
+            description = "Đăng ký thành công",
             content = @Content(schema = @Schema(implementation = RegisterResponse.class))),
-        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Validation error, " +
-            "or (PHONE_NOT_VERIFIED) phone registration missing/mismatched firebaseIdToken"),
-        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Firebase ID token invalid or expired (INVALID_OTP)"),
-        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "409", description = "Email or phone already registered"),
-        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "503", description = "Firebase not configured on the server")
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "400",
+            description = "Dữ liệu không hợp lệ (thiếu email/phone, OTP sai, mật khẩu yếu...)"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "409",
+            description = "Email hoặc số điện thoại đã được đăng ký")
     })
     @SecurityRequirements({})
     @PostMapping("/register")
-    public ResponseEntity<ApiResponse<RegisterResponse>> register(@Valid @RequestBody RegisterRequest request) {
-        log.info("Registration attempt for email={} phone={}", request.getEmail(), request.getPhone());
+    public ResponseEntity<ApiResponse<RegisterResponse>> register(
+            @Valid @RequestBody RegisterRequest request) {
+        log.info("Registration attempt email={} phone={}",
+            request.getEmail() != null ? "***" : null,
+            request.getPhone() != null ? "***" : null);
         RegisterResponse response = registerService.register(request);
         return ResponseEntity.status(201).body(ApiResponse.success(response));
+    }
+ 
+// 3. Thêm endpoint mới sau endpoint register:
+ 
+    @Operation(
+        summary = "Gửi OTP xác thực số điện thoại (bước 1 đăng ký bằng phone)",
+        description = """
+            Gửi mã OTP 6 số về số điện thoại qua SMS.
+            Sau khi nhận được OTP, dùng mã đó trong `POST /auth/register`.
+ 
+            **Giới hạn:** Tối đa 3 lần gửi trong 15 phút.
+ 
+            **Dev mode:** OTP được log ra console server, không gửi SMS thật.
+            Xem log với từ khoá `[DEV] SMS OTP`.
+ 
+            Không yêu cầu xác thực (public endpoint).
+            """)
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "200",
+            description = "OTP đã được gửi thành công"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "400",
+            description = "Số điện thoại không hợp lệ"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "409",
+            description = "Số điện thoại đã được đăng ký và xác thực"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "429",
+            description = "Gửi OTP quá nhiều lần, vui lòng đợi")
+    })
+    @SecurityRequirements({})
+    @PostMapping("/register/send-otp")
+    public ResponseEntity<ApiResponse<Void>> sendRegistrationOtp(
+            @Valid @RequestBody SendOtpRequest request) {
+        log.info("Registration OTP requested for phone=***");
+        registerService.sendRegistrationOtp(request);
+        return ResponseEntity.ok(new ApiResponse<>(
+            true,
+            "Mã OTP đã được gửi đến số điện thoại của bạn. Có hiệu lực trong 5 phút.",
+            null));
     }
 
     @Operation(summary = "Verify email address",
@@ -204,19 +265,21 @@ public class AuthController {
         return ResponseEntity.ok(new ApiResponse<>(true, "Password has been reset successfully.", null));
     }
 
-    @Operation(summary = "Login with email and password",
-        description = "Returns JWT access + refresh tokens. When TOTP is enabled, returns a pendingToken instead and sets totpRequired=true. No auth required.")
+     @Operation(summary = "Đăng nhập bằng email hoặc số điện thoại",
+        description = "Trả về JWT access + refresh token. Nhận `identifier` là email hoặc số điện thoại "
+            + "đã đăng ký. Nếu tài khoản bật TOTP, trả về `pendingToken` thay vì token thật và "
+            + "`totpRequired=true`. Không yêu cầu xác thực.")
     @ApiResponses({
-        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Login successful",
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Đăng nhập thành công",
             content = @Content(schema = @Schema(implementation = LoginResponse.class))),
-        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Validation error"),
-        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Bad credentials"),
-        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "423", description = "Account temporarily locked due to too many failed attempts")
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Dữ liệu không hợp lệ"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Sai thông tin đăng nhập"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "423", description = "Tài khoản bị khóa tạm thời do đăng nhập sai nhiều lần")
     })
     @SecurityRequirements({})
     @PostMapping("/login")
     public ResponseEntity<ApiResponse<LoginResponse>> login(@Valid @RequestBody LoginRequest request) {
-        log.info("Login attempt for email: {}", request.getEmail());
+        log.info("Login attempt for identifier: ***"); // không log giá trị thật để tránh lộ PII vào log file
         LoginResponse response = authService.login(request);
         return ResponseEntity.ok(ApiResponse.success(response));
     }

@@ -89,6 +89,10 @@ public class SecurityConfig {
                                 "/api/v1/auth/verify-email", "/api/v1/auth/totp/qr").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/login").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/register").permitAll()
+                        // FIX: đăng ký bằng phone cần endpoint gửi OTP trước — thiếu dòng này
+                        // gây 401 Unauthorized vì JwtAuthFilter/anyRequest().authenticated()
+                        // chặn mọi request không có Bearer token hợp lệ.
+                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/register/send-otp").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/resend-verification").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/otp/verify").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/forgot-password").permitAll()

@@ -6,28 +6,33 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.UUID;
+
 @Data
 @Builder
 @AllArgsConstructor
 @NoArgsConstructor
-@Schema(description = "Result of account registration")
+@Schema(description = "Kết quả đăng ký tài khoản")
 public class RegisterResponse {
 
-    @Schema(description = "True when an email verification link was sent and the user must verify before logging in")
+    @Schema(description = "UUID của user vừa tạo", example = "550e8400-e29b-41d4-a716-446655440000")
+    private UUID userId;
+
+    @Schema(
+        description = "true = đã gửi email xác thực, user phải verify trước khi đăng nhập",
+        example = "true"
+    )
     private boolean emailVerificationRequired;
 
-    @Schema(description = "Human-readable status message", example = "Registration successful. Please check your email to verify your account.")
+    @Schema(
+        description = "true = số điện thoại đã xác thực qua OTP, tài khoản đã sẵn sàng đăng nhập",
+        example = "false"
+    )
+    private boolean phoneVerified;
+
+    @Schema(
+        description = "Thông báo trạng thái đăng ký",
+        example = "Đăng ký thành công. Vui lòng kiểm tra email để xác thực tài khoản."
+    )
     private String message;
-
-    @Schema(description = "JWT access token (only present for phone-only registration where email verification is not required)", example = "eyJhbGciOiJIUzI1NiJ9...")
-    private String accessToken;
-
-    @Schema(description = "Refresh token (only present for phone-only registration)", example = "eyJhbGciOiJIUzI1NiJ9...")
-    private String refreshToken;
-
-    @Schema(description = "Token type, always Bearer", example = "Bearer")
-    private String tokenType;
-
-    @Schema(description = "Access token lifetime in seconds (only present for phone-only registration)", example = "900")
-    private Long expiresIn;
 }
