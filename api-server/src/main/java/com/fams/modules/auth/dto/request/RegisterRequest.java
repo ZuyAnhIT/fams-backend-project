@@ -8,37 +8,57 @@ import jakarta.validation.constraints.Size;
 import lombok.Data;
 
 @Data
-@Schema(description = "New account registration request. Provide at least one of email or phone.")
+@Schema(description = "Yêu cầu đăng ký tài khoản mới. Cung cấp email HOẶC phone, không bắt buộc cả hai.")
 public class RegisterRequest {
 
-    @Schema(description = "Email address (required if phone is omitted)", example = "alice@acme.com")
-    @Email(message = "Invalid email format")
+    @Schema(
+        description = "Địa chỉ email. Bắt buộc nếu không cung cấp phone.",
+        example = "alice@acme.com"
+    )
+    @Email(message = "Định dạng email không hợp lệ")
     private String email;
 
-    @Schema(description = "Phone number in E.164 format (required if email is omitted)", example = "+84912345678")
-    @Pattern(regexp = "^\\+?[1-9]\\d{7,14}$", message = "Invalid phone number format")
+    @Schema(
+        description = "Số điện thoại theo chuẩn E.164. Bắt buộc nếu không cung cấp email.",
+        example = "+84912345678"
+    )
+    @Pattern(
+        regexp = "^\\+?[1-9]\\d{7,14}$",
+        message = "Số điện thoại không hợp lệ (phải theo định dạng quốc tế, VD: +84912345678)"
+    )
     private String phone;
 
-    @Schema(description = "Password — min 8 chars, must contain upper, lower, and digit", example = "S3cur3P@ss")
-    @NotBlank(message = "Password is required")
-    @Size(min = 8, message = "Password must be at least 8 characters")
+    @Schema(description = "Mật khẩu — tối thiểu 8 ký tự, phải có chữ hoa, chữ thường và số", example = "S3cur3P@ss")
+    @NotBlank(message = "Mật khẩu là bắt buộc")
+    @Size(min = 8, message = "Mật khẩu phải có ít nhất 8 ký tự")
     @Pattern(
-            regexp = "^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d).+$",
-            message = "Password must contain at least one uppercase letter, one lowercase letter, and one digit"
+        regexp = "^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d).+$",
+        message = "Mật khẩu phải chứa ít nhất 1 chữ hoa, 1 chữ thường và 1 chữ số"
     )
     private String password;
 
-    @Schema(description = "Full display name shown in the UI", example = "Alice Nguyen")
-    @NotBlank(message = "Display name is required")
-    @Size(max = 100, message = "Display name must not exceed 100 characters")
+    @Schema(description = "Họ tên hiển thị trong hệ thống", example = "Nguyễn Văn A")
+    @NotBlank(message = "Tên hiển thị là bắt buộc")
+    @Size(max = 100, message = "Tên hiển thị không được vượt quá 100 ký tự")
     private String displayName;
 
-    @Schema(description = "Unique device identifier for multi-device token tracking", example = "device-abc-123")
+    @Schema(description = "ID thiết bị để quản lý session", example = "device-abc-123")
     private String deviceId;
 
-    @Schema(description = "Firebase phone-auth ID token proving OTP verification. Required when registering " +
-            "with `phone` and no `email` — the client must complete Firebase's phone OTP flow first and pass " +
-            "the resulting ID token here; the phone number inside the token must match `phone`.",
-            example = "eyJhbGciOiJSUzI1NiIsI...")
-    private String firebaseIdToken;
+    // ── Phone OTP flow ──────────────────────────────────────────────────────
+    // Khi đăng ký bằng phone:
+    //   Bước 1: Gọi POST /auth/register/send-otp { phone }  → nhận OTP qua SMS
+    //   Bước 2: Gọi POST /auth/register { phone, password, displayName, otpCode }
+    //
+    // Khi đăng ký bằng email: không cần otpCode — hệ thống gửi link verify email.
+
+    @Schema(
+        description = "Mã OTP 6 số nhận qua SMS. Bắt buộc khi đăng ký bằng phone.",
+        example = "123456"
+    )
+    @Pattern(
+        regexp = "^\\d{6}$",
+        message = "Mã OTP phải là 6 chữ số"
+    )
+    private String otpCode;
 }

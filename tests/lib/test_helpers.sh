@@ -40,7 +40,7 @@ register_verified_test_user_token() {
     local login_body
     login_body=$(curl -s -X POST "$base_url/api/v1/auth/login" \
         -H "Content-Type: application/json" \
-        -d "{\"email\":\"$email\",\"password\":\"$password\"}")
+        -d "{\"identifier\":\"$email\",\"password\":\"$password\"}")
 
     echo "$login_body" | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4
 }

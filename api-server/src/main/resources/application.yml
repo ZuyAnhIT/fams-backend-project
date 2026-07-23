@@ -61,6 +61,10 @@ app:
     secret: ${JWT_SECRET}
     access-ttl-minutes: ${JWT_ACCESS_TTL_MINUTES:15}
     refresh-ttl-days: ${JWT_REFRESH_TTL_DAYS:30}
+  sms:
+    # true  = log OTP ra console (dev/test, không gửi SMS thật)
+    # false = dùng SMS provider thật (production)
+    dev-mode: true
   otp:
     # Backlog #2 (Đăng nhập bằng số điện thoại OTP): per-IP request limit on
     # /auth/otp/verify — Firebase itself gates the actual OTP code, this just

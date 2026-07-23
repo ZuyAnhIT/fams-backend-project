@@ -27,6 +27,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.http.HttpStatus;
+import org.springframework.util.StringUtils;
 
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -74,19 +75,35 @@ public class AuthService {
         this.refreshTtlDays = refreshTtlDays;
     }
 
+    /**
+     * Đăng nhập bằng email + password hoặc số điện thoại + password.
+     *
+     * Thứ tự kiểm tra:
+     *  1. Tìm user theo identifier (email hoặc phone)
+     *  2. Kiểm tra account locked
+     *  3. Kiểm tra password
+     *  4. Kiểm tra account active
+     *  5. Kiểm tra email verified (chỉ áp dụng nếu login bằng email)
+     *  6. Reset failed attempts
+     *  7. Resolve primary tenant
+     *  8. Check tenant suspended
+     *  9. TOTP gate (nếu bật)
+     * 10. Issue token pair + audit
+     */
     @Transactional(noRollbackFor = {InvalidCredentialsException.class, AccountLockedException.class})
     public LoginResponse login(LoginRequest request) {
-        // 1. Find user by email
-        User user = userRepository.findByEmailAndDeletedAtIsNull(request.getEmail())
-                .orElseThrow(() -> new InvalidCredentialsException("Invalid email or password"));
 
-        // 2. Check if account is locked
+        // ── 1. Tìm user theo identifier (email hoặc phone) ──────────────────────
+        User user = resolveUser(request.getIdentifier());
+
+        // ── 2. Kiểm tra account bị khóa tạm thời ───────────────────────────────
         if (user.getLockedUntil() != null && user.getLockedUntil().isAfter(OffsetDateTime.now())) {
             throw new AccountLockedException(user.getLockedUntil());
         }
 
-        // 3. Verify password
-        if (!passwordEncoder.matches(request.getPassword(), user.getPasswordHash())) {
+        // ── 3. Xác minh password ────────────────────────────────────────────────
+        if (user.getPasswordHash() == null ||
+                !passwordEncoder.matches(request.getPassword(), user.getPasswordHash())) {
             int attempts = user.getFailedLoginAttempts() + 1;
             user.setFailedLoginAttempts(attempts);
 
@@ -95,30 +112,39 @@ public class AuthService {
                         .plusMinutes(AppConstants.LOCK_DURATION_MINUTES);
                 user.setLockedUntil(lockUntil);
                 userRepository.save(user);
-                log.warn("Account locked for user {} until {}", user.getEmail(), lockUntil);
+                log.warn("Account locked for user {} until {}", user.getId(), lockUntil);
                 throw new AccountLockedException(lockUntil);
             }
 
             userRepository.save(user);
-            throw new InvalidCredentialsException("Invalid email or password");
+            throw new InvalidCredentialsException("Invalid credentials");
         }
 
-        // 4. Check email verification (only for email-based accounts)
+        // ── 4. Kiểm tra tài khoản active ────────────────────────────────────────
+        if (!user.isActive()) {
+            throw new InvalidCredentialsException("Account is not active");
+        }
+
+        // ── 5. Kiểm tra email verified — CHỈ áp dụng nếu account có email ───────
+        // Lưu ý: user đăng ký thuần bằng phone có email=null → bỏ qua bước này.
+        // User có cả email lẫn phone (email chưa verify) vẫn bị chặn dù đang login
+        // bằng phone, vì email_verified là trạng thái của TÀI KHOẢN, không phải của
+        // kênh đăng nhập đang dùng.
         if (user.getEmail() != null && !user.isEmailVerified()) {
             throw new EmailNotVerifiedException();
         }
 
-        // 5. Reset failed attempts
+        // ── 6. Reset failed attempts sau khi xác thực thành công ────────────────
         user.setFailedLoginAttempts(0);
         user.setLockedUntil(null);
         userRepository.save(user);
 
-        // 6. Resolve primary tenant role for JWT claims
+        // ── 7. Resolve primary tenant & role cho JWT claims ─────────────────────
         List<UserRole> roles = userRoleRepository.findAllActiveByUserId(user.getId());
         UUID primaryTenantId = roles.isEmpty() ? null : roles.get(0).getTenantId();
-        String primaryRole = roles.isEmpty() ? null : roles.get(0).getRole().getName();
+        String primaryRole   = roles.isEmpty() ? null : roles.get(0).getRole().getName();
 
-        // 6a. Block login if tenant is suspended (platform admins are not tenant-scoped)
+        // ── 8. Block nếu primary tenant bị suspend ──────────────────────────────
         if (!user.isPlatformAdmin() && primaryTenantId != null) {
             tenantRepository.findByIdAndDeletedAtIsNull(primaryTenantId).ifPresent(tenant -> {
                 if ("suspended".equals(tenant.getStatus())) {
@@ -127,30 +153,32 @@ public class AuthService {
             });
         }
 
-        // 7. If TOTP is enabled, issue a pending token instead of real tokens
+        // ── 9. TOTP gate ─────────────────────────────────────────────────────────
         String deviceId = (request.getDeviceId() != null) ? request.getDeviceId() : "unknown";
         if (user.isTotpEnabled()) {
             String pendingToken = UUID.randomUUID().toString();
-            // Store: userId|email|deviceId|isPlatformAdmin|tenantId|role
             String tenantStr = primaryTenantId != null ? primaryTenantId.toString() : "";
-            String roleStr = primaryRole != null ? primaryRole : "";
-            String value = user.getId() + "|" + user.getEmail() + "|" + deviceId + "|" + user.isPlatformAdmin()
-                    + "|" + tenantStr + "|" + roleStr;
-            redis.opsForValue().set(TOTP_PENDING_PREFIX + pendingToken, value, TOTP_PENDING_TTL_MIN, TimeUnit.MINUTES);
-            log.info("TOTP required for user {} — pending token issued", user.getEmail());
+            String roleStr   = primaryRole   != null ? primaryRole               : "";
+            String value = user.getId() + "|" + user.getEmail() + "|" + deviceId
+                    + "|" + user.isPlatformAdmin() + "|" + tenantStr + "|" + roleStr;
+            redis.opsForValue().set(
+                    TOTP_PENDING_PREFIX + pendingToken, value,
+                    TOTP_PENDING_TTL_MIN, TimeUnit.MINUTES);
+            log.info("TOTP required for user {} — pending token issued", user.getId());
             return LoginResponse.builder()
                     .totpRequired(true)
                     .pendingToken(pendingToken)
                     .build();
         }
 
-        // 8. Generate access token
+        // ── 10. Issue token pair ─────────────────────────────────────────────────
         String accessToken = jwtProvider.generateAccessToken(
-                user.getId(), user.getEmail(), deviceId, user.isPlatformAdmin(), primaryTenantId, primaryRole);
+                user.getId(), user.getEmail(), deviceId,
+                user.isPlatformAdmin(), primaryTenantId, primaryRole);
 
-        // 8. Generate and save refresh token
         String rawRefreshToken = jwtProvider.generateRefreshTokenRaw();
-        String tokenHash = jwtProvider.hashToken(rawRefreshToken);
+        String tokenHash       = jwtProvider.hashToken(rawRefreshToken);
+
         RefreshToken refreshToken = RefreshToken.builder()
                 .user(user)
                 .tokenHash(tokenHash)
@@ -162,23 +190,30 @@ public class AuthService {
                 .build();
         refreshTokenRepository.save(refreshToken);
 
-        // 9. Record last_login_at + audit LOGIN (Acceptance Criteria, backlog #1)
         user.setLastLoginAt(OffsetDateTime.now());
         userRepository.save(user);
-        auditLogService.record(
-                primaryTenantId,
-                user.getId(),
-                user.getEmail(),
-                "USER",
-                user.getId().toString(),
-                "LOGIN",
-                null,
-                null,
-                null,
-                HttpRequestUtils.currentIpAddress(),
-                HttpRequestUtils.currentUserAgent());
+
+        try {
+            auditLogService.record(
+                    primaryTenantId,
+                    user.getId(),
+                    user.getEmail() != null ? user.getEmail() : user.getPhone(),
+                    "USER",
+                    user.getId().toString(),
+                    "LOGIN",
+                    null,
+                    null,
+                    null,
+                    HttpRequestUtils.currentIpAddress(),
+                    HttpRequestUtils.currentUserAgent());
+        } catch (Exception ex) {
+            // Audit không được làm hỏng flow login chính
+            log.warn("Failed to record LOGIN audit for user {}: {}", user.getId(), ex.getMessage());
+        }
 
         return LoginResponse.builder()
+                .userId(user.getId())
+                .activeTenantId(primaryTenantId)
                 .accessToken(accessToken)
                 .refreshToken(rawRefreshToken)
                 .tokenType("Bearer")
@@ -187,12 +222,50 @@ public class AuthService {
     }
 
     /**
-     * Issue #3 (docs/issues/ISSUES.md): a user belonging to multiple tenants needs a way to
-     * actually operate as a different company — until now, login (and every refresh) always
-     * re-picked the OLDEST role assignment, so there was no real "switch company" possible.
-     * This re-issues a token pair scoped to {@code request.tenantId} (which the caller must
-     * hold an active role in) and persists that choice onto the refresh-token row so it
-     * survives subsequent silent token refreshes ({@link RefreshTokenService#refresh}).
+     * Tìm user theo identifier — email hoặc số điện thoại.
+     *
+     * Heuristic phân biệt: chứa '@' → coi là email; ngược lại → coi là phone
+     * và chuẩn hoá về E.164 (giống RegisterService.normalizePhone) trước khi
+     * tra DB, vì phone được lưu dạng +84xxx.
+     *
+     * Luôn ném InvalidCredentialsException (không phải 404) để tránh lộ
+     * thông tin "tài khoản có tồn tại hay không" (user enumeration).
+     */
+    private User resolveUser(String identifier) {
+        if (!StringUtils.hasText(identifier)) {
+            throw new InvalidCredentialsException("Invalid credentials");
+        }
+
+        String trimmed = identifier.trim();
+
+        if (trimmed.contains("@")) {
+            return userRepository.findByEmailAndDeletedAtIsNull(trimmed.toLowerCase())
+                    .orElseThrow(() -> new InvalidCredentialsException("Invalid credentials"));
+        }
+
+        String normalizedPhone = normalizePhone(trimmed);
+        return userRepository.findByPhoneAndDeletedAtIsNull(normalizedPhone)
+                .orElseThrow(() -> new InvalidCredentialsException("Invalid credentials"));
+    }
+
+    /**
+     * Chuẩn hoá số điện thoại về E.164 — PHẢI đồng nhất với
+     * RegisterService.normalizePhone() vì đây là cùng một dữ liệu lưu trong
+     * cột users.phone. Nếu hai nơi chuẩn hoá khác nhau, user đăng ký bằng
+     * "0912..." sẽ không login lại được vì tra theo "+84912..." bị lệch.
+     */
+    private String normalizePhone(String phone) {
+        String cleaned = phone.trim();
+        if (cleaned.startsWith("0")) {
+            cleaned = "+84" + cleaned.substring(1);
+        } else if (!cleaned.startsWith("+")) {
+            cleaned = "+" + cleaned;
+        }
+        return cleaned;
+    }
+
+    /**
+     * Switch active tenant — giữ nguyên logic cũ, không thay đổi.
      */
     @Transactional
     public LoginResponse switchTenant(UUID callerUserId, UUID targetTenantId, String rawRefreshToken) {
@@ -203,22 +276,22 @@ public class AuthService {
         RefreshToken stored = refreshTokenRepository.findByTokenHash(hash)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid refresh token"));
         if (!stored.getUser().getId().equals(callerUserId)) {
-            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Refresh token does not belong to this user");
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED,
+                    "Refresh token does not belong to this user");
         }
         if (stored.getRevokedAt() != null || OffsetDateTime.now().isAfter(stored.getExpiresAt())) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Refresh token is no longer valid");
         }
 
-        List<UserRole> targetRoles = userRoleRepository.findActiveByUserIdAndTenantId(callerUserId, targetTenantId);
+        List<UserRole> targetRoles = userRoleRepository
+                .findActiveByUserIdAndTenantId(callerUserId, targetTenantId);
         if (targetRoles.isEmpty()) {
             throw new AccessDeniedException("You do not have a role in this company");
         }
         String targetRole = targetRoles.get(0).getRole().getName();
 
         tenantRepository.findByIdAndDeletedAtIsNull(targetTenantId).ifPresentOrElse(tenant -> {
-            if ("suspended".equals(tenant.getStatus())) {
-                throw new TenantSuspendedException();
-            }
+            if ("suspended".equals(tenant.getStatus())) throw new TenantSuspendedException();
         }, () -> {
             throw new ResourceNotFoundException("Tenant not found: " + targetTenantId);
         });
@@ -227,8 +300,6 @@ public class AuthService {
                 user.getId(), user.getEmail(), stored.getDeviceId(),
                 user.isPlatformAdmin(), targetTenantId, targetRole);
 
-        // Rotate the refresh token (same convention as RefreshTokenService.refresh), carrying
-        // the newly-chosen tenant forward so it sticks across future refreshes.
         stored.setRevokedAt(OffsetDateTime.now());
         refreshTokenRepository.save(stored);
 
@@ -247,6 +318,8 @@ public class AuthService {
         log.info("User {} switched active tenant to {}", callerUserId, targetTenantId);
 
         return LoginResponse.builder()
+                .userId(user.getId())
+                .activeTenantId(targetTenantId)
                 .accessToken(accessToken)
                 .refreshToken(rawNew)
                 .tokenType("Bearer")

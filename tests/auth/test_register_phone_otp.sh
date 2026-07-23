@@ -1,20 +1,21 @@
 #!/usr/bin/env bash
-# Manual test for phone-only registration with real OTP verification (Issue #1,
-# docs/issues/ISSUES.md: registration used to activate phone accounts without any
-# proof of OTP verification — POST /api/v1/auth/register now requires a Firebase
-# phone-auth ID token for phone-only registration, the same mechanism already used
-# for phone LOGIN (see test_otp_login.sh). This script follows the same pattern.
+# Full happy-path test for phone-only registration via the in-house OTP flow
+# (RegisterService.sendRegistrationOtp / register + PhoneOtp + SmsService).
+#
+# This replaced the earlier Firebase-Phone-Auth-based registration flow. In
+# app.sms.dev-mode (default true, see application.yml / SmsService), the OTP is
+# logged to the API container's console instead of being sent as a real SMS, so
+# this script can run fully automated — no Firebase project or manual code entry
+# required.
 #
 # Usage:
-#   FIREBASE_API_KEY=<web-api-key> BASE_URL=http://localhost:8080 bash tests/auth/test_register_phone_otp.sh
+#   BASE_URL=http://localhost:8080 bash tests/auth/test_register_phone_otp.sh
 #
-# QUOTA / RECAPTCHA NOTE: same as test_otp_login.sh — register a Firebase "test phone
-# number" (Authentication → Sign-in method → Phone → Test phone numbers) to avoid
-# consuming real SMS quota and to bypass reCAPTCHA in this script.
+# Requires: the API container running as `fams-api` under `docker compose`
+# (used to scrape the OTP from `docker compose logs`).
 
 set -eo pipefail
 
-FIREBASE_API_KEY="${FIREBASE_API_KEY:-}"
 BASE_URL="${BASE_URL:-http://localhost:8080}"
 PASS=0
 FAIL=0
@@ -22,80 +23,105 @@ FAIL=0
 pass() { echo "PASS: $1"; PASS=$((PASS + 1)); }
 fail() { echo "FAIL: $1"; FAIL=$((FAIL + 1)); }
 
-if [ -z "$FIREBASE_API_KEY" ]; then
-    echo "ERROR: FIREBASE_API_KEY is required (Firebase Console → Project Settings → General → Web API key)."
-    exit 1
-fi
-
-echo "=== Phone Registration with Firebase OTP — Manual Test ==="
+echo "=== Phone Registration via in-house OTP — Automated Test ==="
 echo "Target: $BASE_URL"
 echo ""
 
-read -rp "Phone number registered as a Firebase test number (E.164, e.g. +84912345678): " PHONE
 TS=$(date +%s)
+PHONE="+8493$(printf '%07d' $(( (TS + $$) % 10000000 )))"
 DISPLAY_NAME="Phone OTP Test ${TS}"
 PASSWORD="TestPass1"
 
-# ── Step 1: Ask Firebase to send OTP ─────────────────────────────────────────
-echo ""
-echo "--- Step 1: Requesting OTP from Firebase ---"
+fetch_otp() {
+    # Scrapes the most recent "[DEV] SMS OTP for <phone>" block from the API
+    # container's logs and prints the 6-digit code.
+    docker compose logs fams-api --since 30s 2>/dev/null \
+        | grep -A1 "\[DEV\] SMS OTP for ${PHONE} " \
+        | grep -o "OTP CODE: [0-9]\{6\}" \
+        | tail -1 \
+        | grep -o "[0-9]\{6\}"
+}
+
+# ── Step 1: request OTP ──────────────────────────────────────────────────────
+echo "--- Step 1: POST /auth/register/send-otp ---"
 SEND_STATUS=$(curl -s -o /tmp/fams_reg_otp_send.json -w "%{http_code}" \
-    -X POST "https://identitytoolkit.googleapis.com/v1/accounts:sendVerificationCode?key=$FIREBASE_API_KEY" \
+    -X POST "$BASE_URL/api/v1/auth/register/send-otp" \
     -H "Content-Type: application/json" \
-    -d "{\"phoneNumber\":\"$PHONE\",\"recaptchaToken\":\"test-recaptcha\"}")
-SEND_BODY=$(cat /tmp/fams_reg_otp_send.json)
-if [ "$SEND_STATUS" -ne 200 ]; then
-    fail "Firebase rejected the OTP request (HTTP $SEND_STATUS)"
-    echo "Response: $SEND_BODY"
-    echo "Register $PHONE as a Firebase test phone number first (see script header)."
+    -d "{\"phone\":\"$PHONE\"}")
+if [ "$SEND_STATUS" -eq 200 ]; then
+    pass "OTP send accepted (HTTP 200)"
+else
+    fail "OTP send rejected (HTTP $SEND_STATUS): $(cat /tmp/fams_reg_otp_send.json)"
+    echo ""; echo "=== Results ==="; echo "PASSED: $PASS"; echo "FAILED: $FAIL"
     exit 1
 fi
-SESSION_INFO=$(echo "$SEND_BODY" | grep -o '"sessionInfo"[[:space:]]*:[[:space:]]*"[^"]*"' | cut -d'"' -f4 || true)
-pass "Firebase OTP ready — enter the fixed code you set for this test number"
 
-# ── Step 2: Enter OTP, exchange for ID token ─────────────────────────────────
-echo ""
-read -rp "Enter the 6-digit code: " OTP_CODE
-TOKEN_STATUS=$(curl -s -o /tmp/fams_reg_otp_token.json -w "%{http_code}" \
-    -X POST "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPhoneNumber?key=$FIREBASE_API_KEY" \
-    -H "Content-Type: application/json" \
-    -d "{\"sessionInfo\":\"$SESSION_INFO\",\"code\":\"$OTP_CODE\"}")
-TOKEN_BODY=$(cat /tmp/fams_reg_otp_token.json)
-if [ "$TOKEN_STATUS" -ne 200 ]; then
-    fail "Firebase rejected the OTP code (HTTP $TOKEN_STATUS)"
-    echo "Response: $TOKEN_BODY"
+sleep 1
+OTP_CODE=$(fetch_otp)
+if [ -z "$OTP_CODE" ]; then
+    fail "Could not read OTP from 'docker compose logs fams-api' — is app.sms.dev-mode=true, and is the container named fams-api?"
+    echo ""; echo "=== Results ==="; echo "PASSED: $PASS"; echo "FAILED: $FAIL"
     exit 1
 fi
-FIREBASE_ID_TOKEN=$(echo "$TOKEN_BODY" | grep -o '"idToken"[[:space:]]*:[[:space:]]*"[^"]*"' | cut -d'"' -f4 || true)
-pass "Firebase ID Token obtained"
+pass "OTP scraped from dev-mode server log ($OTP_CODE)"
 
-# ── Step 3: Register against FAMS with the verified token ───────────────────
+# ── Step 2: wrong OTP is rejected first ──────────────────────────────────────
 echo ""
-echo "--- Step 3: POST /api/v1/auth/register with firebaseIdToken ---"
+echo "--- Step 2: register with a deliberately wrong otpCode → 400 ---"
+WRONG_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+    -X POST "$BASE_URL/api/v1/auth/register" \
+    -H "Content-Type: application/json" \
+    -d "{\"phone\":\"$PHONE\",\"password\":\"$PASSWORD\",\"displayName\":\"$DISPLAY_NAME\",\"otpCode\":\"000000\"}")
+if [ "$WRONG_STATUS" -eq 400 ]; then
+    pass "Wrong OTP rejected (HTTP 400)"
+else
+    fail "Wrong OTP — expected HTTP 400, got HTTP $WRONG_STATUS"
+fi
+
+# ── Step 3: register with the real OTP ───────────────────────────────────────
+echo ""
+echo "--- Step 3: POST /auth/register with the real otpCode ---"
 REG_STATUS=$(curl -s -o /tmp/fams_reg_result.json -w "%{http_code}" \
     -X POST "$BASE_URL/api/v1/auth/register" \
     -H "Content-Type: application/json" \
-    -d "{
-          \"phone\":           \"$PHONE\",
-          \"password\":        \"$PASSWORD\",
-          \"displayName\":     \"$DISPLAY_NAME\",
-          \"firebaseIdToken\": \"$FIREBASE_ID_TOKEN\"
-        }")
+    -d "{\"phone\":\"$PHONE\",\"password\":\"$PASSWORD\",\"displayName\":\"$DISPLAY_NAME\",\"otpCode\":\"$OTP_CODE\"}")
 REG_BODY=$(cat /tmp/fams_reg_result.json)
 
 if [ "$REG_STATUS" -eq 201 ]; then
-    ACCESS_TOKEN=$(echo "$REG_BODY" | grep -o '"accessToken":"[^"]*"' | head -1)
-    if [ -n "$ACCESS_TOKEN" ]; then
-        pass "Phone registration succeeded with verified OTP (HTTP 201, tokens present)"
+    phone_verified=$(echo "$REG_BODY" | grep -o '"phoneVerified":true' | head -1)
+    if [ -n "$phone_verified" ]; then
+        pass "Phone registration succeeded with verified OTP (HTTP 201, phoneVerified=true)"
     else
-        fail "HTTP 201 but tokens missing"
-        echo "Body: $REG_BODY"
+        fail "HTTP 201 but phoneVerified is not true: $REG_BODY"
     fi
-elif [ "$REG_STATUS" -eq 409 ]; then
-    echo "INFO: Phone already registered from a previous run of this script (HTTP 409) — that's expected on reruns, not a failure of this feature."
 else
-    fail "Unexpected response (HTTP $REG_STATUS)"
-    echo "Body: $REG_BODY"
+    fail "Register with real OTP — expected HTTP 201, got HTTP $REG_STATUS: $REG_BODY"
+fi
+
+# ── Step 4: the account can log in immediately (no email verification needed) ─
+echo ""
+echo "--- Step 4: login with the new phone account ---"
+LOGIN_STATUS=$(curl -s -o /tmp/fams_reg_login.json -w "%{http_code}" \
+    -X POST "$BASE_URL/api/v1/auth/login" \
+    -H "Content-Type: application/json" \
+    -d "{\"identifier\":\"$PHONE\",\"password\":\"$PASSWORD\"}")
+if [ "$LOGIN_STATUS" -eq 200 ] && grep -q '"accessToken"' /tmp/fams_reg_login.json; then
+    pass "Login with newly-registered phone account succeeded"
+else
+    fail "Login after phone registration — expected HTTP 200 with accessToken, got HTTP $LOGIN_STATUS: $(cat /tmp/fams_reg_login.json)"
+fi
+
+# ── Step 5: re-registering the same (now verified) phone is rejected ─────────
+echo ""
+echo "--- Step 5: duplicate phone registration → 409 ---"
+DUP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+    -X POST "$BASE_URL/api/v1/auth/register/send-otp" \
+    -H "Content-Type: application/json" \
+    -d "{\"phone\":\"$PHONE\"}")
+if [ "$DUP_STATUS" -eq 409 ]; then
+    pass "send-otp for an already-verified phone rejected (HTTP 409)"
+else
+    fail "send-otp for verified phone — expected HTTP 409, got HTTP $DUP_STATUS"
 fi
 
 echo ""
