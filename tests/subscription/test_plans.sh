@@ -4,6 +4,9 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../lib/test_helpers.sh"
+
 BASE_URL="${BASE_URL:-http://localhost:8080}"
 PASS=0
 FAIL=0
@@ -36,14 +39,9 @@ ADMIN_TOKEN=$(echo "$login_body" | grep -o '"accessToken":"[^"]*"' | head -1 | c
 [ -z "$ADMIN_TOKEN" ] && echo "SETUP FAILED: no admin token" && exit 1
 echo "Admin token obtained."
 
-# Register a regular user (phone-only to get immediate token)
+# Register a regular user
 TS=$(date +%s)
-REGULAR_PHONE="+849$(printf '%07d' $(( (TS + $$) % 10000000 )))"
-reg_body=$(curl -s \
-    -X POST "$BASE_URL/api/v1/auth/register" \
-    -H "Content-Type: application/json" \
-    -d "{\"phone\":\"$REGULAR_PHONE\",\"password\":\"Regular@1234\",\"displayName\":\"Regular\"}")
-REGULAR_TOKEN=$(echo "$reg_body" | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4)
+REGULAR_TOKEN=$(register_verified_test_user_token "$BASE_URL" "Regular")
 echo "Regular user token obtained."
 echo ""
 

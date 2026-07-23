@@ -4,6 +4,9 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../lib/test_helpers.sh"
+
 BASE_URL="${BASE_URL:-http://localhost:8080}"
 PASS=0
 FAIL=0
@@ -51,19 +54,16 @@ fi
 echo "Admin token obtained."
 echo ""
 
-# Register a regular (non-admin) user for 403 tests using phone to avoid SMTP dependency
-echo "--- Setup: Register a regular user (phone) ---"
+# Register a regular (non-admin) user — Issue #3 (docs/issues/ISSUES.md) made tenant
+# creation self-serve for any authenticated user, so this user is no longer used for a
+# 403 test; it's used to verify the self-serve create + auto TENANT_ADMIN membership flow.
+echo "--- Setup: Register a regular user ---"
 TS=$(date +%s)
-REGULAR_PHONE="+849$(printf '%07d' $(( (TS + $$) % 10000000 )))"
-REG_BODY=$(curl -s \
-    -X POST "$BASE_URL/api/v1/auth/register" \
-    -H "Content-Type: application/json" \
-    -d "{\"phone\":\"$REGULAR_PHONE\",\"password\":\"Regular@1234\",\"displayName\":\"Regular User\"}")
-REGULAR_TOKEN=$(echo "$REG_BODY" | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4)
+REGULAR_TOKEN=$(register_verified_test_user_token "$BASE_URL" "Regular User")
 if [ -n "$REGULAR_TOKEN" ]; then
     echo "Regular user token obtained."
 else
-    echo "SETUP WARNING: Could not register regular user — skipping 403 test"
+    echo "SETUP WARNING: Could not register regular user — skipping self-serve tests"
 fi
 echo ""
 
@@ -141,17 +141,70 @@ run_test "Unauthenticated" 401 \
     -H "Content-Type: application/json" \
     -d '{"name":"Ghost Corp","slug":"ghost-corp"}'
 
-# Test 7: Regular user (non-admin) → 403
+# Test 7: Issue #3 — regular (non-admin) user can now self-serve create a tenant → 201,
+# and is auto-assigned TENANT_ADMIN for it (previously this endpoint was platform-admin-only
+# and creation never linked the creator into user_roles at all).
 echo ""
-echo "--- Test 7: Forbidden (regular user) ---"
+echo "--- Test 7: Regular user self-serve create → 201 + auto TENANT_ADMIN ---"
+SELF_SERVE_SLUG="self-serve-$(date +%s)"
 if [ -n "$REGULAR_TOKEN" ]; then
-    run_test "Regular user forbidden" 403 \
+    create_response=$(curl -s -w "\n%{http_code}" \
         -X POST "$BASE_URL/api/v1/tenants" \
         -H "Content-Type: application/json" \
         -H "Authorization: Bearer $REGULAR_TOKEN" \
-        -d '{"name":"Forbidden Corp","slug":"forbidden-corp-slug"}'
+        -d "{\"name\":\"Self Serve Corp\",\"slug\":\"$SELF_SERVE_SLUG\"}")
+    create_body=$(echo "$create_response" | head -n -1)
+    create_status=$(echo "$create_response" | tail -n 1)
+    if [ "$create_status" -eq 201 ]; then
+        self_serve_tenant_id=$(echo "$create_body" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+        role_count=$(docker exec fams-postgres psql -U fams_user -d fams_db -t -c \
+            "SELECT COUNT(*) FROM user_roles ur JOIN roles r ON r.id = ur.role_id \
+             JOIN users u ON u.id = ur.user_id \
+             WHERE ur.tenant_id = '$self_serve_tenant_id' AND r.name = 'TENANT_ADMIN' \
+               AND u.email IS NOT NULL AND ur.deleted_at IS NULL;" | tr -d ' \n')
+        if [ "$role_count" = "1" ]; then
+            echo "PASS: Regular user self-serve create (HTTP 201, auto-assigned TENANT_ADMIN)"
+            PASS=$((PASS + 1))
+        else
+            echo "FAIL: HTTP 201 but creator was not auto-assigned TENANT_ADMIN (role_count=$role_count)"
+            FAIL=$((FAIL + 1))
+        fi
+    else
+        echo "FAIL: Regular user self-serve create — expected HTTP 201, got HTTP $create_status"
+        echo "Body: $create_body"
+        FAIL=$((FAIL + 1))
+    fi
 else
-    echo "SKIP: Regular user forbidden (no regular token)"
+    echo "SKIP: Regular user self-serve create (no regular token)"
+fi
+
+# Test 8: The same user can create a SECOND tenant too — one person, multiple companies.
+echo ""
+echo "--- Test 8: Same regular user creates a second tenant (multi-tenant membership) ---"
+if [ -n "$REGULAR_TOKEN" ]; then
+    run_test "Regular user creates a second tenant" 201 \
+        -X POST "$BASE_URL/api/v1/tenants" \
+        -H "Content-Type: application/json" \
+        -H "Authorization: Bearer $REGULAR_TOKEN" \
+        -d "{\"name\":\"Second Corp\",\"slug\":\"second-corp-$(date +%s)\"}"
+else
+    echo "SKIP: Second tenant (no regular token)"
+fi
+
+# Test 9: Platform Admin still gets old behavior — no auto-membership assigned to the admin
+echo ""
+echo "--- Test 9: Platform Admin create → no auto TENANT_ADMIN membership for the admin ---"
+admin_role_count=$(docker exec fams-postgres psql -U fams_user -d fams_db -t -c \
+    "SELECT COUNT(*) FROM user_roles ur JOIN roles r ON r.id = ur.role_id \
+     JOIN users u ON u.id = ur.user_id \
+     WHERE ur.tenant_id = '$tenant_id' AND r.name = 'TENANT_ADMIN' AND u.email = 'admin@fams.com' \
+       AND ur.deleted_at IS NULL;" | tr -d ' \n')
+if [ "$admin_role_count" = "0" ]; then
+    echo "PASS: Platform Admin not auto-assigned membership in tenant it created ($tenant_id)"
+    PASS=$((PASS + 1))
+else
+    echo "FAIL: Expected no auto-membership for Platform Admin, found $admin_role_count row(s)"
+    FAIL=$((FAIL + 1))
 fi
 
 echo ""

@@ -4,6 +4,9 @@
 
 set -uo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../lib/test_helpers.sh"
+
 BASE_URL="${BASE_URL:-http://localhost:8080}"
 PASS=0
 FAIL=0
@@ -59,12 +62,7 @@ CUSTOM_ROLE_ID=$(echo "$role_resp" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"
 echo "Custom role created: id=$CUSTOM_ROLE_ID"
 
 # Register a regular user (no tenant membership)
-PHONE="+849$(printf '%07d' $(( (TS + $$) % 10000000 )))"
-reg_resp=$(curl -s \
-    -X POST "$BASE_URL/api/v1/auth/register" \
-    -H "Content-Type: application/json" \
-    -d "{\"phone\":\"$PHONE\",\"password\":\"Regular@1234\",\"displayName\":\"RegUser\"}")
-REGULAR_TOKEN=$(echo "$reg_resp" | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4)
+REGULAR_TOKEN=$(register_verified_test_user_token "$BASE_URL" "RegUser")
 [ -z "$REGULAR_TOKEN" ] && echo "FATAL: could not register regular user" && exit 1
 echo "Regular user token obtained."
 echo ""

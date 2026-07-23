@@ -1,6 +1,7 @@
 package com.fams.modules.tenant.dto.request;
 
 import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
@@ -45,4 +46,13 @@ public class CreateTenantRequest {
     @Schema(description = "ISO-4217 currency code", example = "VND")
     @Size(min = 3, max = 3, message = "Currency code must be exactly 3 characters")
     private String currencyCode;
+
+    @Schema(description = "Issue #12 (docs/issues/ISSUES.md): optional email of a different person " +
+            "to invite as this tenant's admin/owner. If omitted (or equal to the caller's own email), " +
+            "the creator becomes the tenant admin as before. If set to someone else, an invitation " +
+            "email is sent to THEM (not the creator) — the creator still keeps admin access too, so " +
+            "the tenant is never left without anyone able to manage it while the invite is pending.",
+            example = "owner@example.com")
+    @Email(message = "ownerEmail must be a valid email address")
+    private String ownerEmail;
 }

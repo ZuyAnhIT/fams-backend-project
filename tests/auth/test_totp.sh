@@ -7,6 +7,9 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../lib/test_helpers.sh"
+
 BASE_URL="${BASE_URL:-http://localhost:8080}"
 PASS=0
 FAIL=0
@@ -31,22 +34,8 @@ echo "=== TOTP 2FA Setup Tests ==="
 echo "Target: $BASE_URL"
 echo ""
 
-# Register a phone-only test user (no email verification needed)
-TEST_PHONE="+8491$(echo "$TS" | tail -c 7)"
-reg_response=$(curl -s -w "\n%{http_code}" \
-    -X POST "$BASE_URL/api/v1/auth/register" \
-    -H "Content-Type: application/json" \
-    -d "{\"phone\":\"$TEST_PHONE\",\"password\":\"TestPass1\",\"displayName\":\"TOTP Tester\"}")
-reg_body=$(echo "$reg_response" | head -n -1)
-reg_status=$(echo "$reg_response" | tail -n 1)
-
-if [ "$reg_status" -ne 201 ]; then
-    echo "SETUP FAIL: Could not register test user (HTTP $reg_status)"
-    echo "Body: $reg_body"
-    exit 1
-fi
-
-ACCESS_TOKEN=$(echo "$reg_body" | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4)
+# Register a test user
+ACCESS_TOKEN=$(register_verified_test_user_token "$BASE_URL" "TOTP Tester")
 if [ -z "$ACCESS_TOKEN" ]; then
     echo "SETUP FAIL: Could not extract access token"
     exit 1

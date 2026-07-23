@@ -6,6 +6,7 @@ import com.fams.modules.assignment.dto.response.AssignmentResponse;
 import com.fams.modules.assignment.entity.Assignment;
 import com.fams.modules.assignment.repository.AssignmentRepository;
 import com.fams.modules.assignment.specification.AssignmentSpecification;
+import com.fams.modules.assignment.util.DayOfWeekBitmask;
 import com.fams.modules.employee.repository.EmployeeRepository;
 import com.fams.modules.randomcheck.service.ScheduledCheckCancelService;
 import com.fams.modules.rbac.repository.UserRoleRepository;
@@ -95,6 +96,10 @@ public class AssignmentService {
             throw new IllegalArgumentException("endDate must be on or after startDate");
         }
 
+        if (request.getDaysOfWeek() != null && request.getDaysOfWeek().isEmpty()) {
+            throw new IllegalArgumentException("daysOfWeek must not be empty; omit it to allow every day");
+        }
+
         if (assignmentRepository.existsByEmployeeIdAndSiteIdAndStatusAndDeletedAtIsNull(
                 request.getEmployeeId(), siteId, "active")) {
             throw new DuplicateResourceException(
@@ -108,6 +113,7 @@ public class AssignmentService {
                 .shiftId(request.getShiftId())
                 .startDate(request.getStartDate())
                 .endDate(request.getEndDate())
+                .daysOfWeek(DayOfWeekBitmask.toBitmask(request.getDaysOfWeek()))
                 .role(request.getRole() != null ? request.getRole() : "worker")
                 .status("active")
                 .notes(request.getNotes())
@@ -200,6 +206,16 @@ public class AssignmentService {
             throw new IllegalArgumentException("endDate must be on or after startDate");
         }
 
+        if (request.isClearDaysOfWeek()) {
+            assignment.setDaysOfWeek(null);
+        } else if (request.getDaysOfWeek() != null) {
+            if (request.getDaysOfWeek().isEmpty()) {
+                throw new IllegalArgumentException(
+                        "daysOfWeek must not be empty; use clearDaysOfWeek to allow every day");
+            }
+            assignment.setDaysOfWeek(DayOfWeekBitmask.toBitmask(request.getDaysOfWeek()));
+        }
+
         if (StringUtils.hasText(request.getRole())) assignment.setRole(request.getRole());
         if (request.getNotes() != null) assignment.setNotes(request.getNotes().isBlank() ? null : request.getNotes());
 
@@ -261,6 +277,7 @@ public class AssignmentService {
                 .shiftId(a.getShiftId())
                 .startDate(a.getStartDate())
                 .endDate(a.getEndDate())
+                .daysOfWeek(DayOfWeekBitmask.fromBitmask(a.getDaysOfWeek()))
                 .role(a.getRole())
                 .status(a.getStatus())
                 .notes(a.getNotes())

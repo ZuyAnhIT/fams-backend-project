@@ -2,6 +2,7 @@ package com.fams.modules.dashboard.service;
 
 import com.fams.modules.assignment.entity.Assignment;
 import com.fams.modules.assignment.repository.AssignmentRepository;
+import com.fams.modules.assignment.util.DayOfWeekBitmask;
 import com.fams.modules.attendance.entity.AttendanceSummary;
 import com.fams.modules.attendance.repository.AttendanceSummaryRepository;
 import com.fams.modules.checkin.entity.CheckinRecord;
@@ -76,7 +77,8 @@ public class EmployeeDashboardService {
     private List<EmployeeDashboardResponse.TodayShiftInfo> buildTodayShifts(UUID tenantId, UUID employeeId,
                                                                                LocalDate today) {
         List<Assignment> assignments = assignmentRepository
-                .findActiveAssignmentsForEmployeeOnDate(tenantId, employeeId, today);
+                .findActiveAssignmentsForEmployeeOnDate(tenantId, employeeId, today,
+                        DayOfWeekBitmask.bitForDate(today));
 
         return assignments.stream().map(a -> {
             Site site = siteRepository.findByIdAndTenantIdAndDeletedAtIsNull(a.getSiteId(), tenantId)

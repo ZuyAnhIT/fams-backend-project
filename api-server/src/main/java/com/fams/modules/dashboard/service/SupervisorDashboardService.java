@@ -2,6 +2,7 @@ package com.fams.modules.dashboard.service;
 
 import com.fams.modules.assignment.entity.Assignment;
 import com.fams.modules.assignment.repository.AssignmentRepository;
+import com.fams.modules.assignment.util.DayOfWeekBitmask;
 import com.fams.modules.checkin.entity.CheckinRecord;
 import com.fams.modules.checkin.repository.CheckinRepository;
 import com.fams.modules.dashboard.dto.response.SupervisorDashboardResponse;
@@ -50,7 +51,8 @@ public class SupervisorDashboardService {
         LocalDate today = LocalDate.now(ZoneOffset.UTC);
 
         List<Assignment> supervisorAssignments = assignmentRepository
-                .findActiveSupervisorAssignmentsForEmployee(tenantId, supervisor.getId(), today);
+                .findActiveSupervisorAssignmentsForEmployee(tenantId, supervisor.getId(), today,
+                        DayOfWeekBitmask.bitForDate(today));
 
         List<SupervisorDashboardResponse.SiteStatus> siteStatuses = supervisorAssignments.stream()
                 .map(a -> buildSiteStatus(tenantId, a.getSiteId(), today))
@@ -71,7 +73,8 @@ public class SupervisorDashboardService {
         String siteName = site != null ? site.getName() : null;
 
         int expected = assignmentRepository
-                .findActiveAssignmentsForSiteOnDate(tenantId, siteId, today).size();
+                .findActiveAssignmentsForSiteOnDate(tenantId, siteId, today,
+                        DayOfWeekBitmask.bitForDate(today)).size();
 
         List<CheckinRecord> openSessions = checkinRepository.findOpenSessionsBySite(tenantId, siteId);
 

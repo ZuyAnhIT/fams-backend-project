@@ -75,35 +75,67 @@ run_test "Register - existing admin email" 409 \
     -H "Content-Type: application/json" \
     -d '{"email":"admin@fams.com","password":"TestPass1","displayName":"Admin Copy"}'
 
-# Test 4: Happy path — register with phone only → 201 with tokens (no email verification needed)
+# Test 4: Phone registration WITHOUT a Firebase ID token → 400 PHONE_NOT_VERIFIED
+# (Issue #1, docs/issues/ISSUES.md: phone registration used to activate the account
+# immediately with no proof the phone number was real. See tests/auth/test_register_phone_otp.sh
+# for the full happy-path test that actually goes through Firebase OTP.)
 echo ""
-echo "--- Test 4: Register with phone only ---"
+echo "--- Test 4: Register with phone only, no firebaseIdToken → 400 PHONE_NOT_VERIFIED ---"
 response=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/auth/register" \
     -H "Content-Type: application/json" \
     -d "{\"phone\":\"$TEST_PHONE\",\"password\":\"$TEST_PASS\",\"displayName\":\"$TEST_NAME Phone\"}")
 body=$(echo "$response" | head -n -1)
 status=$(echo "$response" | tail -n 1)
-if [ "$status" -eq 201 ]; then
-    access_token=$(echo "$body" | grep -o '"accessToken":"[^"]*"' | head -1)
-    email_not_required=$(echo "$body" | grep -o '"emailVerificationRequired":false' | head -1)
-    if [ -n "$access_token" ] && [ -n "$email_not_required" ]; then
-        echo "PASS: Register with phone (HTTP 201, token present, no email verification required)"
+if [ "$status" -eq 400 ]; then
+    error_code=$(echo "$body" | grep -o '"errorCode":"PHONE_NOT_VERIFIED"' | head -1)
+    if [ -n "$error_code" ]; then
+        echo "PASS: Phone registration without OTP rejected (HTTP 400, PHONE_NOT_VERIFIED)"
         PASS=$((PASS + 1))
     else
-        echo "FAIL: Register with phone — HTTP 201 but token missing or emailVerificationRequired not false"
+        echo "FAIL: HTTP 400 but errorCode is not PHONE_NOT_VERIFIED"
         echo "Body: $body"
         FAIL=$((FAIL + 1))
     fi
 else
-    echo "FAIL: Register with phone — expected HTTP 201, got HTTP $status"
+    echo "FAIL: Register with phone (no token) — expected HTTP 400, got HTTP $status"
     echo "Body: $body"
     FAIL=$((FAIL + 1))
 fi
 
+# Test 4b: Phone registration with an obviously-invalid firebaseIdToken.
+# Expected 401 INVALID_OTP when Firebase is configured on the server (real
+# FCM_SERVICE_ACCOUNT_JSON); this dev environment has no real Firebase project
+# wired up, so the server correctly reports 503 (Firebase not configured)
+# before it ever gets to validate the token — same environmental gap as
+# tests/auth/test_otp_login.sh, not a regression from this fix.
+echo ""
+echo "--- Test 4b: Register with phone + garbage firebaseIdToken ---"
+status4b=$(curl -s -o /dev/null -w "%{http_code}" \
+    -X POST "$BASE_URL/api/v1/auth/register" \
+    -H "Content-Type: application/json" \
+    -d "{\"phone\":\"$TEST_PHONE\",\"password\":\"$TEST_PASS\",\"displayName\":\"$TEST_NAME Phone\",\"firebaseIdToken\":\"not-a-real-token\"}")
+if [ "$status4b" -eq 401 ]; then
+    echo "PASS: Invalid firebaseIdToken rejected (HTTP 401 INVALID_OTP)"
+    PASS=$((PASS + 1))
+elif [ "$status4b" -eq 503 ]; then
+    echo "INFO: Firebase not configured in this environment (HTTP 503) — cannot validate token rejection here, skipping"
+else
+    echo "FAIL: Register - invalid firebaseIdToken — expected HTTP 401 (or 503 if Firebase unconfigured), got HTTP $status4b"
+    FAIL=$((FAIL + 1))
+fi
+
 # Test 5: Duplicate phone → 409
+# The duplicate-phone check runs before the OTP-verification check in RegisterService,
+# so it fires regardless of firebaseIdToken. Pre-seed a phone-verified account directly
+# via SQL (bypassing the real OTP flow, which needs a configured Firebase project) so
+# this test doesn't depend on Test 4/4b having actually created an account.
 echo ""
 echo "--- Test 5: Duplicate phone ---"
+docker exec fams-postgres psql -U fams_user -d fams_db -q -c \
+    "INSERT INTO users (phone, password_hash, display_name, is_active, email_verified, phone_verified) \
+     VALUES ('$TEST_PHONE', '\$2b\$10\$fIjK7mXIYZH8RTqSyqI2pO2rV9y45S7JS9S5530ZtMBuuCHz3Hdv6', '$TEST_NAME Seed', true, true, true) \
+     ON CONFLICT (phone) DO NOTHING;" > /dev/null
 run_test "Register - duplicate phone" 409 \
     -X POST "$BASE_URL/api/v1/auth/register" \
     -H "Content-Type: application/json" \

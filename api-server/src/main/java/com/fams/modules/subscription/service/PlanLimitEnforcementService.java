@@ -13,6 +13,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -96,6 +99,37 @@ public class PlanLimitEnforcementService {
             throw new PlanLimitExceededException(
                     "Random check monthly limit reached: plan allows " + cap + " per month");
         }
+    }
+
+    /**
+     * Issue #8 (docs/issues/ISSUES.md): checks whether tenants' CURRENT usage (not "would one
+     * more exceed" like the assert* methods above) already exceeds a candidate target plan's
+     * limits — used before migrating tenants off a plan being deactivated. Returns one
+     * human-readable reason per violation found; empty list means every tenant fits.
+     */
+    @Transactional(readOnly = true)
+    public List<String> findLimitViolationsForPlan(Map<UUID, String> tenantLabelsById, UUID targetPlanId) {
+        PlanLimits limits = planLimitsRepository.findByPlanId(targetPlanId).orElse(null);
+        if (limits == null) return List.of();
+
+        List<String> violations = new ArrayList<>();
+        for (Map.Entry<UUID, String> entry : tenantLabelsById.entrySet()) {
+            UUID tenantId = entry.getKey();
+            String label = entry.getValue();
+            if (limits.getMaxEmployees() != null) {
+                long employees = employeeRepository.countByTenantIdAndDeletedAtIsNull(tenantId);
+                if (employees > limits.getMaxEmployees()) {
+                    violations.add(label + ": " + employees + " nhân viên (vượt giới hạn " + limits.getMaxEmployees() + " của gói mới)");
+                }
+            }
+            if (limits.getMaxSites() != null) {
+                long sites = siteRepository.countByTenantIdAndDeletedAtIsNull(tenantId);
+                if (sites > limits.getMaxSites()) {
+                    violations.add(label + ": " + sites + " công trình (vượt giới hạn " + limits.getMaxSites() + " của gói mới)");
+                }
+            }
+        }
+        return violations;
     }
 
     private Optional<PlanLimits> resolveLimits(UUID tenantId) {

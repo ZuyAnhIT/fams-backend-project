@@ -4,6 +4,9 @@
 
 set -uo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../lib/test_helpers.sh"
+
 BASE_URL="${BASE_URL:-http://localhost:8080}"
 PASS=0
 FAIL=0
@@ -54,25 +57,18 @@ echo "Using EMPLOYEE roleId: $EMPLOYEE_ROLE_ID"
 UNIQUE_SUFFIX="$$"
 TS_REG=$(date +%s)
 
-# Helper: register a test user (phone-only) and return their UUID (decoded from JWT)
-# Pass a numeric index (1, 2, 3...) to generate unique phone numbers per run
+# Helper: register a test user and return their UUID (via GET /auth/me)
+# Pass a numeric index (1, 2, 3...) to generate a unique email per call — the helper's
+# own default email (derived from date +%s + $$) can collide when called several times
+# in quick succession within this same process, so an explicit unique email is used here.
 register_user() {
     local idx="$1"
-    local phone="+849$(printf '%07d' $(( (TS_REG * 10 + idx) % 10000000 )))"
-    local resp
-    resp=$(curl -s \
-        -X POST "$BASE_URL/api/v1/auth/register" \
-        -H "Content-Type: application/json" \
-        -d "{\"phone\":\"$phone\",\"password\":\"Test@1234\",\"displayName\":\"Revoke Test $idx\"}")
+    local email="revoke_test_${TS_REG}_${UNIQUE_SUFFIX}_${idx}@fams.com"
     local token
-    token=$(echo "$resp" | grep -o '"accessToken":"[^"]*"' | sed 's/"accessToken":"//;s/"//')
-    local payload
-    payload=$(echo "$token" | cut -d'.' -f2 | tr '_-' '/+')
-    case $((${#payload} % 4)) in
-        2) payload="${payload}==" ;;
-        3) payload="${payload}=" ;;
-    esac
-    echo "$payload" | base64 -d 2>/dev/null | grep -o '"sub":"[^"]*"' | sed 's/"sub":"//;s/"//'
+    token=$(register_verified_test_user_token "$BASE_URL" "Revoke Test $idx" "$email" "Test@1234")
+    [ -z "$token" ] && return
+    curl -s -X GET "$BASE_URL/api/v1/auth/me" -H "Authorization: Bearer $token" \
+        | grep -o '"id":"[^"]*"' | head -1 | sed 's/"id":"//;s/"//'
 }
 
 # Helper: assign a role and return the assignment ID

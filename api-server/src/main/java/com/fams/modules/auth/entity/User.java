@@ -34,17 +34,35 @@ public class User {
     @Column(name = "avatar_url")
     private String avatarUrl;
 
+    @Column(name = "date_of_birth")
+    private java.time.LocalDate dateOfBirth;
+
+    @Column(name = "hometown")
+    private String hometown;
+
+    @Column(name = "gender")
+    private String gender;
+
+    @Column(name = "address")
+    private String address;
+
     @Column(name = "failed_login_attempts", nullable = false)
     private int failedLoginAttempts;
 
     @Column(name = "locked_until")
     private OffsetDateTime lockedUntil;
 
+    @Column(name = "last_login_at")
+    private OffsetDateTime lastLoginAt;
+
     @Column(name = "is_active", nullable = false)
     private boolean isActive;
 
     @Column(name = "email_verified", nullable = false)
     private boolean emailVerified;
+
+    @Column(name = "phone_verified", nullable = false)
+    private boolean phoneVerified;
 
     @Column(name = "totp_secret")
     private String totpSecret;

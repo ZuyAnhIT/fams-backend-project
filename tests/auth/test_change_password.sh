@@ -4,6 +4,9 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../lib/test_helpers.sh"
+
 BASE_URL="${BASE_URL:-http://localhost:8080}"
 PASS=0
 FAIL=0
@@ -28,29 +31,15 @@ echo "=== Auth Change Password Tests ==="
 echo "Target: $BASE_URL"
 echo ""
 
-# ── Setup: register a test user (phone-only) and obtain a token ──────────────
+# ── Setup: register a test user (email) and obtain a token ───────────────────
 TS=$(date +%s)
-TEST_PHONE="+849$(printf '%07d' $(( (TS + $$) % 10000000 )))"
+TEST_EMAIL="changepass_${TS}_$$@fams.com"
 ORIGINAL_PASSWORD="Original@123"
 NEW_PASSWORD="NewPass@456"
 SECOND_NEW_PASSWORD="SecondNew@789"
 
-echo "--- Setup: registering test user (phone=$TEST_PHONE) ---"
-register_response=$(curl -s -w "\n%{http_code}" \
-    -X POST "$BASE_URL/api/v1/auth/register" \
-    -H "Content-Type: application/json" \
-    -d "{\"phone\":\"$TEST_PHONE\",\"password\":\"$ORIGINAL_PASSWORD\",\"displayName\":\"Test User\"}")
-
-register_body=$(echo "$register_response" | head -n -1)
-register_status=$(echo "$register_response" | tail -n 1)
-
-if [ "$register_status" -ne 201 ]; then
-    echo "FAIL: Setup — could not register test user (HTTP $register_status)"
-    echo "Body: $register_body"
-    exit 1
-fi
-
-ACCESS_TOKEN=$(echo "$register_body" | grep -o '"accessToken":"[^"]*"' | sed 's/"accessToken":"//;s/"//')
+echo "--- Setup: registering test user (email=$TEST_EMAIL) ---"
+ACCESS_TOKEN=$(register_verified_test_user_token "$BASE_URL" "Test User" "$TEST_EMAIL" "$ORIGINAL_PASSWORD")
 if [ -z "$ACCESS_TOKEN" ]; then
     echo "FAIL: Setup — could not extract access token"
     exit 1

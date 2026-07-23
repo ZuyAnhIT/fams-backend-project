@@ -1,21 +1,25 @@
 package com.fams.modules.auth.controller;
 
 import com.fams.modules.auth.dto.request.ChangePasswordRequest;
+import com.fams.modules.auth.dto.request.DisableTotpRequest;
 import com.fams.modules.auth.dto.request.FirebasePhoneLoginRequest;
 import com.fams.modules.auth.dto.request.ForgotPasswordRequest;
 import com.fams.modules.auth.dto.request.GoogleLoginRequest;
 import com.fams.modules.auth.dto.request.LoginRequest;
 import com.fams.modules.auth.dto.request.LoginTotpRequest;
 import com.fams.modules.auth.dto.request.RefreshTokenRequest;
+import com.fams.modules.auth.dto.request.ResendVerificationRequest;
 import com.fams.modules.auth.dto.request.ResetPasswordRequest;
 import com.fams.modules.auth.dto.request.TotpVerifyRequest;
 import com.fams.modules.auth.dto.request.UpdateProfileRequest;
+import com.fams.modules.auth.dto.response.TotpEnableResponse;
 import com.fams.modules.auth.dto.response.TotpSetupResponse;
 import com.fams.modules.auth.dto.response.UserProfileResponse;
 import com.fams.modules.auth.dto.request.LogoutRequest;
 import com.fams.modules.auth.dto.request.RegisterRequest;
 import com.fams.modules.auth.dto.response.LoginResponse;
 import com.fams.modules.auth.dto.response.RegisterResponse;
+import com.fams.modules.auth.dto.response.SessionResponse;
 import com.fams.modules.auth.service.EmailVerificationService;
 import com.fams.modules.auth.repository.HealthCheckRepository;
 import com.fams.modules.auth.service.AuthService;
@@ -32,6 +36,7 @@ import com.fams.modules.auth.service.UserProfileService;
 import com.fams.shared.response.ApiResponse;
 import com.fams.shared.security.FamsUserDetails;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
@@ -45,6 +50,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
+import java.util.UUID;
 
 @Slf4j
 @Tag(name = "Auth", description = "Authentication, registration, profile and 2FA endpoints")
@@ -116,12 +122,17 @@ public class AuthController {
     }
 
     @Operation(summary = "Register a new account",
-        description = "Creates a user account with email+password or phone. Sends a verification email when an email is provided.")
+        description = "Creates a user account with email+password or phone. Sends a verification email when an "
+            + "email is provided. Phone-only registration requires `firebaseIdToken`: the client must complete "
+            + "Firebase's phone OTP flow first and pass the resulting ID token to prove the phone number is real.")
     @ApiResponses({
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "201", description = "Account created",
             content = @Content(schema = @Schema(implementation = RegisterResponse.class))),
-        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Validation error"),
-        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "409", description = "Email or phone already registered")
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Validation error, " +
+            "or (PHONE_NOT_VERIFIED) phone registration missing/mismatched firebaseIdToken"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Firebase ID token invalid or expired (INVALID_OTP)"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "409", description = "Email or phone already registered"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "503", description = "Firebase not configured on the server")
     })
     @SecurityRequirements({})
     @PostMapping("/register")
@@ -143,6 +154,24 @@ public class AuthController {
         log.info("Email verification attempt");
         emailVerificationService.verifyToken(token);
         return ResponseEntity.ok(new ApiResponse<>(true, "Email verified successfully. You can now log in.", null));
+    }
+
+    @Operation(summary = "Resend the email verification link",
+        description = "Issue #2 (docs/issues/ISSUES.md): re-sends the verification email if the original was "
+            + "missed or expired. Always responds 200 regardless of whether the email exists, is already "
+            + "verified, or is rate-limited — this endpoint must not be usable to enumerate registered emails. "
+            + "No auth required.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Request accepted (email sent if applicable — response does not reveal which)"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Validation error")
+    })
+    @SecurityRequirements({})
+    @PostMapping("/resend-verification")
+    public ResponseEntity<ApiResponse<Void>> resendVerification(@Valid @RequestBody ResendVerificationRequest request) {
+        log.info("Resend verification requested for email={}", request.getEmail());
+        emailVerificationService.resendVerification(request.getEmail());
+        return ResponseEntity.ok(new ApiResponse<>(true,
+                "If an account with that email exists and is not yet verified, a new verification email has been sent.", null));
     }
 
     @Operation(summary = "Request password reset",
@@ -189,6 +218,29 @@ public class AuthController {
     public ResponseEntity<ApiResponse<LoginResponse>> login(@Valid @RequestBody LoginRequest request) {
         log.info("Login attempt for email: {}", request.getEmail());
         LoginResponse response = authService.login(request);
+        return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    @Operation(
+        summary = "Switch active company (multi-tenant users)",
+        description = "Issue #3 (docs/issues/ISSUES.md): a user belonging to several companies can switch which " +
+            "one their session currently operates as. Previously there was no way to do this — login and every " +
+            "token refresh always defaulted to the oldest role assignment. Requires an active role in the " +
+            "target tenant; persists the switch so it survives subsequent token refreshes.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Switched — new tokens returned",
+            content = @Content(schema = @Schema(implementation = LoginResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Invalid/expired refresh token"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "No active role in the target company"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "Tenant not found")
+    })
+    @PostMapping("/switch-tenant")
+    public ResponseEntity<ApiResponse<LoginResponse>> switchTenant(
+            @Valid @RequestBody com.fams.modules.auth.dto.request.SwitchTenantRequest request,
+            @AuthenticationPrincipal FamsUserDetails userDetails) {
+        log.info("Switch-tenant requested by user {} -> tenant {}", userDetails.getUserId(), request.getTenantId());
+        LoginResponse response = authService.switchTenant(
+                userDetails.getUserId(), request.getTenantId(), request.getRefreshToken());
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 
@@ -246,7 +298,9 @@ public class AuthController {
     }
 
     @Operation(summary = "Update current user profile",
-        description = "Updates display name, phone, and/or avatar URL for the authenticated user.")
+        description = "Updates display name, phone, avatar URL, date of birth, hometown, gender, and/or address "
+            + "for the authenticated user (Issue #4, docs/issues/ISSUES.md). To upload an actual image file "
+            + "instead of linking an existing URL, use POST /auth/profile/avatar.")
     @ApiResponses({
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Profile updated",
             content = @Content(schema = @Schema(implementation = UserProfileResponse.class))),
@@ -259,6 +313,25 @@ public class AuthController {
             @AuthenticationPrincipal FamsUserDetails userDetails) {
         log.info("Profile update for user {}", userDetails.getUserId());
         UserProfileResponse profile = userProfileService.updateProfile(userDetails.getUserId(), request);
+        return ResponseEntity.ok(ApiResponse.success(profile));
+    }
+
+    @Operation(summary = "Upload avatar image",
+        description = "Issue #4 (docs/issues/ISSUES.md): uploads an image file (JPEG/PNG/WEBP, max 5MB) from the "
+            + "user's device as their avatar, replacing any previous uploaded avatar. Stored in S3-compatible "
+            + "object storage (MinIO in dev, real AWS S3 in production).")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Avatar uploaded",
+            content = @Content(schema = @Schema(implementation = UserProfileResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Missing file, wrong type, or too large"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Unauthorized")
+    })
+    @PostMapping(value = "/profile/avatar", consumes = org.springframework.http.MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<ApiResponse<UserProfileResponse>> uploadAvatar(
+            @RequestParam("file") org.springframework.web.multipart.MultipartFile file,
+            @AuthenticationPrincipal FamsUserDetails userDetails) {
+        log.info("Avatar upload for user {}", userDetails.getUserId());
+        UserProfileResponse profile = userProfileService.updateAvatarFile(userDetails.getUserId(), file);
         return ResponseEntity.ok(ApiResponse.success(profile));
     }
 
@@ -295,6 +368,58 @@ public class AuthController {
         return ResponseEntity.ok(ApiResponse.success(null));
     }
 
+    @Operation(summary = "List active sessions/devices",
+        description = "Issue #6 (docs/issues/ISSUES.md): lists every active login session for the authenticated "
+            + "user — device, IP/user-agent captured at login, and when it was last active. The entry matching "
+            + "the request's own session is flagged `current`. This endpoint did not exist before.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Sessions listed",
+            content = @Content(schema = @Schema(implementation = SessionResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Unauthorized")
+    })
+    @GetMapping("/sessions")
+    public ResponseEntity<ApiResponse<java.util.List<SessionResponse>>> listSessions(
+            @AuthenticationPrincipal FamsUserDetails userDetails) {
+        log.info("List sessions requested by user {}", userDetails.getUserId());
+        var sessions = logoutService.listSessions(userDetails.getUserId(), userDetails.getDeviceId());
+        return ResponseEntity.ok(ApiResponse.success(sessions));
+    }
+
+    @Operation(summary = "Log out a specific session/device",
+        description = "Issue #6 (docs/issues/ISSUES.md): revokes exactly one session by its ID (from "
+            + "GET /auth/sessions) — e.g. \"log out my old phone\" while sitting at a different device. "
+            + "Previously impossible: the only logout endpoint required already holding that device's raw "
+            + "refresh token, which a different device never has.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Session revoked"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Unauthorized"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "Session not found, already revoked, or belongs to a different user")
+    })
+    @DeleteMapping("/sessions/{sessionId}")
+    public ResponseEntity<ApiResponse<Void>> logoutSession(
+            @Parameter(description = "Session (refresh token) UUID") @PathVariable UUID sessionId,
+            @AuthenticationPrincipal FamsUserDetails userDetails) {
+        log.info("Logout session {} requested by user {}", sessionId, userDetails.getUserId());
+        logoutService.logoutSession(userDetails.getUserId(), sessionId);
+        return ResponseEntity.ok(ApiResponse.success(null));
+    }
+
+    @Operation(summary = "Log out all OTHER devices",
+        description = "Issue #6 (docs/issues/ISSUES.md): revokes every active session EXCEPT the one making this "
+            + "request — the classic \"sign out everywhere else\" option. POST /auth/logout/all revokes the "
+            + "caller's own session too with no way to opt out; this is the alternative that keeps the current "
+            + "device logged in.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Other sessions terminated"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Unauthorized")
+    })
+    @PostMapping("/logout/others")
+    public ResponseEntity<ApiResponse<Void>> logoutOthers(@AuthenticationPrincipal FamsUserDetails userDetails) {
+        log.info("Logout-others requested by user {}", userDetails.getUserId());
+        logoutService.logoutAllExceptCurrent(userDetails.getUserId(), userDetails.getDeviceId());
+        return ResponseEntity.ok(ApiResponse.success(null));
+    }
+
     @Operation(summary = "Login with Google",
         description = "Exchanges a Google ID token for FAMS JWT tokens. Creates an account on first use. No auth required.")
     @ApiResponses({
@@ -311,13 +436,49 @@ public class AuthController {
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 
+    @Operation(summary = "Link a Google account",
+        description = "Issue #7 (docs/issues/ISSUES.md): while already logged in (e.g. via email+password), "
+            + "explicitly connects a Google account for one-click login next time — rather than waiting for "
+            + "the implicit auto-link that already happens the next time POST /auth/login/google is called "
+            + "with a matching email. Requires Bearer token.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Google account linked"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Unauthorized, or invalid Google ID token"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "409", description = "This Google account is already linked to a different user")
+    })
+    @PostMapping("/link-google")
+    public ResponseEntity<ApiResponse<Void>> linkGoogle(@Valid @RequestBody GoogleLoginRequest request,
+                                                        @AuthenticationPrincipal FamsUserDetails userDetails) {
+        log.info("Link Google account requested by user {}", userDetails.getUserId());
+        googleLoginService.linkGoogleAccount(userDetails.getUserId(), request.getIdToken());
+        return ResponseEntity.ok(ApiResponse.success(null));
+    }
+
+    @Operation(summary = "Unlink Google account",
+        description = "Issue #7 (docs/issues/ISSUES.md): disconnects Google sign-in from the account. Requires "
+            + "a password to already be set (via Change Password or Forgot Password) — otherwise the account "
+            + "would have no way to log in on demand. Requires Bearer token.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Google account unlinked"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "No password set on this account yet"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Unauthorized")
+    })
+    @PostMapping("/unlink-google")
+    public ResponseEntity<ApiResponse<Void>> unlinkGoogle(@AuthenticationPrincipal FamsUserDetails userDetails) {
+        log.info("Unlink Google account requested by user {}", userDetails.getUserId());
+        googleLoginService.unlinkGoogleAccount(userDetails.getUserId());
+        return ResponseEntity.ok(ApiResponse.success(null));
+    }
+
     @Operation(summary = "Complete login with TOTP code",
-        description = "Exchanges the pendingToken (from the initial login response) and a 6-digit TOTP code for real JWT tokens. No auth required.")
+        description = "Exchanges the pendingToken (from the initial login response) and either a 6-digit TOTP "
+            + "code or a one-time backupCode (Issue #5, docs/issues/ISSUES.md — for when the authenticator "
+            + "device is lost) for real JWT tokens. No auth required.")
     @ApiResponses({
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "TOTP verified — JWT tokens returned",
             content = @Content(schema = @Schema(implementation = LoginResponse.class))),
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Validation error"),
-        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Invalid or expired pending token / wrong TOTP code")
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Invalid or expired pending token / wrong TOTP or backup code")
     })
     @SecurityRequirements({})
     @PostMapping("/login/totp")
@@ -360,33 +521,41 @@ public class AuthController {
     }
 
     @Operation(summary = "Confirm and enable TOTP",
-        description = "Verifies the first TOTP code from the Authenticator app and activates 2FA on the account. Requires Bearer token.")
+        description = "Verifies the first TOTP code from the Authenticator app and activates 2FA on the account. "
+            + "Returns one-time backup codes (Issue #5, docs/issues/ISSUES.md) — shown only this once, save them "
+            + "somewhere safe. Requires Bearer token.")
     @ApiResponses({
-        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "TOTP enabled successfully"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "TOTP enabled successfully — backup codes returned",
+            content = @Content(schema = @Schema(implementation = TotpEnableResponse.class))),
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Invalid setup token or wrong TOTP code"),
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Unauthorized")
     })
     @PostMapping("/totp/verify")
-    public ResponseEntity<ApiResponse<Void>> totpVerify(
+    public ResponseEntity<ApiResponse<TotpEnableResponse>> totpVerify(
             @Valid @RequestBody TotpVerifyRequest request,
             @AuthenticationPrincipal FamsUserDetails userDetails) {
         log.info("TOTP verify attempt by user {}", userDetails.getUserId());
-        totpService.enableTotp(userDetails.getUserId(), request);
-        return ResponseEntity.ok(new ApiResponse<>(true, "TOTP two-factor authentication has been enabled.", null));
+        TotpEnableResponse response = totpService.enableTotp(userDetails.getUserId(), request);
+        return ResponseEntity.ok(ApiResponse.success(response));
     }
 
     @Operation(summary = "Disable TOTP 2FA",
-        description = "Removes TOTP two-factor authentication from the authenticated user's account. Requires Bearer token.")
+        description = "Issue #5 (docs/issues/ISSUES.md): removes TOTP two-factor authentication from the "
+            + "authenticated user's account. Requires proving continued control of the account — provide "
+            + "exactly one of `password`, `code`, or `backupCode` in the request body. A valid Bearer token "
+            + "alone is no longer sufficient (previously it was, meaning a stolen session token could disable "
+            + "2FA with no further proof).")
     @ApiResponses({
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "TOTP disabled successfully"),
-        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Unauthorized"),
-        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "409", description = "TOTP is not enabled on this account")
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "TOTP is not enabled on this account"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Unauthorized, or re-authentication (password/code/backupCode) failed")
     })
     @PostMapping("/totp/disable")
     public ResponseEntity<ApiResponse<Void>> totpDisable(
+            @RequestBody DisableTotpRequest request,
             @AuthenticationPrincipal FamsUserDetails userDetails) {
         log.info("TOTP disable requested by user {}", userDetails.getUserId());
-        totpService.disableTotp(userDetails.getUserId());
+        totpService.disableTotp(userDetails.getUserId(), request);
         return ResponseEntity.ok(new ApiResponse<>(true, "TOTP two-factor authentication has been disabled.", null));
     }
 

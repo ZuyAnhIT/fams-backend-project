@@ -4,7 +4,9 @@ import com.fasterxml.jackson.annotation.JsonFormat;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.Pattern;
 
+import java.time.DayOfWeek;
 import java.time.LocalDate;
+import java.util.Set;
 import java.util.UUID;
 
 @Schema(description = "Request body for updating an assignment. All fields optional — only provided fields are changed.")
@@ -24,6 +26,13 @@ public class UpdateAssignmentRequest {
     private LocalDate endDate;
 
     private boolean clearEndDate = false;
+
+    @Schema(description = "Issue #14: restrict the assignment to specific weekdays only. " +
+            "Pass null/omit to leave unchanged; use clearDaysOfWeek to revert to every day.",
+            example = "[\"MONDAY\",\"WEDNESDAY\",\"FRIDAY\"]")
+    private Set<DayOfWeek> daysOfWeek;
+
+    private boolean clearDaysOfWeek = false;
 
     @Schema(description = "Employee's role: worker or supervisor", example = "worker",
             allowableValues = {"worker", "supervisor"})
@@ -47,6 +56,12 @@ public class UpdateAssignmentRequest {
 
     public boolean isClearEndDate() { return clearEndDate; }
     public void setClearEndDate(boolean clearEndDate) { this.clearEndDate = clearEndDate; }
+
+    public Set<DayOfWeek> getDaysOfWeek() { return daysOfWeek; }
+    public void setDaysOfWeek(Set<DayOfWeek> daysOfWeek) { this.daysOfWeek = daysOfWeek; }
+
+    public boolean isClearDaysOfWeek() { return clearDaysOfWeek; }
+    public void setClearDaysOfWeek(boolean clearDaysOfWeek) { this.clearDaysOfWeek = clearDaysOfWeek; }
 
     public String getRole() { return role; }
     public void setRole(String role) { this.role = role; }

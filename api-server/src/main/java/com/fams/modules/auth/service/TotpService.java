@@ -1,19 +1,29 @@
 package com.fams.modules.auth.service;
 
+import com.fams.modules.auth.dto.request.DisableTotpRequest;
 import com.fams.modules.auth.dto.request.TotpVerifyRequest;
+import com.fams.modules.auth.dto.response.TotpEnableResponse;
 import com.fams.modules.auth.dto.response.TotpSetupResponse;
+import com.fams.modules.auth.entity.TotpBackupCode;
 import com.fams.modules.auth.entity.User;
+import com.fams.modules.auth.repository.TotpBackupCodeRepository;
 import com.fams.modules.auth.repository.UserRepository;
+import com.fams.shared.exception.InvalidCredentialsException;
 import com.fams.shared.exception.ResourceNotFoundException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import java.security.SecureRandom;
+import java.time.OffsetDateTime;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
@@ -25,16 +35,28 @@ public class TotpService {
     private static final int    SETUP_TTL_MIN = 10;
     private static final String BASE32_ALPHA  = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
     private static final String ISSUER        = "FAMS";
+    private static final String BACKUP_CODE_ALPHA = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no 0/O/1/I ambiguity
+    private static final int    BACKUP_CODE_COUNT  = 8;
+    private static final int    BACKUP_CODE_LENGTH = 8;
 
     private final StringRedisTemplate redis;
     private final UserRepository userRepository;
+    private final TotpBackupCodeRepository backupCodeRepository;
+    private final TotpSecretCipher secretCipher;
+    private final BCryptPasswordEncoder passwordEncoder;
     private final String baseUrl;
 
     public TotpService(StringRedisTemplate redis,
                        UserRepository userRepository,
+                       TotpBackupCodeRepository backupCodeRepository,
+                       TotpSecretCipher secretCipher,
+                       BCryptPasswordEncoder passwordEncoder,
                        @Value("${app.base-url}") String baseUrl) {
         this.redis = redis;
         this.userRepository = userRepository;
+        this.backupCodeRepository = backupCodeRepository;
+        this.secretCipher = secretCipher;
+        this.passwordEncoder = passwordEncoder;
         this.baseUrl = baseUrl;
     }
 
@@ -121,7 +143,7 @@ public class TotpService {
     }
 
     @Transactional
-    public void enableTotp(UUID userId, TotpVerifyRequest request) {
+    public TotpEnableResponse enableTotp(UUID userId, TotpVerifyRequest request) {
         String key = SETUP_PREFIX + request.getSetupToken();
         String value = redis.opsForValue().get(key);
         if (value == null) {
@@ -143,23 +165,92 @@ public class TotpService {
         User user = userRepository.findByIdAndDeletedAtIsNull(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found"));
 
-        user.setTotpSecret(secret);
+        // Issue #5 (docs/issues/ISSUES.md): encrypt at rest — previously stored plaintext.
+        user.setTotpSecret(secretCipher.encrypt(secret));
         user.setTotpEnabled(true);
         userRepository.save(user);
-
         redis.delete(key);
+
+        List<String> backupCodes = regenerateBackupCodes(userId);
+
         log.info("TOTP enabled for user id={}", userId);
+        return TotpEnableResponse.builder().backupCodes(backupCodes).build();
     }
 
+    /**
+     * Issue #5 (docs/issues/ISSUES.md): disabling 2FA previously required only a valid
+     * JWT — no password, no TOTP code, nothing proving the caller actually still controls
+     * the second factor (or the account at all beyond having a live session token). Now
+     * requires proof via password, a live TOTP code, or an unused backup code.
+     */
     @Transactional
-    public void disableTotp(UUID userId) {
+    public void disableTotp(UUID userId, DisableTotpRequest request) {
         User user = userRepository.findByIdAndDeletedAtIsNull(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+
+        if (!user.isTotpEnabled()) {
+            throw new IllegalStateException("TOTP is not enabled on this account");
+        }
+
+        if (!reauthenticate(user, request)) {
+            throw new InvalidCredentialsException(
+                    "Could not verify your identity — provide the correct password, a valid TOTP code, or an unused backup code");
+        }
 
         user.setTotpEnabled(false);
         user.setTotpSecret(null);
         userRepository.save(user);
+        backupCodeRepository.deleteByUserId(userId);
         log.info("TOTP disabled for user id={}", userId);
+    }
+
+    private boolean reauthenticate(User user, DisableTotpRequest request) {
+        if (StringUtils.hasText(request.getPassword())) {
+            return user.getPasswordHash() != null && passwordEncoder.matches(request.getPassword(), user.getPasswordHash());
+        }
+        if (StringUtils.hasText(request.getCode())) {
+            return verifyCode(secretCipher.decrypt(user.getTotpSecret()), request.getCode());
+        }
+        if (StringUtils.hasText(request.getBackupCode())) {
+            return consumeBackupCode(user.getId(), request.getBackupCode());
+        }
+        return false;
+    }
+
+    /** Discards any previously-issued codes and generates a fresh set — used on (re-)enable. */
+    private List<String> regenerateBackupCodes(UUID userId) {
+        backupCodeRepository.deleteByUserId(userId);
+        SecureRandom random = new SecureRandom();
+        List<String> plainCodes = new ArrayList<>(BACKUP_CODE_COUNT);
+        List<TotpBackupCode> entities = new ArrayList<>(BACKUP_CODE_COUNT);
+        for (int i = 0; i < BACKUP_CODE_COUNT; i++) {
+            StringBuilder sb = new StringBuilder(BACKUP_CODE_LENGTH);
+            for (int j = 0; j < BACKUP_CODE_LENGTH; j++) {
+                sb.append(BACKUP_CODE_ALPHA.charAt(random.nextInt(BACKUP_CODE_ALPHA.length())));
+            }
+            String code = sb.toString();
+            plainCodes.add(code);
+            entities.add(TotpBackupCode.builder()
+                    .userId(userId)
+                    .codeHash(passwordEncoder.encode(code))
+                    .build());
+        }
+        backupCodeRepository.saveAll(entities);
+        return plainCodes;
+    }
+
+    /** Marks a backup code used (single-use) if it matches an unused one for this user. */
+    boolean consumeBackupCode(UUID userId, String candidateCode) {
+        List<TotpBackupCode> unused = backupCodeRepository.findByUserIdAndUsedAtIsNull(userId);
+        for (TotpBackupCode backupCode : unused) {
+            if (passwordEncoder.matches(candidateCode, backupCode.getCodeHash())) {
+                backupCode.setUsedAt(OffsetDateTime.now());
+                backupCodeRepository.save(backupCode);
+                log.info("Backup code consumed for user id={}", userId);
+                return true;
+            }
+        }
+        return false;
     }
 
     // ── TOTP algorithm (RFC 6238 / RFC 4226) ────────────────────────────────
@@ -168,6 +259,11 @@ public class TotpService {
         byte[] bytes = new byte[20];
         new SecureRandom().nextBytes(bytes);
         return base32Encode(bytes);
+    }
+
+    /** Decrypts the user's stored (encrypted) secret and checks a live TOTP code against it. */
+    public boolean verifyStoredCode(User user, String code) {
+        return verifyCode(secretCipher.decrypt(user.getTotpSecret()), code);
     }
 
     public boolean verifyCode(String base32Secret, String code) {

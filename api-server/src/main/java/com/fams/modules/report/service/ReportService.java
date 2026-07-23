@@ -2,6 +2,7 @@ package com.fams.modules.report.service;
 
 import com.fams.modules.assignment.entity.Assignment;
 import com.fams.modules.assignment.repository.AssignmentRepository;
+import com.fams.modules.assignment.util.DayOfWeekBitmask;
 import com.fams.modules.attendance.dto.response.AttendanceSummaryResponse;
 import com.fams.modules.attendance.entity.AttendanceSummary;
 import com.fams.modules.attendance.repository.AttendanceSummaryRepository;
@@ -116,9 +117,10 @@ public class ReportService {
                 .map(AttendanceSummary::getEmployeeId)
                 .collect(Collectors.toSet());
 
+        int dateBit = DayOfWeekBitmask.bitForDate(date);
         List<Assignment> activeAssignments = siteId != null
-                ? assignmentRepository.findActiveAssignmentsForSiteOnDate(tenantId, siteId, date)
-                : assignmentRepository.findActiveAssignmentsWithShiftForDate(tenantId, date);
+                ? assignmentRepository.findActiveAssignmentsForSiteOnDate(tenantId, siteId, date, dateBit)
+                : assignmentRepository.findActiveAssignmentsWithShiftForDate(tenantId, date, dateBit);
 
         List<UUID> absentEmployeeIds = activeAssignments.stream()
                 .map(Assignment::getEmployeeId)
@@ -428,7 +430,8 @@ public class ReportService {
 
             // Employees with active assignments today
             List<Assignment> activeAssignments = assignmentRepository
-                    .findActiveAssignmentsForSiteOnDate(tenantId, site.getId(), today);
+                    .findActiveAssignmentsForSiteOnDate(tenantId, site.getId(), today,
+                            DayOfWeekBitmask.bitForDate(today));
             Set<UUID> assignedIds = activeAssignments.stream()
                     .map(Assignment::getEmployeeId)
                     .collect(Collectors.toSet());

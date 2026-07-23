@@ -4,6 +4,9 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../lib/test_helpers.sh"
+
 BASE_URL="${BASE_URL:-http://localhost:8080}"
 PASS=0
 FAIL=0
@@ -28,28 +31,31 @@ echo "=== Auth Update Profile Tests ==="
 echo "Target: $BASE_URL"
 echo ""
 
-# ── Setup: register two test users (phone-only) ──────────────────────────────
+# ── Setup: register two test users (email accounts) via the login shortcut ──
+# Note: this test is about PATCH /api/v1/auth/me (profile update, including its phone
+# field), not about the phone-registration endpoint touched by Issue #1 — so registration
+# itself just needs to hand us a token. PHONE_B below IS meaningful test data (Test 6
+# asserts a phone-uniqueness conflict), so it's assigned to user B via the real
+# profile-update endpoint rather than fabricated at registration time.
 TS=$(date +%s)
-PHONE_A="+849$(printf '%07d' $(( (TS + $$) % 10000000 )))"
 PHONE_B="+849$(printf '%07d' $(( (TS + $$ + 1) % 10000000 )))"
 PASSWORD="Profile@123"
 
-register_user() {
-    local phone="$1"
-    curl -s -X POST "$BASE_URL/api/v1/auth/register" \
-        -H "Content-Type: application/json" \
-        -d "{\"phone\":\"$phone\",\"password\":\"$PASSWORD\",\"displayName\":\"User\"}" 2>/dev/null \
-        | grep -o '"accessToken":"[^"]*"' | sed 's/"accessToken":"//;s/"//'
-}
-
 echo "--- Setup: registering test users ---"
-TOKEN_A=$(register_user "$PHONE_A")
-TOKEN_B=$(register_user "$PHONE_B")
+TOKEN_A=$(register_verified_test_user_token "$BASE_URL" "User A" "update_profile_a_${TS}_$$@fams.com" "$PASSWORD")
+TOKEN_B=$(register_verified_test_user_token "$BASE_URL" "User B" "update_profile_b_${TS}_$$@fams.com" "$PASSWORD")
 
 if [ -z "$TOKEN_A" ] || [ -z "$TOKEN_B" ]; then
     echo "FAIL: Setup — could not register test users"
     exit 1
 fi
+
+# Give user B a phone number via the real profile-update endpoint so Test 6 can verify
+# the phone-uniqueness conflict check.
+curl -s -o /dev/null -X PATCH "$BASE_URL/api/v1/auth/me" \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer $TOKEN_B" \
+    -d "{\"phone\":\"$PHONE_B\"}"
 echo "Setup OK"
 echo ""
 

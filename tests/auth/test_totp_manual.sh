@@ -11,6 +11,9 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../lib/test_helpers.sh"
+
 BASE_URL="${BASE_URL:-http://localhost:8080}"
 TS=$(date +%s)
 
@@ -18,25 +21,10 @@ echo "=== Manual TOTP 2FA Setup Test ==="
 echo "Target: $BASE_URL"
 echo ""
 
-# Step 1: Register a temporary phone-only account
-TEST_PHONE="+8490$(echo "$TS" | tail -c 7)"
-TEST_PASS="TestPass1"
-echo "--- Step 1: Creating temporary test account (phone: $TEST_PHONE) ---"
+# Step 1: Register a temporary test account
+echo "--- Step 1: Creating temporary test account ---"
 
-reg_response=$(curl -s -w "\n%{http_code}" \
-    -X POST "$BASE_URL/api/v1/auth/register" \
-    -H "Content-Type: application/json" \
-    -d "{\"phone\":\"$TEST_PHONE\",\"password\":\"$TEST_PASS\",\"displayName\":\"TOTP Manual Tester\"}")
-reg_body=$(echo "$reg_response" | head -n -1)
-reg_status=$(echo "$reg_response" | tail -n 1)
-
-if [ "$reg_status" -ne 201 ]; then
-    echo "FAIL: Registration failed (HTTP $reg_status)"
-    echo "Body: $reg_body"
-    exit 1
-fi
-
-ACCESS_TOKEN=$(echo "$reg_body" | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4)
+ACCESS_TOKEN=$(register_verified_test_user_token "$BASE_URL" "TOTP Manual Tester")
 if [ -z "$ACCESS_TOKEN" ]; then
     echo "FAIL: Could not extract access token from registration response"
     exit 1
@@ -130,4 +118,4 @@ fi
 
 echo ""
 echo "=== Manual TOTP test PASSED ==="
-echo "TOTP 2FA is now enabled for the test account (phone: $TEST_PHONE)"
+echo "TOTP 2FA is now enabled for the test account"

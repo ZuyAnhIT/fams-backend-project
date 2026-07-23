@@ -13,4 +13,7 @@ public interface TenantSubscriptionRepository extends JpaRepository<TenantSubscr
     Optional<TenantSubscription> findByTenantId(UUID tenantId);
     boolean existsByTenantId(UUID tenantId);
     List<TenantSubscription> findAllByStatusAndExpiresAtBefore(SubscriptionStatus status, OffsetDateTime cutoff);
+
+    /** Issue #8 (docs/issues/ISSUES.md): tenants still subscribed to a plan being deactivated. */
+    List<TenantSubscription> findAllByPlanIdAndStatusIn(UUID planId, List<SubscriptionStatus> statuses);
 }

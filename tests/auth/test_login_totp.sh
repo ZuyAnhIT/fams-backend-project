@@ -126,11 +126,16 @@ run_test "login/totp - missing pendingToken" 400 \
     -H "Content-Type: application/json" \
     -d '{"code":"123456"}'
 
-# ── Test 3: login/totp with missing code → 400 ────────────────────
+# ── Test 3: login/totp with missing code → 401 ────────────────────
+# Issue #5 (docs/issues/ISSUES.md): `code` is no longer @NotBlank at the DTO level since
+# backupCode is now a valid alternative — so this no longer 400s at validation. It still
+# gets rejected, just later: "some-token" isn't a real pending token, so the service's
+# Redis lookup fails first with 401 (same status it would 401 with a real pending token
+# and neither code nor backupCode supplied — see LoginTotpService's explicit check).
 
 echo ""
 echo "--- Test 3: login/totp - missing code ---"
-run_test "login/totp - missing code" 400 \
+run_test "login/totp - missing code" 401 \
     -X POST "$BASE_URL/api/v1/auth/login/totp" \
     -H "Content-Type: application/json" \
     -d '{"pendingToken":"some-token"}'
@@ -217,19 +222,25 @@ else
 fi
 
 # ── Cleanup: disable TOTP on admin ───────────────────────────────
+# Issue #5 (docs/issues/ISSUES.md): /totp/disable now requires re-proof of identity
+# (password/code/backupCode) — a bare Bearer token is no longer enough. Without this fix,
+# every run of this script would leave admin@fams.com stuck with totp_enabled=true,
+# breaking every OTHER test suite that logs in as admin expecting immediate tokens.
 
 echo ""
 echo "--- Cleanup: Disabling TOTP on admin ---"
-# Use the token from the successful TOTP login if available, otherwise re-enable via setup
 CLEANUP_TOKEN="${NEW_ADMIN_TOKEN:-$ADMIN_TOKEN}"
 disable_status=$(curl -s -o /dev/null -w "%{http_code}" \
     -X POST "$BASE_URL/api/v1/auth/totp/disable" \
-    -H "Authorization: Bearer $CLEANUP_TOKEN")
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer $CLEANUP_TOKEN" \
+    -d '{"password":"Admin@1234"}')
 
 if [ "$disable_status" -eq 200 ]; then
     echo "Cleanup: TOTP disabled on admin."
 else
     echo "WARNING: Could not disable TOTP on admin (HTTP $disable_status). Manual cleanup may be needed."
+    echo "Manual fix: docker exec fams-postgres psql -U fams_user -d fams_db -c \"UPDATE users SET totp_enabled=false, totp_secret=NULL WHERE email='admin@fams.com';\""
 fi
 
 echo ""

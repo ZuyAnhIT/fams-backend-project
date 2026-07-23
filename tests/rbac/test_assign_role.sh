@@ -4,6 +4,9 @@
 
 set -uo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../lib/test_helpers.sh"
+
 BASE_URL="${BASE_URL:-http://localhost:8080}"
 PASS=0
 FAIL=0
@@ -52,41 +55,23 @@ if [ -z "$EMPLOYEE_ROLE_ID" ]; then
 fi
 echo "Using EMPLOYEE roleId: $EMPLOYEE_ROLE_ID"
 
-# ─── Register a fresh test user (phone-only to get immediate token) ───────────
+# ─── Register a fresh test user and obtain a token ───────────────────────────
 UNIQUE_SUFFIX="$$"
 TS_REG=$(date +%s)
-TEST_PHONE="+849$(printf '%07d' $(( (TS_REG + UNIQUE_SUFFIX) % 10000000 )))"
-reg_resp=$(curl -s -w "\n%{http_code}" \
-    -X POST "$BASE_URL/api/v1/auth/register" \
-    -H "Content-Type: application/json" \
-    -d "{\"phone\":\"$TEST_PHONE\",\"password\":\"Test@1234\",\"displayName\":\"Test User $UNIQUE_SUFFIX\"}")
-reg_body=$(echo "$reg_resp" | head -n -1)
-reg_status=$(echo "$reg_resp" | tail -n 1)
-
-if [ "$reg_status" -ne 201 ] && [ "$reg_status" -ne 200 ]; then
-    echo "FATAL: could not register test user (HTTP $reg_status) — aborting"
-    echo "Body: $reg_body"
+NEW_TOKEN=$(register_verified_test_user_token "$BASE_URL" "Test User $UNIQUE_SUFFIX")
+if [ -z "$NEW_TOKEN" ]; then
+    echo "FATAL: could not register test user — aborting"
     exit 1
 fi
-TARGET_USER_ID=$(echo "$reg_body" | grep -o '"userId":"[^"]*"' | head -1 | sed 's/"userId":"//;s/"//')
+
+# Extract userId via GET /auth/me (the registration response no longer includes tokens
+# for email accounts, and the helper only hands back a login token).
+me_resp=$(curl -s -X GET "$BASE_URL/api/v1/auth/me" -H "Authorization: Bearer $NEW_TOKEN")
+TARGET_USER_ID=$(echo "$me_resp" | grep -o '"id":"[^"]*"' | head -1 | sed 's/"id":"//;s/"//')
 
 if [ -z "$TARGET_USER_ID" ]; then
-    # Extract userId from JWT sub claim (second segment, base64url decode)
-    NEW_TOKEN=$(echo "$reg_body" | grep -o '"accessToken":"[^"]*"' | sed 's/"accessToken":"//;s/"//')
-    if [ -n "$NEW_TOKEN" ]; then
-        PAYLOAD=$(echo "$NEW_TOKEN" | cut -d'.' -f2 | tr '_-' '/+')
-        # Pad base64
-        case $((${#PAYLOAD} % 4)) in
-            2) PAYLOAD="${PAYLOAD}==" ;;
-            3) PAYLOAD="${PAYLOAD}=" ;;
-        esac
-        TARGET_USER_ID=$(echo "$PAYLOAD" | base64 -d 2>/dev/null | grep -o '"sub":"[^"]*"' | sed 's/"sub":"//;s/"//')
-    fi
-fi
-
-if [ -z "$TARGET_USER_ID" ]; then
-    echo "FATAL: could not extract userId from registration response — aborting"
-    echo "Body: $reg_body"
+    echo "FATAL: could not extract userId from /auth/me response — aborting"
+    echo "Body: $me_resp"
     exit 1
 fi
 echo "Test user registered: $TARGET_USER_ID"

@@ -29,48 +29,68 @@ public interface AssignmentRepository extends JpaRepository<Assignment, UUID>,
 
     long countBySiteIdAndStatusAndDeletedAtIsNull(UUID siteId, String status);
 
-    @Query("SELECT a FROM Assignment a WHERE a.tenantId = :tenantId AND a.employeeId = :employeeId " +
-           "AND a.status = 'active' AND a.deletedAt IS NULL " +
-           "AND a.startDate <= :today AND (a.endDate IS NULL OR a.endDate >= :today)")
+    // Issue #14 (docs/issues/ISSUES.md): the 6 date-scoped "is this assignment active on this
+    // exact date" queries below are native SQL (not JPQL) because they need Postgres's bitwise
+    // `&` operator to test the days_of_week bitmask against the query date's day-of-week bit
+    // (:dayBit, computed in Java via DayOfWeekBitmask.bitForDate) — JPQL has no bitwise operator.
+    // days_of_week IS NULL still means "every day", preserving exact prior behavior for every
+    // assignment that doesn't set it.
+
+    @Query(value = "SELECT * FROM assignments a WHERE a.tenant_id = :tenantId AND a.employee_id = :employeeId " +
+           "AND a.status = 'active' AND a.deleted_at IS NULL " +
+           "AND a.start_date <= :today AND (a.end_date IS NULL OR a.end_date >= :today) " +
+           "AND (a.days_of_week IS NULL OR (a.days_of_week & :dayBit) <> 0)", nativeQuery = true)
     List<Assignment> findActiveAssignmentsForEmployeeOnDate(
             @Param("tenantId") UUID tenantId,
             @Param("employeeId") UUID employeeId,
-            @Param("today") LocalDate today);
+            @Param("today") LocalDate today,
+            @Param("dayBit") int dayBit);
 
-    @Query("SELECT a FROM Assignment a WHERE a.tenantId = :tenantId AND a.status = 'active' " +
-           "AND a.deletedAt IS NULL AND a.shiftId IS NOT NULL " +
-           "AND a.startDate <= :date AND (a.endDate IS NULL OR a.endDate >= :date)")
+    @Query(value = "SELECT * FROM assignments a WHERE a.tenant_id = :tenantId AND a.status = 'active' " +
+           "AND a.deleted_at IS NULL AND a.shift_id IS NOT NULL " +
+           "AND a.start_date <= :date AND (a.end_date IS NULL OR a.end_date >= :date) " +
+           "AND (a.days_of_week IS NULL OR (a.days_of_week & :dayBit) <> 0)", nativeQuery = true)
     List<Assignment> findActiveAssignmentsWithShiftForDate(
             @Param("tenantId") UUID tenantId,
-            @Param("date") LocalDate date);
+            @Param("date") LocalDate date,
+            @Param("dayBit") int dayBit);
 
-    @Query("SELECT a FROM Assignment a WHERE a.status = 'active' AND a.deletedAt IS NULL " +
-           "AND a.shiftId IS NOT NULL " +
-           "AND a.startDate <= :date AND (a.endDate IS NULL OR a.endDate >= :date)")
-    List<Assignment> findAllActiveAssignmentsWithShiftForDate(@Param("date") LocalDate date);
+    @Query(value = "SELECT * FROM assignments a WHERE a.status = 'active' AND a.deleted_at IS NULL " +
+           "AND a.shift_id IS NOT NULL " +
+           "AND a.start_date <= :date AND (a.end_date IS NULL OR a.end_date >= :date) " +
+           "AND (a.days_of_week IS NULL OR (a.days_of_week & :dayBit) <> 0)", nativeQuery = true)
+    List<Assignment> findAllActiveAssignmentsWithShiftForDate(
+            @Param("date") LocalDate date,
+            @Param("dayBit") int dayBit);
 
-    @Query("SELECT a FROM Assignment a WHERE a.tenantId = :tenantId AND a.siteId = :siteId " +
-           "AND a.employeeId = :employeeId AND a.status = 'active' AND a.deletedAt IS NULL " +
-           "AND a.startDate <= :today AND (a.endDate IS NULL OR a.endDate >= :today)")
+    @Query(value = "SELECT * FROM assignments a WHERE a.tenant_id = :tenantId AND a.site_id = :siteId " +
+           "AND a.employee_id = :employeeId AND a.status = 'active' AND a.deleted_at IS NULL " +
+           "AND a.start_date <= :today AND (a.end_date IS NULL OR a.end_date >= :today) " +
+           "AND (a.days_of_week IS NULL OR (a.days_of_week & :dayBit) <> 0)", nativeQuery = true)
     Optional<Assignment> findActiveAssignmentByEmployeeAndSite(
             @Param("tenantId") UUID tenantId,
             @Param("siteId") UUID siteId,
             @Param("employeeId") UUID employeeId,
-            @Param("today") LocalDate today);
+            @Param("today") LocalDate today,
+            @Param("dayBit") int dayBit);
 
-    @Query("SELECT a FROM Assignment a WHERE a.tenantId = :tenantId AND a.employeeId = :employeeId " +
-           "AND a.role = 'supervisor' AND a.status = 'active' AND a.deletedAt IS NULL " +
-           "AND a.startDate <= :today AND (a.endDate IS NULL OR a.endDate >= :today)")
+    @Query(value = "SELECT * FROM assignments a WHERE a.tenant_id = :tenantId AND a.employee_id = :employeeId " +
+           "AND a.role = 'supervisor' AND a.status = 'active' AND a.deleted_at IS NULL " +
+           "AND a.start_date <= :today AND (a.end_date IS NULL OR a.end_date >= :today) " +
+           "AND (a.days_of_week IS NULL OR (a.days_of_week & :dayBit) <> 0)", nativeQuery = true)
     List<Assignment> findActiveSupervisorAssignmentsForEmployee(
             @Param("tenantId") UUID tenantId,
             @Param("employeeId") UUID employeeId,
-            @Param("today") LocalDate today);
+            @Param("today") LocalDate today,
+            @Param("dayBit") int dayBit);
 
-    @Query("SELECT a FROM Assignment a WHERE a.tenantId = :tenantId AND a.siteId = :siteId " +
-           "AND a.status = 'active' AND a.deletedAt IS NULL " +
-           "AND a.startDate <= :today AND (a.endDate IS NULL OR a.endDate >= :today)")
+    @Query(value = "SELECT * FROM assignments a WHERE a.tenant_id = :tenantId AND a.site_id = :siteId " +
+           "AND a.status = 'active' AND a.deleted_at IS NULL " +
+           "AND a.start_date <= :today AND (a.end_date IS NULL OR a.end_date >= :today) " +
+           "AND (a.days_of_week IS NULL OR (a.days_of_week & :dayBit) <> 0)", nativeQuery = true)
     List<Assignment> findActiveAssignmentsForSiteOnDate(
             @Param("tenantId") UUID tenantId,
             @Param("siteId") UUID siteId,
-            @Param("today") LocalDate today);
+            @Param("today") LocalDate today,
+            @Param("dayBit") int dayBit);
 }

@@ -140,6 +140,15 @@
 			<artifactId>firebase-admin</artifactId>
 			<version>9.4.3</version>
 		</dependency>
+
+		<!-- Issue #4 (docs/issues/ISSUES.md): S3-compatible object storage for avatar
+		     uploads. S3Client works against MinIO in dev (endpointOverride + path-style)
+		     and real AWS S3 in prod (no override) with the same code. -->
+		<dependency>
+			<groupId>software.amazon.awssdk</groupId>
+			<artifactId>s3</artifactId>
+			<version>2.29.6</version>
+		</dependency>
 	</dependencies>
 
 	<build>

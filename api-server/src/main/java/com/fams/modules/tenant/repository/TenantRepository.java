@@ -4,6 +4,8 @@ import com.fams.modules.tenant.entity.Tenant;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -16,4 +18,6 @@ public interface TenantRepository extends JpaRepository<Tenant, UUID>, JpaSpecif
     Optional<Tenant> findByDomainAndDeletedAtIsNull(String domain);
 
     long countByStatusAndDeletedAtIsNull(String status);
+
+    List<Tenant> findAllByIdInAndDeletedAtIsNull(Collection<UUID> ids);
 }

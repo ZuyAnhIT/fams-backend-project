@@ -2,10 +2,20 @@ package com.fams.modules.auth.service;
 
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.mail.MailException;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
+/**
+ * Every send method here is {@code @Async}: the SMTP round-trip (connect, STARTTLS,
+ * auth, and — when the send is rejected, e.g. a quota error — the server's response)
+ * routinely takes several seconds, and callers (register, forgot-password, invite)
+ * must never block their HTTP response on that. The caller's own DB/Redis writes
+ * always happen first and synchronously, so firing the email off in the background
+ * loses nothing but the email itself if it fails — never the primary action.
+ */
 @Slf4j
 @Service
 public class EmailService {
@@ -19,6 +29,7 @@ public class EmailService {
         this.from = from;
     }
 
+    @Async
     public void sendPasswordResetEmail(String to, String resetUrl) {
         SimpleMailMessage msg = new SimpleMailMessage();
         msg.setFrom(from);
@@ -31,10 +42,10 @@ public class EmailService {
                 "This link will expire in 1 hour.\n\n" +
                 "If you did not request this, please ignore this email — your password will not change."
         );
-        mailSender.send(msg);
-        log.info("Password reset email sent to {}", to);
+        sendSafely(msg, "password reset", to);
     }
 
+    @Async
     public void sendInvitationEmail(String to, String acceptUrl, int expiryDays) {
         SimpleMailMessage msg = new SimpleMailMessage();
         msg.setFrom(from);
@@ -47,10 +58,17 @@ public class EmailService {
                 "This invitation will expire in " + expiryDays + " days.\n\n" +
                 "If you did not expect this invitation, please ignore this email."
         );
-        mailSender.send(msg);
-        log.info("Invitation email sent to {}", to);
+        sendSafely(msg, "invitation", to);
     }
 
+    /**
+     * Deliberately NOT async and NOT wrapped by {@link #sendSafely}: the only caller,
+     * {@code UserDeviceService.sendEmailFallback}, already has its own try/catch that
+     * records the real outcome ("FALLBACK_EMAIL_SENT" vs "FALLBACK_EMAIL_FAILED") in
+     * {@code notification_delivery_logs} — swallowing the exception here or making it
+     * async would make that tracking always report success regardless of what
+     * actually happened.
+     */
     public void sendNotificationFallback(String to, String title, String body) {
         SimpleMailMessage msg = new SimpleMailMessage();
         msg.setFrom(from);
@@ -58,9 +76,10 @@ public class EmailService {
         msg.setSubject("FAMS - " + title);
         msg.setText(body + "\n\n(This message was delivered by email because push notification could not be sent.)");
         mailSender.send(msg);
-        log.info("Notification fallback email sent to {}", to);
+        log.info("Sent notification fallback email to {}", to);
     }
 
+    @Async
     public void sendVerificationEmail(String to, String verificationUrl) {
         SimpleMailMessage msg = new SimpleMailMessage();
         msg.setFrom(from);
@@ -73,7 +92,23 @@ public class EmailService {
                 "This link will expire in 24 hours.\n\n" +
                 "If you did not register, please ignore this email."
         );
-        mailSender.send(msg);
-        log.info("Verification email sent to {}", to);
+        sendSafely(msg, "verification", to);
+    }
+
+    /**
+     * Sends and swallows any SMTP-layer failure (quota exceeded, provider outage,
+     * bad credentials...) so a flaky mail server never aborts the caller's primary
+     * action (account creation, password reset, invitation) — only the email itself
+     * is lost, not the whole business transaction. Callers already have their own
+     * fallback for the user (resend-verification, request-reset-again, resend-invite),
+     * so a missing email is recoverable; a rolled-back account/token is not.
+     */
+    private void sendSafely(SimpleMailMessage msg, String kind, String to) {
+        try {
+            mailSender.send(msg);
+            log.info("Sent {} email to {}", kind, to);
+        } catch (MailException e) {
+            log.error("Failed to send {} email to {}: {}", kind, to, e.getMessage(), e);
+        }
     }
 }

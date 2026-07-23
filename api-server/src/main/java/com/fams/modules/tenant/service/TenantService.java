@@ -2,6 +2,12 @@ package com.fams.modules.tenant.service;
 
 import com.fams.modules.auth.entity.User;
 import com.fams.modules.auth.repository.UserRepository;
+import com.fams.modules.employee.dto.request.InviteEmployeeRequest;
+import com.fams.modules.employee.service.EmployeeInvitationService;
+import com.fams.modules.rbac.entity.Role;
+import com.fams.modules.rbac.entity.UserRole;
+import com.fams.modules.rbac.repository.RoleRepository;
+import com.fams.modules.rbac.repository.UserRoleRepository;
 import com.fams.modules.subscription.entity.TenantSubscription;
 import com.fams.modules.subscription.entity.TenantSubscription.BillingCycle;
 import com.fams.modules.subscription.entity.TenantSubscription.SubscriptionStatus;
@@ -44,21 +50,41 @@ public class TenantService {
     private final UserRepository userRepository;
     private final PlanRepository planRepository;
     private final TenantSubscriptionRepository subscriptionRepository;
+    private final RoleRepository roleRepository;
+    private final UserRoleRepository userRoleRepository;
     private final StringRedisTemplate redis;
+    private final EmployeeInvitationService employeeInvitationService;
 
     public TenantService(TenantRepository tenantRepository, UserRepository userRepository,
                          PlanRepository planRepository,
                          TenantSubscriptionRepository subscriptionRepository,
-                         StringRedisTemplate redis) {
+                         RoleRepository roleRepository,
+                         UserRoleRepository userRoleRepository,
+                         StringRedisTemplate redis,
+                         EmployeeInvitationService employeeInvitationService) {
         this.tenantRepository = tenantRepository;
         this.userRepository = userRepository;
         this.planRepository = planRepository;
         this.subscriptionRepository = subscriptionRepository;
+        this.roleRepository = roleRepository;
+        this.userRoleRepository = userRoleRepository;
         this.redis = redis;
+        this.employeeInvitationService = employeeInvitationService;
     }
 
+    /**
+     * Issue #3 (docs/issues/ISSUES.md): self-serve company creation. Any authenticated
+     * user may call this (see TenantController — the old PLATFORM_ADMIN-only restriction
+     * was lifted). When a regular user creates a tenant, they're auto-assigned TENANT_ADMIN
+     * for it so they can actually manage what they just created — nothing before this
+     * linked the creator into `user_roles` at all, so a self-serve caller would have ended
+     * up locked out of their own new company. Platform Admins keep the old behavior (no
+     * auto-membership) since they're typically provisioning on behalf of a customer, not
+     * joining the company themselves. A user can own/belong to any number of tenants —
+     * `user_roles` has no constraint limiting a user to one tenant.
+     */
     @Transactional
-    public TenantResponse createTenant(CreateTenantRequest request, UUID createdByUserId) {
+    public TenantResponse createTenant(CreateTenantRequest request, UUID createdByUserId, boolean createdByPlatformAdmin) {
         if (tenantRepository.findBySlugAndDeletedAtIsNull(request.getSlug()).isPresent()) {
             throw new DuplicateResourceException("Slug '" + request.getSlug() + "' is already taken");
         }
@@ -100,6 +126,43 @@ public class TenantService {
                         },
                         () -> log.warn("No active plan found — tenant {} created without a subscription", tenant.getId())
                 );
+
+        Role tenantAdminRole = roleRepository.findByNameAndTenantIdIsNull("TENANT_ADMIN").orElse(null);
+        if (tenantAdminRole == null) {
+            log.error("TENANT_ADMIN role not found — tenant {} created with no admin membership/invite", tenant.getId());
+        }
+
+        if (!createdByPlatformAdmin && tenantAdminRole != null) {
+            UserRole membership = UserRole.builder()
+                    .userId(createdByUserId)
+                    .role(tenantAdminRole)
+                    .tenantId(tenant.getId())
+                    .assignedBy(createdByUserId)
+                    .build();
+            userRoleRepository.save(membership);
+            log.info("Creator auto-assigned TENANT_ADMIN: userId={} tenantId={}",
+                    createdByUserId, tenant.getId());
+        }
+
+        // Issue #12 (docs/issues/ISSUES.md): if the creator named a different person as owner,
+        // invite THAT person as tenant admin — the creator keeps their own admin access too (set
+        // above, unaffected by this), so the tenant is never left with no one able to manage it
+        // while the invite is still pending.
+        if (StringUtils.hasText(request.getOwnerEmail()) && tenantAdminRole != null) {
+            String ownerEmail = request.getOwnerEmail().trim().toLowerCase();
+            String creatorEmail = userRepository.findById(createdByUserId)
+                    .map(User::getEmail)
+                    .map(String::toLowerCase)
+                    .orElse(null);
+            if (!ownerEmail.equals(creatorEmail)) {
+                InviteEmployeeRequest inviteRequest = new InviteEmployeeRequest();
+                inviteRequest.setEmail(ownerEmail);
+                inviteRequest.setRoleId(tenantAdminRole.getId());
+                employeeInvitationService.sendInvitation(tenant.getId(), inviteRequest, createdByUserId, createdByPlatformAdmin);
+                log.info("Owner invitation sent: tenantId={} ownerEmail={} invitedBy={}",
+                        tenant.getId(), ownerEmail, createdByUserId);
+            }
+        }
 
         return toResponse(tenant);
     }

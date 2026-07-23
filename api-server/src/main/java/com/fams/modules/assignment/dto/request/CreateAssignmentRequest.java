@@ -6,7 +6,9 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import lombok.Data;
 
+import java.time.DayOfWeek;
 import java.time.LocalDate;
+import java.util.Set;
 import java.util.UUID;
 
 @Data
@@ -29,6 +31,11 @@ public class CreateAssignmentRequest {
             example = "2026-12-31")
     @JsonFormat(pattern = "yyyy-MM-dd")
     private LocalDate endDate;
+
+    @Schema(description = "Issue #14: restrict the assignment to specific weekdays only " +
+            "(e.g. [\"MONDAY\",\"WEDNESDAY\",\"FRIDAY\"]). Omit for every day in the date range (default).",
+            example = "[\"MONDAY\",\"WEDNESDAY\",\"FRIDAY\"]")
+    private Set<DayOfWeek> daysOfWeek;
 
     @Schema(description = "Employee's role at the site: 'worker' (default) or 'supervisor'",
             example = "worker", defaultValue = "worker", allowableValues = {"worker", "supervisor"})
