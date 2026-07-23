@@ -88,14 +88,17 @@ public class PlanController {
     }
 
     @Operation(summary = "Update a subscription plan",
-        description = "Updates display name, description, prices, sort order, or active status of a plan. Restricted to Platform Admins.")
+        description = "Updates display name, description, prices, sort order, or active status of a plan. Restricted to Platform Admins. " +
+            "Issue #8 (docs/issues/ISSUES.md): setting isActive=false while tenants are still subscribed requires migrateToPlanId — " +
+            "they are migrated to that plan first (aborting entirely if any tenant's current usage wouldn't fit its limits) rather than being silently stranded on a deactivated plan.")
     @ApiResponses({
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Plan updated",
             content = @Content(schema = @Schema(implementation = PlanResponse.class))),
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Validation error"),
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Unauthorized"),
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "Platform Admin role required"),
-        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "Plan not found")
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "Plan not found"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "409", description = "Deactivation blocked: tenants still subscribed, no/invalid migrateToPlanId, or migration would exceed the target plan's limits")
     })
     @PatchMapping("/{id}")
     @PreAuthorize("hasRole('PLATFORM_ADMIN')")

@@ -71,15 +71,42 @@ public class JwtAuthFilter extends OncePerRequestFilter {
     }
 
     private Set<String> loadUserPermissions(UUID userId, String tenantId) {
-        if (tenantId == null || tenantId.isEmpty()) return Set.of();
+        Set<String> platformScoped = loadPlatformScopedPermissions(userId);
+
+        if (tenantId == null || tenantId.isEmpty()) return platformScoped;
+
         String cacheKey = PERMS_CACHE_PREFIX + userId + ":" + tenantId;
+        String cached = redis.opsForValue().get(cacheKey);
+        Set<String> tenantScoped;
+        if (cached != null) {
+            tenantScoped = cached.isEmpty() ? Set.of() : new HashSet<>(Arrays.asList(cached.split(",")));
+        } else {
+            tenantScoped = userRoleRepository.findPermissionNamesByUserIdAndTenantId(
+                    userId, UUID.fromString(tenantId));
+            redis.opsForValue().set(cacheKey,
+                    String.join(",", tenantScoped), PERMS_CACHE_TTL_SECONDS, TimeUnit.SECONDS);
+        }
+
+        if (platformScoped.isEmpty()) return tenantScoped;
+        Set<String> merged = new HashSet<>(tenantScoped);
+        merged.addAll(platformScoped);
+        return merged;
+    }
+
+    /**
+     * Issue #10 (docs/issues/ISSUES.md): permissions from platform-scoped role assignments
+     * (e.g. PLATFORM_STAFF) apply regardless of which tenant (if any) the request is scoped to.
+     * Empty for the overwhelming majority of users who have no such assignment — this only ever
+     * adds permissions, never removes any tenant-scoped ones.
+     */
+    private Set<String> loadPlatformScopedPermissions(UUID userId) {
+        String cacheKey = PERMS_CACHE_PREFIX + userId + ":platform";
         String cached = redis.opsForValue().get(cacheKey);
         if (cached != null) {
             if (cached.isEmpty()) return Set.of();
             return new HashSet<>(Arrays.asList(cached.split(",")));
         }
-        Set<String> perms = userRoleRepository.findPermissionNamesByUserIdAndTenantId(
-                userId, UUID.fromString(tenantId));
+        Set<String> perms = userRoleRepository.findPlatformScopedPermissionNamesByUserId(userId);
         redis.opsForValue().set(cacheKey,
                 String.join(",", perms), PERMS_CACHE_TTL_SECONDS, TimeUnit.SECONDS);
         return perms;
@@ -118,6 +145,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
                 String email = claims.get("email", String.class);
                 Boolean isPlatformAdmin = claims.get("isPlatformAdmin", Boolean.class);
                 String tenantId = claims.get("tenantId", String.class);
+                String deviceId = claims.get("deviceId", String.class);
 
                 if (!Boolean.TRUE.equals(isPlatformAdmin) && isTenantSuspended(tenantId)) {
                     log.debug("Rejecting request — tenant {} is suspended", tenantId);
@@ -139,7 +167,8 @@ public class JwtAuthFilter extends OncePerRequestFilter {
                                 .displayName("")
                                 .isPlatformAdmin(Boolean.TRUE.equals(isPlatformAdmin))
                                 .build(),
-                        permissions
+                        permissions,
+                        deviceId
                 );
 
                 UsernamePasswordAuthenticationToken authentication =

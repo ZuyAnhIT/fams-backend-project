@@ -4,6 +4,9 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../lib/test_helpers.sh"
+
 BASE_URL="${BASE_URL:-http://localhost:8080}"
 PASS=0
 FAIL=0
@@ -57,13 +60,8 @@ if [ -z "$TENANT_ID" ]; then
 fi
 echo "Test tenant created: id=$TENANT_ID"
 
-# Register a regular user (non-owner, phone-only to get immediate token)
-REGULAR_PHONE="+849$(printf '%07d' $(( (TS + $$) % 10000000 )))"
-reg_body=$(curl -s \
-    -X POST "$BASE_URL/api/v1/auth/register" \
-    -H "Content-Type: application/json" \
-    -d "{\"phone\":\"$REGULAR_PHONE\",\"password\":\"Regular@1234\",\"displayName\":\"Regular\"}")
-REGULAR_TOKEN=$(echo "$reg_body" | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4)
+# Register a regular user (non-owner)
+REGULAR_TOKEN=$(register_verified_test_user_token "$BASE_URL" "Regular")
 echo "Regular user token obtained."
 echo ""
 

@@ -38,6 +38,9 @@ public class Assignment {
     @Column(name = "end_date")
     private LocalDate endDate;
 
+    @Column(name = "days_of_week")
+    private Short daysOfWeek;
+
     @Column(nullable = false, length = 50)
     private String role;
 

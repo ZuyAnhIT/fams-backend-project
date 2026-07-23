@@ -4,6 +4,15 @@
 # The api container uses the maven image directly so you can
 # edit source on the host and restart the container to pick up
 # changes without rebuilding the image.
+#
+# This file also adds a one-shot `fams-seed` service: it waits for fams-api
+# to report healthy, then runs scripts/seed.sh against it. This means any
+# dev who clones the repo and runs `make dev-d` (or plain `docker compose
+# -f docker-compose.yml -f docker-compose.dev.yml up`) ends up with the same
+# Vietnamese demo dataset automatically — no separate manual step needed.
+# It is intentionally only wired into this dev override, never into
+# docker-compose.yml/docker-compose.full.yml, so production-style runs are
+# never auto-seeded.
 
 services:
 
@@ -21,6 +30,65 @@ services:
     env_file: .env
     environment:
       SPRING_PROFILES_ACTIVE: dev
+    depends_on:
+      minio:
+        condition: service_healthy
+    healthcheck:
+      # NOTE: deliberately NOT /actuator/health — that endpoint's aggregate
+      # status goes DOWN (HTTP 503) whenever FCM_SERVICE_ACCOUNT_JSON isn't a
+      # real Firebase credential (fine for Java-only/no-push-notification
+      # dev work), which would make this healthcheck (and therefore fams-seed)
+      # hang forever in that common case. /api/v1/auth/health is a plain
+      # "is the app up" check with no such dependency.
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/v1/auth/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 90s
+
+  # Issue #4 (docs/issues/ISSUES.md): S3-compatible object storage for avatar uploads.
+  # Dev-only stand-in for real AWS S3 — same AvatarStorageService code talks to either,
+  # switching on whether S3_ENDPOINT is set (see application.yml's app.s3.* block).
+  minio:
+    image: minio/minio:latest
+    container_name: fams-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-fams_minio_admin}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-fams_minio_secret}
+    ports:
+      - "${MINIO_EXPOSE_PORT:-9000}:9000"     # S3 API — avatar URLs point here
+      - "${MINIO_CONSOLE_EXPOSE_PORT:-9001}:9001"  # web console, optional
+    volumes:
+      - minio_data:/data
+    networks:
+      - fams-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  fams-seed:
+    build:
+      context: ./docker/seed
+    container_name: fams-seed
+    depends_on:
+      fams-api:
+        condition: service_healthy
+    networks:
+      - fams-net
+    environment:
+      BASE_URL: http://fams-api:8080
+      DB_HOST: fams-postgres
+      DB_PORT: "5432"
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${DB_NAME}
+    volumes:
+      - ./scripts:/scripts:ro
+    restart: "no"
 
 volumes:
   maven_cache:
+  minio_data:

@@ -5,6 +5,7 @@ import jakarta.validation.constraints.*;
 import lombok.Data;
 
 import java.math.BigDecimal;
+import java.util.UUID;
 
 @Data
 @Schema(description = "Partial update for a subscription plan. All fields are optional.")
@@ -34,4 +35,8 @@ public class UpdatePlanRequest {
 
     @Schema(description = "Set to false to hide the plan from new subscribers", example = "true")
     private Boolean isActive;
+
+    @Schema(description = "Issue #8: required when setting isActive=false and tenants are still " +
+            "subscribed to this plan — they are migrated to this plan first. Ignored otherwise.")
+    private UUID migrateToPlanId;
 }

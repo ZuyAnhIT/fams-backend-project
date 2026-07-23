@@ -4,13 +4,16 @@ COMPOSE_DEV  = $(COMPOSE) -f docker-compose.dev.yml
 COMPOSE_FULL     = docker compose -f docker-compose.full.yml
 COMPOSE_FULL_DEV = $(COMPOSE_FULL) -f docker-compose.dev.yml
 
-.PHONY: dev prod stop restart-api logs logs-api logs-db logs-redis \
+.PHONY: dev prod stop restart-api logs logs-api logs-db logs-redis logs-seed \
         shell-api shell-db ps clean \
         full full-d full-dev full-dev-d full-stop full-stop-v \
         restart-ai logs-ai shell-ai \
         help
 
 ## ── Dev (source mounted, maven run) ──────────────────────────────
+## docker-compose.dev.yml includes a one-shot `fams-seed` service that waits
+## for the API to become healthy and then seeds the Vietnamese demo dataset
+## automatically — every `dev`/`dev-d` run ends up seeded, not just `setup`.
 dev:
 	$(COMPOSE_DEV) up --build
 
@@ -18,17 +21,24 @@ dev-d:
 	$(COMPOSE_DEV) up --build -d
 
 ## ── Prod (built jar image) ───────────────────────────────────────
+## Never auto-seeded — docker-compose.dev.yml (and its fams-seed service)
+## is not part of this stack.
 prod:
 	$(COMPOSE) up --build -d
 
-## ── First-time setup (start + seed) ─────────────────────────────
+## ── First-time setup ─────────────────────────────────────────────
+## Kept as an alias of `dev-d` for muscle memory / README familiarity —
+## seeding now happens automatically via the fams-seed service either way.
 setup:
 	$(COMPOSE_DEV) up --build -d
-	bash scripts/dev-start.sh
 
-## ── Seed demo data ───────────────────────────────────────────────
+## ── Seed demo data manually (e.g. to force a re-seed on demand) ──
 seed:
 	bash scripts/seed.sh
+
+## ── Tail the one-shot seed container's log ───────────────────────
+logs-seed:
+	$(COMPOSE_DEV) logs -f fams-seed
 
 ## ── Stop everything ──────────────────────────────────────────────
 stop:
@@ -112,16 +122,17 @@ shell-ai:
 help:
 	@echo ""
 	@echo "  ── Java backend only (no AI service) ──────────────────────────"
-	@echo "  make setup         First-time setup: start services + seed demo data"
-	@echo "  make dev           Start in dev mode (foreground)"
-	@echo "  make dev-d         Start in dev mode (background)"
-	@echo "  make seed          Seed demo tenants and employees"
-	@echo "  make prod          Build and start with production image"
+	@echo "  make setup         Start services (dev mode auto-seeds demo data)"
+	@echo "  make dev           Start in dev mode (foreground, auto-seeds)"
+	@echo "  make dev-d         Start in dev mode (background, auto-seeds)"
+	@echo "  make seed          Force a manual re-seed of demo data"
+	@echo "  make prod          Build and start with production image (never seeded)"
 	@echo "  make stop          Stop all services"
 	@echo "  make stop-v        Stop and remove volumes"
 	@echo "  make restart-api   Restart Java API container"
 	@echo "  make logs          Tail all logs"
 	@echo "  make logs-api      Tail Java API logs"
+	@echo "  make logs-seed     Tail the one-shot seed container's log"
 	@echo "  make shell-api     Open bash in Java API container"
 	@echo "  make shell-db      Open psql in Postgres container"
 	@echo "  make ps            Show container status"

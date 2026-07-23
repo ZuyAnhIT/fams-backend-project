@@ -4,6 +4,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Builder;
 import lombok.Data;
 
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.UUID;
 
@@ -26,6 +27,21 @@ public class UserProfileResponse {
 
     @Schema(description = "URL of the user's avatar image", example = "https://cdn.example.com/avatars/alice.png")
     private String avatarUrl;
+
+    @Schema(description = "Date of birth (Issue #4, docs/issues/ISSUES.md)", example = "1995-04-12")
+    private LocalDate dateOfBirth;
+
+    @Schema(description = "Hometown / quê quán", example = "Nghệ An")
+    private String hometown;
+
+    @Schema(description = "Gender — free-text (e.g. male/female/other), not constrained to a fixed list", example = "female")
+    private String gender;
+
+    @Schema(description = "Home address", example = "123 Nguyễn Trãi, Q.1, TP.HCM")
+    private String address;
+
+    @Schema(description = "Whether a Google account is linked for one-click login (Issue #7, docs/issues/ISSUES.md)")
+    private boolean googleLinked;
 
     @Schema(description = "Whether the account is active")
     private boolean isActive;

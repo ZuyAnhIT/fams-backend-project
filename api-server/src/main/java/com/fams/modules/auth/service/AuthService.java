@@ -1,5 +1,6 @@
 package com.fams.modules.auth.service;
 
+import com.fams.modules.audit.service.AuditLogService;
 import com.fams.modules.auth.dto.request.LoginRequest;
 import com.fams.modules.auth.dto.response.LoginResponse;
 import com.fams.modules.auth.entity.RefreshToken;
@@ -14,13 +15,18 @@ import com.fams.shared.exception.AccountLockedException;
 import com.fams.shared.exception.EmailNotVerifiedException;
 import com.fams.shared.exception.InvalidCredentialsException;
 import com.fams.shared.exception.TenantSuspendedException;
+import com.fams.shared.exception.ResourceNotFoundException;
 import com.fams.shared.security.JwtProvider;
+import com.fams.shared.security.HttpRequestUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
+import org.springframework.http.HttpStatus;
 
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -41,6 +47,7 @@ public class AuthService {
     private final JwtProvider jwtProvider;
     private final BCryptPasswordEncoder passwordEncoder;
     private final StringRedisTemplate redis;
+    private final AuditLogService auditLogService;
     private final int accessTtlMinutes;
     private final int refreshTtlDays;
 
@@ -52,6 +59,7 @@ public class AuthService {
             JwtProvider jwtProvider,
             BCryptPasswordEncoder passwordEncoder,
             StringRedisTemplate redis,
+            AuditLogService auditLogService,
             @Value("${app.jwt.access-ttl-minutes}") int accessTtlMinutes,
             @Value("${app.jwt.refresh-ttl-days}") int refreshTtlDays) {
         this.userRepository = userRepository;
@@ -61,6 +69,7 @@ public class AuthService {
         this.jwtProvider = jwtProvider;
         this.passwordEncoder = passwordEncoder;
         this.redis = redis;
+        this.auditLogService = auditLogService;
         this.accessTtlMinutes = accessTtlMinutes;
         this.refreshTtlDays = refreshTtlDays;
     }
@@ -146,13 +155,100 @@ public class AuthService {
                 .user(user)
                 .tokenHash(tokenHash)
                 .deviceId(deviceId)
+                .userAgent(HttpRequestUtils.currentUserAgent())
+                .ipAddress(HttpRequestUtils.currentIpAddress())
                 .expiresAt(OffsetDateTime.now().plusDays(refreshTtlDays))
+                .activeTenantId(primaryTenantId)
                 .build();
         refreshTokenRepository.save(refreshToken);
+
+        // 9. Record last_login_at + audit LOGIN (Acceptance Criteria, backlog #1)
+        user.setLastLoginAt(OffsetDateTime.now());
+        userRepository.save(user);
+        auditLogService.record(
+                primaryTenantId,
+                user.getId(),
+                user.getEmail(),
+                "USER",
+                user.getId().toString(),
+                "LOGIN",
+                null,
+                null,
+                null,
+                HttpRequestUtils.currentIpAddress(),
+                HttpRequestUtils.currentUserAgent());
 
         return LoginResponse.builder()
                 .accessToken(accessToken)
                 .refreshToken(rawRefreshToken)
+                .tokenType("Bearer")
+                .expiresIn((long) accessTtlMinutes * 60)
+                .build();
+    }
+
+    /**
+     * Issue #3 (docs/issues/ISSUES.md): a user belonging to multiple tenants needs a way to
+     * actually operate as a different company — until now, login (and every refresh) always
+     * re-picked the OLDEST role assignment, so there was no real "switch company" possible.
+     * This re-issues a token pair scoped to {@code request.tenantId} (which the caller must
+     * hold an active role in) and persists that choice onto the refresh-token row so it
+     * survives subsequent silent token refreshes ({@link RefreshTokenService#refresh}).
+     */
+    @Transactional
+    public LoginResponse switchTenant(UUID callerUserId, UUID targetTenantId, String rawRefreshToken) {
+        User user = userRepository.findByIdAndDeletedAtIsNull(callerUserId)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+
+        String hash = jwtProvider.hashToken(rawRefreshToken);
+        RefreshToken stored = refreshTokenRepository.findByTokenHash(hash)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid refresh token"));
+        if (!stored.getUser().getId().equals(callerUserId)) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Refresh token does not belong to this user");
+        }
+        if (stored.getRevokedAt() != null || OffsetDateTime.now().isAfter(stored.getExpiresAt())) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Refresh token is no longer valid");
+        }
+
+        List<UserRole> targetRoles = userRoleRepository.findActiveByUserIdAndTenantId(callerUserId, targetTenantId);
+        if (targetRoles.isEmpty()) {
+            throw new AccessDeniedException("You do not have a role in this company");
+        }
+        String targetRole = targetRoles.get(0).getRole().getName();
+
+        tenantRepository.findByIdAndDeletedAtIsNull(targetTenantId).ifPresentOrElse(tenant -> {
+            if ("suspended".equals(tenant.getStatus())) {
+                throw new TenantSuspendedException();
+            }
+        }, () -> {
+            throw new ResourceNotFoundException("Tenant not found: " + targetTenantId);
+        });
+
+        String accessToken = jwtProvider.generateAccessToken(
+                user.getId(), user.getEmail(), stored.getDeviceId(),
+                user.isPlatformAdmin(), targetTenantId, targetRole);
+
+        // Rotate the refresh token (same convention as RefreshTokenService.refresh), carrying
+        // the newly-chosen tenant forward so it sticks across future refreshes.
+        stored.setRevokedAt(OffsetDateTime.now());
+        refreshTokenRepository.save(stored);
+
+        String rawNew = jwtProvider.generateRefreshTokenRaw();
+        RefreshToken newToken = RefreshToken.builder()
+                .user(user)
+                .tokenHash(jwtProvider.hashToken(rawNew))
+                .deviceId(stored.getDeviceId())
+                .userAgent(HttpRequestUtils.currentUserAgent())
+                .ipAddress(HttpRequestUtils.currentIpAddress())
+                .expiresAt(OffsetDateTime.now().plusDays(refreshTtlDays))
+                .activeTenantId(targetTenantId)
+                .build();
+        refreshTokenRepository.save(newToken);
+
+        log.info("User {} switched active tenant to {}", callerUserId, targetTenantId);
+
+        return LoginResponse.builder()
+                .accessToken(accessToken)
+                .refreshToken(rawNew)
                 .tokenType("Bearer")
                 .expiresIn((long) accessTtlMinutes * 60)
                 .build();

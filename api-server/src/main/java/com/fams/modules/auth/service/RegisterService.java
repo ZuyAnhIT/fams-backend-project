@@ -7,7 +7,9 @@ import com.fams.modules.auth.entity.User;
 import com.fams.modules.auth.repository.RefreshTokenRepository;
 import com.fams.modules.auth.repository.UserRepository;
 import com.fams.shared.exception.DuplicateResourceException;
+import com.fams.shared.exception.PhoneNotVerifiedException;
 import com.fams.shared.security.JwtProvider;
+import com.fams.shared.security.HttpRequestUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -27,6 +29,7 @@ public class RegisterService {
     private final BCryptPasswordEncoder passwordEncoder;
     private final EmailService emailService;
     private final EmailVerificationService emailVerificationService;
+    private final FirebasePhoneTokenVerifier phoneTokenVerifier;
     private final int accessTtlMinutes;
     private final int refreshTtlDays;
     private final String baseUrl;
@@ -38,6 +41,7 @@ public class RegisterService {
             BCryptPasswordEncoder passwordEncoder,
             EmailService emailService,
             EmailVerificationService emailVerificationService,
+            FirebasePhoneTokenVerifier phoneTokenVerifier,
             @Value("${app.jwt.access-ttl-minutes}") int accessTtlMinutes,
             @Value("${app.jwt.refresh-ttl-days}") int refreshTtlDays,
             @Value("${app.base-url}") String baseUrl) {
@@ -47,6 +51,7 @@ public class RegisterService {
         this.passwordEncoder = passwordEncoder;
         this.emailService = emailService;
         this.emailVerificationService = emailVerificationService;
+        this.phoneTokenVerifier = phoneTokenVerifier;
         this.accessTtlMinutes = accessTtlMinutes;
         this.refreshTtlDays = refreshTtlDays;
         this.baseUrl = baseUrl;
@@ -69,7 +74,31 @@ public class RegisterService {
             throw new DuplicateResourceException("Phone number is already registered");
         }
 
-        // Phone-only users are considered verified (verified via OTP at login)
+        // Issue #1 (docs/issues/ISSUES.md): phone-only registration used to activate the
+        // account immediately without ever checking the phone was real. Now it requires a
+        // Firebase phone-auth ID token — proof the client already completed Firebase's OTP
+        // flow for this exact number — before the account is created at all.
+        boolean phoneVerified = false;
+        if (phone != null && email == null) {
+            String firebaseIdToken = StringUtils.hasText(request.getFirebaseIdToken())
+                    ? request.getFirebaseIdToken().trim() : null;
+            if (firebaseIdToken == null) {
+                throw new PhoneNotVerifiedException(
+                        "Phone registration requires a verified Firebase ID token (firebaseIdToken). "
+                                + "Complete the OTP flow with Firebase on the client first.");
+            }
+            String verifiedPhone = phoneTokenVerifier.verifyAndExtractPhone(firebaseIdToken);
+            String normalizedSubmitted = phone.startsWith("+") ? phone : "+" + phone;
+            if (!normalizedSubmitted.equals(verifiedPhone)) {
+                throw new PhoneNotVerifiedException(
+                        "The verified Firebase token is for a different phone number than the one submitted.");
+            }
+            phoneVerified = true;
+        }
+
+        // Phone-only users have no email to verify; email_verified is only meaningful for
+        // email-based accounts, so it defaults true here to avoid blocking their (already
+        // phone-verified) login.
         boolean emailVerified = (email == null);
 
         User user = User.builder()
@@ -79,6 +108,7 @@ public class RegisterService {
                 .displayName(request.getDisplayName())
                 .isActive(true)
                 .emailVerified(emailVerified)
+                .phoneVerified(phoneVerified)
                 .failedLoginAttempts(0)
                 .build();
         userRepository.save(user);
@@ -108,6 +138,8 @@ public class RegisterService {
                 .user(user)
                 .tokenHash(tokenHash)
                 .deviceId(deviceId)
+                .userAgent(HttpRequestUtils.currentUserAgent())
+                .ipAddress(HttpRequestUtils.currentIpAddress())
                 .expiresAt(OffsetDateTime.now().plusDays(refreshTtlDays))
                 .build();
         refreshTokenRepository.save(refreshToken);

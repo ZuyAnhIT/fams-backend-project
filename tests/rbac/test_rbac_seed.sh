@@ -9,6 +9,9 @@
 
 set -uo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../lib/test_helpers.sh"
+
 BASE_URL="${BASE_URL:-http://localhost:8080}"
 PASS=0
 FAIL=0
@@ -71,35 +74,22 @@ else
     fail "Unauthenticated request — expected HTTP 401, got HTTP $status"
 fi
 
-# ─── 4. Register a regular user (phone-only) and confirm they cannot reach platform endpoints
+# ─── 4. Register a regular user and confirm they cannot reach platform endpoints
 echo ""
 echo "--- Test 4: Regular user cannot access PLATFORM_ADMIN endpoint ---"
-REG_TS=$(date +%s)
-REG_PHONE="+849$(printf '%07d' $(( (REG_TS + $$) % 10000000 )))"
-reg_response=$(curl -s -w "\n%{http_code}" \
-    -X POST "$BASE_URL/api/v1/auth/register" \
-    -H "Content-Type: application/json" \
-    -d "{\"phone\":\"$REG_PHONE\",\"password\":\"Test@12345\",\"displayName\":\"RBAC Tester\"}")
+USER_TOKEN=$(register_verified_test_user_token "$BASE_URL" "RBAC Tester")
 
-reg_body=$(echo "$reg_response" | head -n -1)
-reg_status=$(echo "$reg_response" | tail -n 1)
-
-if [ "$reg_status" -eq 201 ]; then
-    USER_TOKEN=$(echo "$reg_body" | grep -o '"accessToken":"[^"]*"' | sed 's/"accessToken":"//;s/"//')
-    if [ -n "$USER_TOKEN" ]; then
-        forbidden_status=$(curl -s -o /dev/null -w "%{http_code}" \
-            -X GET "$BASE_URL/api/v1/tenants" \
-            -H "Authorization: Bearer $USER_TOKEN")
-        if [ "$forbidden_status" -eq 403 ]; then
-            pass "Regular user blocked from platform endpoint (HTTP 403)"
-        else
-            fail "Regular user platform endpoint — expected HTTP 403, got HTTP $forbidden_status"
-        fi
+if [ -n "$USER_TOKEN" ]; then
+    forbidden_status=$(curl -s -o /dev/null -w "%{http_code}" \
+        -X GET "$BASE_URL/api/v1/tenants" \
+        -H "Authorization: Bearer $USER_TOKEN")
+    if [ "$forbidden_status" -eq 403 ]; then
+        pass "Regular user blocked from platform endpoint (HTTP 403)"
     else
-        fail "Register regular user — no accessToken in registration response"
+        fail "Regular user platform endpoint — expected HTTP 403, got HTTP $forbidden_status"
     fi
 else
-    fail "Register regular user — expected HTTP 201, got HTTP $reg_status"
+    fail "Register regular user — could not obtain access token"
 fi
 
 # ─── Summary ─────────────────────────────────────────────────────────────────

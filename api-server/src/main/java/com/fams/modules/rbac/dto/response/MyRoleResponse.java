@@ -25,8 +25,15 @@ public class MyRoleResponse {
     @Schema(description = "Role name", example = "TENANT_ADMIN")
     private String roleName;
 
-    @Schema(description = "Tenant within which the role is effective")
+    @Schema(description = "Tenant within which the role is effective, or null for a platform-scoped role")
     private UUID tenantId;
+
+    @Schema(description = "Tenant display name, for building a company switcher; null for a platform-scoped role",
+            example = "Công ty CP Xây dựng Hoàng Long")
+    private String tenantName;
+
+    @Schema(description = "Tenant slug; null for a platform-scoped role", example = "acme-corp")
+    private String tenantSlug;
 
     @Schema(description = "Timestamp when the role was assigned")
     private OffsetDateTime assignedAt;

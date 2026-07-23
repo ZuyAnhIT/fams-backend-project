@@ -65,7 +65,7 @@ public class SystemStatusController {
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Unauthorized"),
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "Forbidden — PLATFORM_ADMIN only")
     })
-    @PreAuthorize("hasRole('PLATFORM_ADMIN')")
+    @PreAuthorize("hasRole('PLATFORM_ADMIN') or hasAuthority('system:read')")
     @GetMapping("/system-status")
     public ResponseEntity<ApiResponse<SystemStatusResponse>> getSystemStatus() {
         HealthComponent health = healthEndpoint.health();

@@ -11,6 +11,7 @@ import com.fams.modules.tenant.repository.TenantRepository;
 import com.fams.shared.exception.ResourceNotFoundException;
 import com.fams.shared.exception.TenantSuspendedException;
 import com.fams.shared.security.JwtProvider;
+import com.fams.shared.security.HttpRequestUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
@@ -73,8 +74,23 @@ public class RefreshTokenService {
         }
 
         List<UserRole> roles = userRoleRepository.findAllActiveByUserId(user.getId());
-        UUID primaryTenantId = roles.isEmpty() ? null : roles.get(0).getTenantId();
-        String primaryRole = roles.isEmpty() ? null : roles.get(0).getRole().getName();
+
+        // Issue #3 (docs/issues/ISSUES.md): honor whichever tenant this session last switched
+        // to (POST /auth/switch-tenant) instead of always resetting to the oldest role
+        // assignment — falls back to the old "first role" behavior if no switch ever happened,
+        // or if the role that was active got revoked since the last refresh.
+        UserRole activeRole = null;
+        if (stored.getActiveTenantId() != null) {
+            activeRole = roles.stream()
+                    .filter(r -> stored.getActiveTenantId().equals(r.getTenantId()))
+                    .findFirst()
+                    .orElse(null);
+        }
+        if (activeRole == null) {
+            activeRole = roles.isEmpty() ? null : roles.get(0);
+        }
+        UUID primaryTenantId = activeRole != null ? activeRole.getTenantId() : null;
+        String primaryRole = activeRole != null ? activeRole.getRole().getName() : null;
 
         if (!user.isPlatformAdmin() && primaryTenantId != null) {
             tenantRepository.findByIdAndDeletedAtIsNull(primaryTenantId).ifPresent(tenant -> {
@@ -97,7 +113,10 @@ public class RefreshTokenService {
                 .user(user)
                 .tokenHash(jwtProvider.hashToken(rawNew))
                 .deviceId(stored.getDeviceId())
+                .userAgent(HttpRequestUtils.currentUserAgent())
+                .ipAddress(HttpRequestUtils.currentIpAddress())
                 .expiresAt(OffsetDateTime.now().plusDays(refreshTtlDays))
+                .activeTenantId(primaryTenantId)
                 .build();
         refreshTokenRepository.save(newToken);
 

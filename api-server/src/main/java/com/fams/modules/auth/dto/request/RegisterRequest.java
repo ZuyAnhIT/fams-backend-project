@@ -35,4 +35,10 @@ public class RegisterRequest {
 
     @Schema(description = "Unique device identifier for multi-device token tracking", example = "device-abc-123")
     private String deviceId;
+
+    @Schema(description = "Firebase phone-auth ID token proving OTP verification. Required when registering " +
+            "with `phone` and no `email` — the client must complete Firebase's phone OTP flow first and pass " +
+            "the resulting ID token here; the phone number inside the token must match `phone`.",
+            example = "eyJhbGciOiJSUzI1NiIsI...")
+    private String firebaseIdToken;
 }

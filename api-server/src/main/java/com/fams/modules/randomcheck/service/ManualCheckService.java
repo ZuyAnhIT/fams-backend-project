@@ -2,6 +2,7 @@ package com.fams.modules.randomcheck.service;
 
 import com.fams.modules.assignment.entity.Assignment;
 import com.fams.modules.assignment.repository.AssignmentRepository;
+import com.fams.modules.assignment.util.DayOfWeekBitmask;
 import com.fams.modules.randomcheck.dto.request.ManualCheckRequest;
 import com.fams.modules.randomcheck.entity.RandomCheckConfig;
 import com.fams.modules.randomcheck.entity.ScheduledCheck;
@@ -71,7 +72,8 @@ public class ManualCheckService {
 
         // Validate employee has an active assignment at this site today
         Assignment assignment = assignmentRepository
-                .findActiveAssignmentByEmployeeAndSite(tenantId, siteId, employeeId, today)
+                .findActiveAssignmentByEmployeeAndSite(tenantId, siteId, employeeId, today,
+                        DayOfWeekBitmask.bitForDate(today))
                 .orElseThrow(() -> new IllegalArgumentException(
                         "Employee " + employeeId + " has no active assignment at site " + siteId + " today"));
 

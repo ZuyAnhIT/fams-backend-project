@@ -1,5 +1,6 @@
 package com.fams.modules.rbac.controller;
 
+import com.fams.modules.rbac.dto.request.AssignPlatformRoleRequest;
 import com.fams.modules.rbac.dto.request.AssignRoleRequest;
 import com.fams.modules.rbac.dto.response.UserRoleResponse;
 import com.fams.modules.rbac.service.UserRoleService;
@@ -54,6 +55,32 @@ public class UserRoleController {
 
         UserRoleResponse result = userRoleService.assignRole(
                 userDetails.getUserId(), userDetails.isPlatformAdmin(), request);
+
+        return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success(result));
+    }
+
+    @Operation(summary = "Assign a platform-scoped (cross-tenant) system role",
+        description = "Issue #10 (docs/issues/ISSUES.md): grants a platform-wide system role (e.g. PLATFORM_STAFF) — " +
+            "no tenant context, applies across the whole platform. Platform Admins only.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "201", description = "Platform role assigned",
+            content = @Content(schema = @Schema(implementation = UserRoleResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Validation error, or role is tenant-owned"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Unauthorized"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "Platform Admin role required"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "User or role not found"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "409", description = "User already has this platform role")
+    })
+    @PostMapping("/platform")
+    @PreAuthorize("hasRole('PLATFORM_ADMIN')")
+    public ResponseEntity<ApiResponse<UserRoleResponse>> assignPlatformRole(
+            @Valid @RequestBody AssignPlatformRoleRequest request,
+            @AuthenticationPrincipal FamsUserDetails userDetails) {
+
+        log.info("Assign platform role: userId={} roleId={} by={}",
+                request.getUserId(), request.getRoleId(), userDetails.getUserId());
+
+        UserRoleResponse result = userRoleService.assignPlatformRole(userDetails.getUserId(), request);
 
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success(result));
     }

@@ -72,6 +72,15 @@ public class GlobalExceptionHandler {
                         "Bạn đã đạt giới hạn của gói dịch vụ hiện tại. Vui lòng nâng cấp gói để tiếp tục."));
     }
 
+    @ExceptionHandler(PlanDeactivationBlockedException.class)
+    public ResponseEntity<ApiResponse<Void>> handlePlanDeactivationBlocked(PlanDeactivationBlockedException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ApiResponse.error(
+                        ex.getMessage(),
+                        "PLAN_DEACTIVATION_BLOCKED",
+                        ex.getMessage()));
+    }
+
     @ExceptionHandler(TenantSuspendedException.class)
     public ResponseEntity<ApiResponse<Void>> handleTenantSuspended(TenantSuspendedException ex) {
         return ResponseEntity.status(HttpStatus.FORBIDDEN)
@@ -184,6 +193,15 @@ public class GlobalExceptionHandler {
                         "Mã OTP không hợp lệ hoặc đã hết hạn. Vui lòng yêu cầu mã mới."));
     }
 
+    @ExceptionHandler(PhoneNotVerifiedException.class)
+    public ResponseEntity<ApiResponse<Void>> handlePhoneNotVerified(PhoneNotVerifiedException ex) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(ApiResponse.error(
+                        ex.getMessage(),
+                        "PHONE_NOT_VERIFIED",
+                        "Vui lòng xác thực OTP gửi tới số điện thoại trước khi hoàn tất đăng ký."));
+    }
+
     @ExceptionHandler(ResourceNotFoundException.class)
     public ResponseEntity<ApiResponse<Void>> handleNotFound(ResourceNotFoundException ex) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND)
@@ -236,6 +254,20 @@ public class GlobalExceptionHandler {
                         "Unsupported media type",
                         "UNSUPPORTED_MEDIA_TYPE",
                         "Định dạng dữ liệu không được hỗ trợ. Vui lòng sử dụng application/json."));
+    }
+
+    @ExceptionHandler(org.springframework.web.servlet.resource.NoResourceFoundException.class)
+    public ResponseEntity<ApiResponse<Void>> handleNoResourceFound(
+            org.springframework.web.servlet.resource.NoResourceFoundException ex) {
+        // Issue #4 (docs/issues/ISSUES.md): a deleted/nonexistent uploaded file (e.g. an
+        // old avatar replaced by a new upload) must 404, not fall through to the generic
+        // 500 handler below — this static-resource serving path (WebConfig's /uploads/**
+        // mapping) didn't exist before this feature, so nothing had hit this case yet.
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(ApiResponse.error(
+                        "Resource not found",
+                        "RESOURCE_NOT_FOUND",
+                        "Không tìm thấy tài nguyên yêu cầu."));
     }
 
     @ExceptionHandler(Exception.class)

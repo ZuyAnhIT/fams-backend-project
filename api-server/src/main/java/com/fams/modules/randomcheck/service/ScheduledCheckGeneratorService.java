@@ -2,6 +2,7 @@ package com.fams.modules.randomcheck.service;
 
 import com.fams.modules.assignment.entity.Assignment;
 import com.fams.modules.assignment.repository.AssignmentRepository;
+import com.fams.modules.assignment.util.DayOfWeekBitmask;
 import com.fams.modules.randomcheck.entity.RandomCheckConfig;
 import com.fams.modules.randomcheck.entity.ScheduledCheck;
 import com.fams.modules.randomcheck.redis.RandomCheckDispatchQueue;
@@ -58,7 +59,8 @@ public class ScheduledCheckGeneratorService {
      */
     @Transactional
     public int generateForDate(LocalDate date) {
-        List<Assignment> assignments = assignmentRepository.findAllActiveAssignmentsWithShiftForDate(date);
+        List<Assignment> assignments = assignmentRepository.findAllActiveAssignmentsWithShiftForDate(
+                date, DayOfWeekBitmask.bitForDate(date));
         int generated = 0;
         for (Assignment assignment : assignments) {
             generated += generateForAssignment(assignment, date);
@@ -74,7 +76,8 @@ public class ScheduledCheckGeneratorService {
      */
     @Transactional
     public int generateForTenantAndDate(UUID tenantId, LocalDate date) {
-        List<Assignment> assignments = assignmentRepository.findActiveAssignmentsWithShiftForDate(tenantId, date);
+        List<Assignment> assignments = assignmentRepository.findActiveAssignmentsWithShiftForDate(
+                tenantId, date, DayOfWeekBitmask.bitForDate(date));
         int generated = 0;
         for (Assignment assignment : assignments) {
             generated += generateForAssignment(assignment, date);

@@ -60,9 +60,11 @@ Choose the variant that matches your work:
 **Java backend only (recommended for most development):**
 
 ```bash
-make setup      # start + seed demo data (first time)
-make dev-d      # subsequent starts
+make setup      # start (dev mode auto-seeds demo data on first boot)
+make dev-d      # subsequent starts — also auto-seeds (idempotent, safe to repeat)
 ```
+
+Dev mode (`docker-compose.dev.yml`) includes a one-shot `fams-seed` container that waits for the API to become healthy and then runs `scripts/seed.sh` automatically — anyone who clones the repo and runs the commands above ends up with the same Vietnamese demo dataset, with no separate manual step. This only happens in dev mode; `make prod`/`make full-d` (production-style images) are never auto-seeded. To force a re-seed on demand without restarting containers, run `make seed`.
 
 **Full stack including AI service (required for Face ID / liveness work):**
 
@@ -81,14 +83,12 @@ The first Java start downloads Docker images and Maven dependencies — this may
 ### 4. Verify the system is live
 
 ```bash
-curl http://localhost:8080/actuator/health
+curl http://localhost:8080/api/v1/auth/health
 ```
 
-Expected response:
+Expected response: `FAMS Auth Module is running`
 
-```json
-{"status":"UP"}
-```
+> **Note:** `curl http://localhost:8080/actuator/health` will report `{"status":"DOWN"}` (HTTP 503) unless `FCM_SERVICE_ACCOUNT_JSON` is a real Firebase credential — the `fcm` health indicator is treated as required for the aggregate status, even though every other part of the API works fine without it. Use the endpoint above for a quick liveness check instead.
 
 ---
 
@@ -103,28 +103,42 @@ After seeding, the following data is available:
 | Email | `admin@fams.com` |
 | Password | `Admin@1234` |
 
-**Demo tenants**
+**Demo tenants** (Vietnamese dataset)
 
 | Tenant | Slug | Plan | Sites | Employees |
 |---|---|---|---|---|
-| Acme Corp | `acme-corp` | Pro | 3 | 12 (Alice Walker, Bob Smith, Charlie Jones…) |
-| Beta Industries | `beta-industries` | Basic | 2 | 10 (Eve Taylor, Frank Wilson…) |
-| Gamma Logistics | `gamma-logistics` | Enterprise | 3 | 12 (Oscar Martinez, Patricia Chen…) |
+| Công ty CP Xây dựng Hoàng Long | `acme-corp` | Pro | 3 | 12 (Nguyễn Văn An, Trần Thị Bình, Lê Văn Cường…) |
+| Công ty TNHH Sản xuất Bình Minh | `beta-industries` | Basic | 2 | 10 (Đỗ Thị Xuân, Nguyễn Văn Yên, Phạm Thị Dung…) |
+| Công ty CP Logistics Phương Nam | `gamma-logistics` | Enterprise | 3 | 12 (Trịnh Văn Quang, Lý Thị Hồng, Trương Văn Đạt…) |
+| Công ty Khởi nghiệp Tia Sáng | `tia-sang-startup` | Trial | 1 | 5 — sits exactly at the trial plan's employee limit |
+| Công ty TNHH Đông Á | `dong-a-jsc` | Basic | 1 | 4 — **suspended** via the real `/suspend` API at the end of seeding |
 
-**Historical data (past 30 days)**
+**Multi-tenant people** — same login, two different tenants/roles, to model someone who works at more than one company:
 
-| Table | Count | Notes |
-|---|---|---|
-| `checkins` | ~672 | valid + pending_review; GPS coords, work minutes |
-| `attendance_summaries` | ~672 | late flags, OT minutes |
-| `scheduled_checks` | ~240 | responded + no_response statuses |
-| `check_responses` | ~182 | GPS + outcome |
-| `violations` | ~82 | no_response + location_fail; ~60% resolved |
-| `face_profiles` | 34 | enrolled / pending / revoked / not_enrolled |
-| `notifications` | 39 | 13 event types × 3 tenants |
-| `audit_logs` | 30 | 10 action types × 3 tenants |
+| Shared login (password `Admin@1234`) | Tenant A | Role A | Tenant B | Role B |
+|---|---|---|---|---|
+| `dung.pham.hr@gmail.com` (Phạm Thị Dung) | Hoàng Long | HR_MANAGER | Bình Minh | SITE_SUPERVISOR |
+| `truong.van.dat@gmail.com` (Trương Văn Đạt) | Phương Nam | EMPLOYEE | Tia Sáng | EMPLOYEE |
 
-The seed script is fully idempotent — safe to run multiple times.
+**Historical data (past 30 days, across all 5 tenants)**
+
+| Table | Notes |
+|---|---|
+| `checkins` | valid + pending_review; GPS coords, work minutes |
+| `attendance_summaries` | late flags, OT minutes, missing-checkout cases |
+| `scheduled_checks` | responded + no_response statuses |
+| `check_responses` | GPS + outcome |
+| `violations` | no_response + location_fail; ~60% resolved (confirmed/dismissed) |
+| `face_profiles` | enrolled (with demo embedding vector) / pending / revoked / not_enrolled |
+| `face_verify_requests` | ad-hoc pending/pass/fail face verification requests |
+| `notifications` | 13 Vietnamese event types × 5 tenants |
+| `notification_templates` | vi + en templates per event type |
+| `user_notification_settings` / `user_devices` / `notification_delivery_logs` | per-user channel prefs, FCM tokens, delivery attempts incl. retry-after-failure |
+| `audit_logs` | 11 action types × 5 tenants |
+| `tenant_settings` | branding + employee-code prefix per tenant |
+| `employee_invitations` | pending, accepted, cancelled (via API) + expired (backfilled) |
+
+Run `bash scripts/seed.sh` to (re)populate; it calls the API for anything reachable through it (tenants, sites, shifts, employees, departments, invitations, IP whitelist, workspaces/members, tenant suspend) and falls back to direct SQL (`scripts/seed_historical.sql`) only for what the API doesn't expose or can't backdate. The seed script is fully idempotent — safe to run multiple times.
 
 To reset and re-seed from scratch:
 

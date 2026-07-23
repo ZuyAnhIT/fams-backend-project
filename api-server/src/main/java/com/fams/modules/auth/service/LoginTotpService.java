@@ -8,11 +8,13 @@ import com.fams.modules.auth.repository.RefreshTokenRepository;
 import com.fams.modules.auth.repository.UserRepository;
 import com.fams.shared.exception.InvalidCredentialsException;
 import com.fams.shared.security.JwtProvider;
+import com.fams.shared.security.HttpRequestUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 import java.time.OffsetDateTime;
 import java.util.UUID;
@@ -70,8 +72,18 @@ public class LoginTotpService {
             throw new InvalidCredentialsException("TOTP is not configured for this account");
         }
 
-        if (!totpService.verifyCode(user.getTotpSecret(), request.getCode())) {
-            log.warn("Invalid TOTP code for user {}", email);
+        // Issue #5 (docs/issues/ISSUES.md): accept either a live TOTP code or a one-time
+        // backup code (for when the authenticator device is lost) — exactly one is required.
+        boolean verified;
+        if (StringUtils.hasText(request.getBackupCode())) {
+            verified = totpService.consumeBackupCode(userId, request.getBackupCode());
+        } else if (StringUtils.hasText(request.getCode())) {
+            verified = totpService.verifyStoredCode(user, request.getCode());
+        } else {
+            throw new InvalidCredentialsException("Provide either a TOTP code or a backup code");
+        }
+        if (!verified) {
+            log.warn("Invalid TOTP/backup code for user {}", email);
             throw new InvalidCredentialsException("Invalid TOTP code");
         }
 
@@ -86,6 +98,8 @@ public class LoginTotpService {
                 .user(user)
                 .tokenHash(tokenHash)
                 .deviceId(deviceId)
+                .userAgent(HttpRequestUtils.currentUserAgent())
+                .ipAddress(HttpRequestUtils.currentIpAddress())
                 .expiresAt(OffsetDateTime.now().plusDays(refreshTtlDays))
                 .build();
         refreshTokenRepository.save(refreshToken);

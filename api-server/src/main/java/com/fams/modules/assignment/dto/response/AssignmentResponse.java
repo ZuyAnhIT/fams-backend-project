@@ -5,8 +5,10 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Builder;
 import lombok.Data;
 
+import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.util.Set;
 import java.util.UUID;
 
 @Data
@@ -36,6 +38,10 @@ public class AssignmentResponse {
     @Schema(description = "Assignment end date (inclusive), or null for open-ended", example = "2026-12-31")
     @JsonFormat(pattern = "yyyy-MM-dd")
     private LocalDate endDate;
+
+    @Schema(description = "Weekdays this assignment is active on, or null if active every day",
+            example = "[\"MONDAY\",\"WEDNESDAY\",\"FRIDAY\"]")
+    private Set<DayOfWeek> daysOfWeek;
 
     @Schema(description = "Employee's role at the site: worker or supervisor", example = "worker")
     private String role;

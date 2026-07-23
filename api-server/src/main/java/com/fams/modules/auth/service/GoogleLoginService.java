@@ -8,7 +8,10 @@ import com.fams.modules.auth.repository.RefreshTokenRepository;
 import com.fams.modules.auth.repository.UserRepository;
 import com.fams.modules.rbac.entity.UserRole;
 import com.fams.modules.rbac.repository.UserRoleRepository;
+import com.fams.shared.exception.DuplicateResourceException;
+import com.fams.shared.exception.ResourceNotFoundException;
 import com.fams.shared.security.JwtProvider;
+import com.fams.shared.security.HttpRequestUtils;
 import com.google.api.client.googleapis.auth.oauth2.GoogleIdToken;
 import com.google.api.client.googleapis.auth.oauth2.GoogleIdTokenVerifier;
 import com.google.api.client.http.javanet.NetHttpTransport;
@@ -90,6 +93,8 @@ public class GoogleLoginService {
                 .user(user)
                 .tokenHash(jwtProvider.hashToken(rawRefreshToken))
                 .deviceId(deviceId)
+                .userAgent(HttpRequestUtils.currentUserAgent())
+                .ipAddress(HttpRequestUtils.currentIpAddress())
                 .expiresAt(OffsetDateTime.now().plusDays(refreshTtlDays))
                 .build();
         refreshTokenRepository.save(refreshToken);
@@ -102,6 +107,52 @@ public class GoogleLoginService {
                 .tokenType("Bearer")
                 .expiresIn((long) accessTtlMinutes * 60)
                 .build();
+    }
+
+    /**
+     * Issue #7 (docs/issues/ISSUES.md): explicit "connect my Google account" action for a
+     * user who is ALREADY logged in via email+password — rather than relying only on the
+     * implicit auto-link that happens the next time they use "Login with Google" with a
+     * matching email (still supported, unchanged, in {@link #loginWithGoogle}). Rejects if
+     * this Google account is already linked to a different FAMS user.
+     */
+    @Transactional
+    public void linkGoogleAccount(UUID userId, String idToken) {
+        GoogleIdToken.Payload payload = verifyToken(idToken);
+        String googleId = payload.getSubject();
+
+        userRepository.findByGoogleIdAndDeletedAtIsNull(googleId).ifPresent(existing -> {
+            if (!existing.getId().equals(userId)) {
+                throw new DuplicateResourceException("This Google account is already linked to a different user");
+            }
+        });
+
+        User user = userRepository.findByIdAndDeletedAtIsNull(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+        user.setGoogleId(googleId);
+        userRepository.save(user);
+        log.info("Google account linked for user id={}", userId);
+    }
+
+    /**
+     * Issue #7 (docs/issues/ISSUES.md): the reverse of linking. Requires the account to
+     * already have a password set — otherwise unlinking would leave the user with zero
+     * ways to prove identity on demand (they could still recover via forgot-password, but
+     * requiring a password first matches how most real systems guard against removing your
+     * only sign-in method).
+     */
+    @Transactional
+    public void unlinkGoogleAccount(UUID userId) {
+        User user = userRepository.findByIdAndDeletedAtIsNull(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+        if (user.getPasswordHash() == null) {
+            throw new IllegalStateException(
+                    "Set a password first (via Change Password or Forgot Password) before unlinking Google — "
+                            + "otherwise you would have no way to log in.");
+        }
+        user.setGoogleId(null);
+        userRepository.save(user);
+        log.info("Google account unlinked for user id={}", userId);
     }
 
     private User findOrCreateByEmail(String googleId, String email, String name, String picture) {

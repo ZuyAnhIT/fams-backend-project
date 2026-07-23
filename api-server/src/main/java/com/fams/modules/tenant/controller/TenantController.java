@@ -71,7 +71,7 @@ public class TenantController {
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "Platform Admin role required")
     })
     @GetMapping
-    @PreAuthorize("hasRole('PLATFORM_ADMIN')")
+    @PreAuthorize("hasRole('PLATFORM_ADMIN') or hasAuthority('tenants:list')")
     public ResponseEntity<ApiResponse<PageResponse<TenantResponse>>> listTenants(
             @Parameter(description = "Search by name or slug") @RequestParam(required = false) String search,
             @Parameter(description = "Filter by status") @RequestParam(required = false) String status,
@@ -97,7 +97,7 @@ public class TenantController {
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "Tenant not found")
     })
     @GetMapping("/{id}/detail")
-    @PreAuthorize("hasRole('PLATFORM_ADMIN')")
+    @PreAuthorize("hasRole('PLATFORM_ADMIN') or hasAuthority('tenants:read')")
     public ResponseEntity<ApiResponse<TenantDetailResponse>> getTenantDetail(
             @Parameter(description = "Tenant UUID") @PathVariable UUID id,
             @AuthenticationPrincipal FamsUserDetails userDetails) {
@@ -107,22 +107,25 @@ public class TenantController {
     }
 
     @Operation(summary = "Create a tenant",
-        description = "Provisions a new company workspace. Restricted to Platform Admins.")
+        description = "Issue #3 (docs/issues/ISSUES.md): provisions a new company workspace. Any authenticated "
+            + "user may self-serve create a company — they become that company's TENANT_ADMIN automatically and "
+            + "the tenant starts on the default (lowest-tier, zero-cost) plan. A user may own/belong to multiple "
+            + "companies at once. Platform Admins may also call this (e.g. provisioning on behalf of a customer); "
+            + "in that case no membership role is auto-assigned to the admin, matching prior behavior.")
     @ApiResponses({
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "201", description = "Tenant created",
             content = @Content(schema = @Schema(implementation = TenantResponse.class))),
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Validation error"),
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Unauthorized"),
-        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "Platform Admin role required"),
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "409", description = "Slug already taken")
     })
     @PostMapping
-    @PreAuthorize("hasRole('PLATFORM_ADMIN')")
     public ResponseEntity<ApiResponse<TenantResponse>> createTenant(
             @Valid @RequestBody CreateTenantRequest request,
             @AuthenticationPrincipal FamsUserDetails userDetails) {
         log.info("Create tenant request: slug={} by userId={}", request.getSlug(), userDetails.getUserId());
-        TenantResponse response = tenantService.createTenant(request, userDetails.getUserId());
+        TenantResponse response = tenantService.createTenant(
+                request, userDetails.getUserId(), userDetails.isPlatformAdmin());
         return ResponseEntity.status(201).body(ApiResponse.success(response));
     }
 

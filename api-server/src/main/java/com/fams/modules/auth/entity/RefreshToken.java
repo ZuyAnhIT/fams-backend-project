@@ -38,10 +38,28 @@ public class RefreshToken {
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
 
+    // Issue #6 (docs/issues/ISSUES.md): display metadata for a "my sessions" list.
+    @Column(name = "last_used_at")
+    private OffsetDateTime lastUsedAt;
+
+    @Column(name = "user_agent")
+    private String userAgent;
+
+    @Column(name = "ip_address")
+    private String ipAddress;
+
+    // Issue #3 (docs/issues/ISSUES.md): which tenant this session currently operates as, for
+    // multi-tenant users switching company without losing the switch on next token refresh.
+    @Column(name = "active_tenant_id")
+    private UUID activeTenantId;
+
     @PrePersist
     protected void onCreate() {
         if (createdAt == null) {
             createdAt = OffsetDateTime.now();
+        }
+        if (lastUsedAt == null) {
+            lastUsedAt = createdAt;
         }
     }
 }

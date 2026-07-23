@@ -14,6 +14,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.UUID;
 
@@ -22,9 +23,31 @@ import java.util.UUID;
 public class UserProfileService {
 
     private final UserRepository userRepository;
+    private final AvatarStorageService avatarStorageService;
 
-    public UserProfileService(UserRepository userRepository) {
+    public UserProfileService(UserRepository userRepository, AvatarStorageService avatarStorageService) {
         this.userRepository = userRepository;
+        this.avatarStorageService = avatarStorageService;
+    }
+
+    /**
+     * Issue #4 (docs/issues/ISSUES.md): actual file upload for the avatar, as opposed to
+     * {@link #updateProfile} which only accepts a pre-hosted URL string.
+     */
+    @Transactional
+    public UserProfileResponse updateAvatarFile(UUID userId, MultipartFile file) {
+        User user = userRepository.findByIdAndDeletedAtIsNull(userId)
+                .orElseThrow(() -> new InvalidCredentialsException("User not found"));
+
+        String previousUrl = user.getAvatarUrl();
+        String newUrl = avatarStorageService.store(userId, file);
+        user.setAvatarUrl(newUrl);
+        userRepository.save(user);
+
+        avatarStorageService.deleteIfManaged(previousUrl);
+
+        log.info("Avatar file uploaded for user {}", userId);
+        return toResponse(user);
     }
 
     @Transactional(readOnly = true)
@@ -58,6 +81,22 @@ public class UserProfileService {
             user.setAvatarUrl(request.getAvatarUrl().isEmpty() ? null : request.getAvatarUrl());
         }
 
+        // Issue #4 (docs/issues/ISSUES.md): hometown/gender/address follow the same
+        // "blank means not provided" convention as displayName above; dateOfBirth has no
+        // blank-string equivalent so any non-null value (validated @Past) is applied.
+        if (StringUtils.hasText(request.getHometown())) {
+            user.setHometown(request.getHometown());
+        }
+        if (StringUtils.hasText(request.getGender())) {
+            user.setGender(request.getGender());
+        }
+        if (StringUtils.hasText(request.getAddress())) {
+            user.setAddress(request.getAddress());
+        }
+        if (request.getDateOfBirth() != null) {
+            user.setDateOfBirth(request.getDateOfBirth());
+        }
+
         userRepository.save(user);
         log.info("Profile updated for user {}", userId);
 
@@ -78,6 +117,11 @@ public class UserProfileService {
                 .phone(user.getPhone())
                 .displayName(user.getDisplayName())
                 .avatarUrl(user.getAvatarUrl())
+                .dateOfBirth(user.getDateOfBirth())
+                .hometown(user.getHometown())
+                .gender(user.getGender())
+                .address(user.getAddress())
+                .googleLinked(user.getGoogleId() != null)
                 .isActive(user.isActive())
                 .createdAt(user.getCreatedAt())
                 .updatedAt(user.getUpdatedAt())

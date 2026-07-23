@@ -28,6 +28,11 @@ spring:
     locations: classpath:db/migration
     baseline-on-migrate: false
 
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 5MB
+
   data:
     redis:
       host: ${REDIS_HOST:localhost}
@@ -57,10 +62,30 @@ app:
     access-ttl-minutes: ${JWT_ACCESS_TTL_MINUTES:15}
     refresh-ttl-days: ${JWT_REFRESH_TTL_DAYS:30}
   otp:
-    dev-fixed-code: ${OTP_DEV_FIXED_CODE:}
-    rate-limit-max: ${OTP_RATE_LIMIT_MAX:3}
+    # Backlog #2 (Đăng nhập bằng số điện thoại OTP): per-IP request limit on
+    # /auth/otp/verify — Firebase itself gates the actual OTP code, this just
+    # throttles abuse of the verify endpoint (see FirebasePhoneLoginService).
+    rate-limit-max: ${OTP_RATE_LIMIT_MAX:10}
   email:
     verification-ttl-hours: ${EMAIL_VERIFICATION_TTL_HOURS:24}
+    resend-rate-limit-max: ${EMAIL_RESEND_RATE_LIMIT_MAX:3}
+  totp:
+    encryption-key: ${TOTP_ENCRYPTION_KEY}
+  s3:
+    # Issue #4 (docs/issues/ISSUES.md): avatar uploads via S3-compatible object storage.
+    # Dev/self-hosted: point at the MinIO container (docker-compose.dev.yml) by setting
+    # S3_ENDPOINT. Production: leave S3_ENDPOINT empty to talk to real AWS S3 with IAM
+    # credentials — same code path either way (see AvatarStorageService).
+    endpoint: ${S3_ENDPOINT:}
+    region: ${S3_REGION:us-east-1}
+    bucket: ${S3_BUCKET:fams-avatars}
+    access-key: ${S3_ACCESS_KEY:}
+    secret-key: ${S3_SECRET_KEY:}
+    # Deliberately separate from app.base-url: base-url points at the WEB FRONTEND origin
+    # (so emailed links are clickable there and Next.js proxies /api/** through to this
+    # backend — see fams-front-web-project/next.config.ts). That proxy doesn't cover
+    # object-storage URLs, so this must be the bucket's own public URL/CDN domain.
+    public-url: ${S3_PUBLIC_URL:http://localhost:9000/fams-avatars}
   password-reset:
     rate-limit-max: ${PASSWORD_RESET_RATE_LIMIT_MAX:3}
   invitation:
@@ -79,6 +104,12 @@ app:
   data-retention:
     delivery-log-days: ${DATA_RETENTION_DELIVERY_LOG_DAYS:30}
     notification-days: ${DATA_RETENTION_NOTIFICATION_DAYS:90}
+  cors:
+    # Only needed for browser clients that call this API cross-origin (Expo web dev
+    # server, and LAN-IP origins when testing the Expo web build from another device
+    # on the same network). Native iOS/Android and the Web Admin (which proxies /api/**
+    # same-origin via next.config.ts rewrites) are unaffected by CORS entirely.
+    allowed-origin-patterns: ${CORS_ALLOWED_ORIGIN_PATTERNS:http://localhost:*,http://127.0.0.1:*,http://192.168.*.*:*,http://10.*.*.*:*}
 
 management:
   endpoint:

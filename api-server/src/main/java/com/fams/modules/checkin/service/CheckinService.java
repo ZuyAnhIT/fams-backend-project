@@ -2,6 +2,7 @@ package com.fams.modules.checkin.service;
 
 import com.fams.modules.assignment.entity.Assignment;
 import com.fams.modules.assignment.repository.AssignmentRepository;
+import com.fams.modules.assignment.util.DayOfWeekBitmask;
 import com.fams.modules.attendance.service.AttendanceSummaryService;
 import com.fams.modules.checkin.dto.request.OverrideCheckinRequest;
 import com.fams.modules.checkin.dto.request.SubmitCheckinRequest;
@@ -94,7 +95,8 @@ public class CheckinService {
 
         LocalDate today = LocalDate.now();
         List<Assignment> assignments = assignmentRepository
-                .findActiveAssignmentsForEmployeeOnDate(tenantId, employee.getId(), today);
+                .findActiveAssignmentsForEmployeeOnDate(tenantId, employee.getId(), today,
+                        DayOfWeekBitmask.bitForDate(today));
 
         log.info("Available sites query: tenantId={} employeeId={} date={} found={}",
                 tenantId, employee.getId(), today, assignments.size());
@@ -116,7 +118,8 @@ public class CheckinService {
         // Validate active assignment for this employee at this site today
         LocalDate today = LocalDate.now();
         Assignment assignment = assignmentRepository
-                .findActiveAssignmentsForEmployeeOnDate(tenantId, employee.getId(), today)
+                .findActiveAssignmentsForEmployeeOnDate(tenantId, employee.getId(), today,
+                        DayOfWeekBitmask.bitForDate(today))
                 .stream()
                 .filter(a -> a.getSiteId().equals(request.getSiteId()))
                 .findFirst()

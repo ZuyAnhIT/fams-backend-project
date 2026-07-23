@@ -13,8 +13,11 @@ public class LoginTotpRequest {
     @NotBlank(message = "Pending token is required")
     private String pendingToken;
 
-    @Schema(description = "6-digit TOTP code from the Authenticator app", example = "123456")
-    @NotBlank(message = "Code is required")
+    @Schema(description = "6-digit TOTP code from the Authenticator app. Provide this OR backupCode.", example = "123456")
     @Pattern(regexp = "^\\d{6}$", message = "Code must be exactly 6 digits")
     private String code;
+
+    @Schema(description = "Issue #5 (docs/issues/ISSUES.md): a one-time backup code, used instead of `code` " +
+            "when the authenticator device is unavailable. Provide this OR code.", example = "A1B2C3D4")
+    private String backupCode;
 }
