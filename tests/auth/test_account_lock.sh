@@ -55,7 +55,7 @@ for i in 1 2 3 4; do
     run_test "Wrong password attempt $i/4 returns 401" 401 \
         -X POST "$BASE_URL/api/v1/auth/login" \
         -H "Content-Type: application/json" \
-        -d "{\"email\":\"$TEST_EMAIL\",\"password\":\"$WRONG_PASS\"}"
+        -d "{\"identifier\":\"$TEST_EMAIL\",\"password\":\"$WRONG_PASS\"}"
 done
 
 # ── Test 5: 5th wrong password → 423 (account now locked) ────────────────────
@@ -65,7 +65,7 @@ echo "--- Test 5: 5th wrong password should lock the account (423) ---"
 run_test "5th wrong password locks account (423)" 423 \
     -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d "{\"email\":\"$TEST_EMAIL\",\"password\":\"$WRONG_PASS\"}"
+    -d "{\"identifier\":\"$TEST_EMAIL\",\"password\":\"$WRONG_PASS\"}"
 
 # ── Test 6: Correct password while locked → 423 ──────────────────────────────
 
@@ -74,7 +74,7 @@ echo "--- Test 6: Correct password while account is locked should still return 4
 run_test "Correct password while locked returns 423" 423 \
     -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d "{\"email\":\"$TEST_EMAIL\",\"password\":\"$TEST_PASS\"}"
+    -d "{\"identifier\":\"$TEST_EMAIL\",\"password\":\"$TEST_PASS\"}"
 
 # ── Test 7: Wrong password on locked account → 423 (not 401) ─────────────────
 
@@ -83,7 +83,7 @@ echo "--- Test 7: Another wrong password on locked account should still return 4
 run_test "Wrong password on locked account returns 423" 423 \
     -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d "{\"email\":\"$TEST_EMAIL\",\"password\":\"$WRONG_PASS\"}"
+    -d "{\"identifier\":\"$TEST_EMAIL\",\"password\":\"$WRONG_PASS\"}"
 
 # ── Test 8–9: Successful login resets counter (admin account) ─────────────────
 
@@ -95,27 +95,27 @@ for i in 1 2 3; do
     curl -s -o /dev/null \
         -X POST "$BASE_URL/api/v1/auth/login" \
         -H "Content-Type: application/json" \
-        -d '{"email":"admin@fams.com","password":"WrongPass@999"}' > /dev/null
+        -d '{"identifier":"admin@fams.com","password":"WrongPass@999"}' > /dev/null
 done
 
 # Login correctly — should reset counter
 run_test "Correct login resets failed attempt counter (200)" 200 \
     -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d '{"email":"admin@fams.com","password":"Admin@1234"}'
+    -d '{"identifier":"admin@fams.com","password":"Admin@1234"}'
 
 # Send 3 more wrong passwords — should be 401 (counter was reset, not still at 3)
 run_test "Wrong password after counter reset returns 401 (not 423)" 401 \
     -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d '{"email":"admin@fams.com","password":"WrongPass@999"}'
+    -d '{"identifier":"admin@fams.com","password":"WrongPass@999"}'
 
 # Reset admin to clean state (2 more wrong + correct to get to 3 then reset)
 # Actually just do a correct login to reset back cleanly
 curl -s -o /dev/null \
     -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d '{"email":"admin@fams.com","password":"Admin@1234"}' > /dev/null
+    -d '{"identifier":"admin@fams.com","password":"Admin@1234"}' > /dev/null
 
 echo ""
 echo "=== Results ==="

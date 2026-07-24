@@ -26,7 +26,7 @@ run_test() {
 do_login() {
     curl -s -X POST "$BASE_URL/api/v1/auth/login" \
         -H "Content-Type: application/json" \
-        -d "{\"email\":\"admin@fams.com\",\"password\":\"Admin@1234\",\"deviceId\":\"$1\"}"
+        -d "{\"identifier\":\"admin@fams.com\",\"password\":\"Admin@1234\",\"deviceId\":\"$1\"}"
 }
 
 echo "=== Auth Logout-All Tests ==="

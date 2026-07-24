@@ -19,8 +19,14 @@ public class UserProfileResponse {
     @Schema(description = "Email address", example = "alice@acme.com")
     private String email;
 
+    @Schema(description = "Whether the email address has been verified (a freshly added/changed email is false until the link is clicked)")
+    private boolean emailVerified;
+
     @Schema(description = "Phone number in E.164 format", example = "+84912345678")
     private String phone;
+
+    @Schema(description = "Whether the phone number has been verified via OTP")
+    private boolean phoneVerified;
 
     @Schema(description = "Display name shown in the UI", example = "Alice Nguyen")
     private String displayName;

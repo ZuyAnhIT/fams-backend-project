@@ -54,7 +54,7 @@ echo "--- Setup: Login as admin and enable TOTP ---"
 admin_login=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d '{"email":"admin@fams.com","password":"Admin@1234"}')
+    -d '{"identifier":"admin@fams.com","password":"Admin@1234"}')
 admin_body=$(echo "$admin_login" | head -n -1)
 admin_status=$(echo "$admin_login" | tail -n 1)
 
@@ -97,7 +97,7 @@ echo "--- Test 1: Login with TOTP-enabled account returns totpRequired=true ---"
 login_response=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d '{"email":"admin@fams.com","password":"Admin@1234"}')
+    -d '{"identifier":"admin@fams.com","password":"Admin@1234"}')
 login_body=$(echo "$login_response" | head -n -1)
 login_status=$(echo "$login_response" | tail -n 1)
 
@@ -167,7 +167,7 @@ if [ -n "$PENDING_TOKEN" ]; then
     fresh_login=$(curl -s \
         -X POST "$BASE_URL/api/v1/auth/login" \
         -H "Content-Type: application/json" \
-        -d '{"email":"admin@fams.com","password":"Admin@1234"}')
+        -d '{"identifier":"admin@fams.com","password":"Admin@1234"}')
     FRESH_PENDING=$(echo "$fresh_login" | grep -o '"pendingToken":"[^"]*"' | head -1 | cut -d'"' -f4)
 
     run_test "login/totp - wrong TOTP code" 401 \
@@ -187,7 +187,7 @@ echo "--- Test 7: login/totp - correct TOTP code (full flow) ---"
 pending_login=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d '{"email":"admin@fams.com","password":"Admin@1234"}')
+    -d '{"identifier":"admin@fams.com","password":"Admin@1234"}')
 pending_body=$(echo "$pending_login" | head -n -1)
 pending_status=$(echo "$pending_login" | tail -n 1)
 VALID_PENDING=$(echo "$pending_body" | grep -o '"pendingToken":"[^"]*"' | head -1 | cut -d'"' -f4)

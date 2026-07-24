@@ -26,10 +26,10 @@ EMAIL="sessions_${TS}@fams.com"
 register_verified_test_user_token "$BASE_URL" "Session Test" "$EMAIL" > /dev/null
 
 TOKEN_A=$(curl -s -X POST "$BASE_URL/api/v1/auth/login" -H "Content-Type: application/json" \
-    -d "{\"email\":\"$EMAIL\",\"password\":\"TestPass1\",\"deviceId\":\"device-a-${TS}\"}" \
+    -d "{\"identifier\":\"$EMAIL\",\"password\":\"TestPass1\",\"deviceId\":\"device-a-${TS}\"}" \
     | grep -o '"accessToken":"[^"]*"' | cut -d'"' -f4)
 TOKEN_B=$(curl -s -X POST "$BASE_URL/api/v1/auth/login" -H "Content-Type: application/json" \
-    -d "{\"email\":\"$EMAIL\",\"password\":\"TestPass1\",\"deviceId\":\"device-b-${TS}\"}" \
+    -d "{\"identifier\":\"$EMAIL\",\"password\":\"TestPass1\",\"deviceId\":\"device-b-${TS}\"}" \
     | grep -o '"accessToken":"[^"]*"' | cut -d'"' -f4)
 
 if [ -z "$TOKEN_A" ] || [ -z "$TOKEN_B" ]; then
@@ -101,6 +101,14 @@ else
     fail "Unexpected remaining sessions: $remaining"
 fi
 
+device_b_access_status=$(curl -s -o /dev/null -w "%{http_code}" -X GET "$BASE_URL/api/v1/auth/me" \
+    -H "Authorization: Bearer $TOKEN_B")
+if [ "$device_b_access_status" -eq 401 ]; then
+    pass "Targeted logout invalidates device-b access token immediately"
+else
+    fail "Targeted logout left device-b access token usable (HTTP $device_b_access_status)"
+fi
+
 # Test 5: Logging out a non-existent/already-revoked session ID → 404
 echo ""
 echo "--- Test 5: DELETE already-revoked session → 404 ---"
@@ -133,10 +141,11 @@ echo "--- Test 7: POST /auth/logout/others keeps current session, revokes the re
 EMAIL2="sessions_others_${TS}@fams.com"
 register_verified_test_user_token "$BASE_URL" "Logout Others Test" "$EMAIL2" > /dev/null
 T_A=$(curl -s -X POST "$BASE_URL/api/v1/auth/login" -H "Content-Type: application/json" \
-    -d "{\"email\":\"$EMAIL2\",\"password\":\"TestPass1\",\"deviceId\":\"keep-me-${TS}\"}" \
+    -d "{\"identifier\":\"$EMAIL2\",\"password\":\"TestPass1\",\"deviceId\":\"keep-me-${TS}\"}" \
     | grep -o '"accessToken":"[^"]*"' | cut -d'"' -f4)
-curl -s -o /dev/null -X POST "$BASE_URL/api/v1/auth/login" -H "Content-Type: application/json" \
-    -d "{\"email\":\"$EMAIL2\",\"password\":\"TestPass1\",\"deviceId\":\"drop-me-${TS}\"}"
+T_B=$(curl -s -X POST "$BASE_URL/api/v1/auth/login" -H "Content-Type: application/json" \
+    -d "{\"identifier\":\"$EMAIL2\",\"password\":\"TestPass1\",\"deviceId\":\"drop-me-${TS}\"}" \
+    | grep -o '"accessToken":"[^"]*"' | cut -d'"' -f4)
 
 logout_others_status=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE_URL/api/v1/auth/logout/others" \
     -H "Authorization: Bearer $T_A")
@@ -146,6 +155,16 @@ if [ "$logout_others_status" -eq 200 ] && [[ "$remaining2" == *"keep-me-${TS}"* 
     pass "logout/others: current session kept, other device(s) revoked"
 else
     fail "logout/others — status=$logout_others_status remaining=$remaining2"
+fi
+
+kept_access_status=$(curl -s -o /dev/null -w "%{http_code}" -X GET "$BASE_URL/api/v1/auth/me" \
+    -H "Authorization: Bearer $T_A")
+dropped_access_status=$(curl -s -o /dev/null -w "%{http_code}" -X GET "$BASE_URL/api/v1/auth/me" \
+    -H "Authorization: Bearer $T_B")
+if [ "$kept_access_status" -eq 200 ] && [ "$dropped_access_status" -eq 401 ]; then
+    pass "logout/others keeps current access token and immediately invalidates other device access tokens"
+else
+    fail "logout/others access-token state unexpected: kept=$kept_access_status dropped=$dropped_access_status"
 fi
 
 # Test 8: No auth → 401 on all three new endpoints

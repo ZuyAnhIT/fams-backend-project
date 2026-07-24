@@ -86,7 +86,8 @@ public class SecurityConfig {
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.GET, "/api/v1/auth/health", "/api/v1/auth/db-health",
-                                "/api/v1/auth/verify-email", "/api/v1/auth/totp/qr").permitAll()
+                                "/api/v1/auth/verify-email", "/api/v1/auth/profile/email/confirm-change",
+                                "/api/v1/auth/totp/qr").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/login").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/register").permitAll()
                         // FIX: đăng ký bằng phone cần endpoint gửi OTP trước — thiếu dòng này

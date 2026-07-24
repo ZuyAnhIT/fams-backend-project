@@ -36,7 +36,7 @@ echo "--- Test 1: Happy path (correct credentials) ---"
 response=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d '{"email":"admin@fams.com","password":"Admin@1234"}')
+    -d '{"identifier":"admin@fams.com","password":"Admin@1234"}')
 
 body=$(echo "$response" | head -n -1)
 status=$(echo "$response" | tail -n 1)
@@ -64,7 +64,7 @@ echo "--- Test 2: Wrong password ---"
 run_test "Wrong password" 401 \
     -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d '{"email":"admin@fams.com","password":"WrongPass1"}'
+    -d '{"identifier":"admin@fams.com","password":"WrongPass1"}'
 
 # Test 3: Missing email field → 400
 echo ""
@@ -80,7 +80,7 @@ echo "--- Test 4: Non-existent email ---"
 run_test "Non-existent email" 401 \
     -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d '{"email":"nobody@fams.com","password":"Admin@1234"}'
+    -d '{"identifier":"nobody@fams.com","password":"Admin@1234"}'
 
 # Test 5: Unverified email user cannot login → 403
 echo ""
@@ -94,7 +94,7 @@ curl -s -o /dev/null -X POST "$BASE_URL/api/v1/auth/register" \
 run_test "Unverified email login blocked" 403 \
     -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d "{\"email\":\"$UNVERIFIED_EMAIL\",\"password\":\"TestPass1\"}"
+    -d "{\"identifier\":\"$UNVERIFIED_EMAIL\",\"password\":\"TestPass1\"}"
 
 echo ""
 echo "=== Results ==="

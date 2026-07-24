@@ -118,7 +118,7 @@ GOOGLE_ONLY_EMAIL="google_only_${TS}@fams.com"
 
 # Sanity: normal login with a guessed password must NOT crash (null passwordHash) — 401, not 500
 login_attempt_status=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE_URL/api/v1/auth/login" \
-    -H "Content-Type: application/json" -d "{\"email\":\"$GOOGLE_ONLY_EMAIL\",\"password\":\"WhateverPass1\"}")
+    -H "Content-Type: application/json" -d "{\"identifier\":\"$GOOGLE_ONLY_EMAIL\",\"password\":\"WhateverPass1\"}")
 if [ "$login_attempt_status" -ne 401 ]; then
     fail "Login attempt on Google-only account before password is set — expected 401, got $login_attempt_status (possible null-password crash)"
 else
@@ -145,7 +145,7 @@ if [ -n "$RESET_TOKEN" ]; then
     reset_status=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE_URL/api/v1/auth/reset-password" \
         -H "Content-Type: application/json" -d "{\"token\":\"$RESET_TOKEN\",\"newPassword\":\"NewPass123\"}")
     login_status=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE_URL/api/v1/auth/login" \
-        -H "Content-Type: application/json" -d "{\"email\":\"$GOOGLE_ONLY_EMAIL\",\"password\":\"NewPass123\"}")
+        -H "Content-Type: application/json" -d "{\"identifier\":\"$GOOGLE_ONLY_EMAIL\",\"password\":\"NewPass123\"}")
     if [ "$reset_status" -eq 200 ] && [ "$login_status" -eq 200 ]; then
         pass "Google-only account set a password via forgot-password and logged in normally afterward"
     else

@@ -6,12 +6,15 @@ import com.fams.modules.auth.repository.RefreshTokenRepository;
 import com.fams.modules.auth.repository.UserRepository;
 import com.fams.shared.exception.InvalidCredentialsException;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 @Slf4j
 @Service
@@ -20,18 +23,33 @@ public class ChangePasswordService {
     private final UserRepository userRepository;
     private final RefreshTokenRepository refreshTokenRepository;
     private final BCryptPasswordEncoder passwordEncoder;
+    private final StringRedisTemplate redis;
+    private final LogoutService logoutService;
+    private final int accessTtlMinutes;
 
     public ChangePasswordService(
             UserRepository userRepository,
             RefreshTokenRepository refreshTokenRepository,
-            BCryptPasswordEncoder passwordEncoder) {
+            BCryptPasswordEncoder passwordEncoder,
+            StringRedisTemplate redis,
+            LogoutService logoutService,
+            @Value("${app.jwt.access-ttl-minutes}") int accessTtlMinutes) {
         this.userRepository = userRepository;
         this.refreshTokenRepository = refreshTokenRepository;
         this.passwordEncoder = passwordEncoder;
+        this.redis = redis;
+        this.logoutService = logoutService;
+        this.accessTtlMinutes = accessTtlMinutes;
     }
 
+    /**
+     * @param rawAccessToken the token used to authenticate THIS request (from the
+     *                       Authorization header) — blacklisted directly and immediately so
+     *                       it remains deterministic even though the user-wide timestamp
+     *                       mechanism also invalidates every sibling session.
+     */
     @Transactional
-    public void changePassword(UUID userId, ChangePasswordRequest request) {
+    public void changePassword(UUID userId, ChangePasswordRequest request, String rawAccessToken) {
         User user = userRepository.findByIdAndDeletedAtIsNull(userId)
                 .orElseThrow(() -> new InvalidCredentialsException("User not found"));
 
@@ -43,9 +61,20 @@ public class ChangePasswordService {
         user.setPasswordHash(passwordEncoder.encode(request.getNewPassword()));
         userRepository.save(user);
 
-        // Revoke all refresh tokens so other sessions are invalidated
+        // Revoke all refresh tokens so no session can silently get a new access token...
         refreshTokenRepository.revokeAllActiveByUserId(userId, OffsetDateTime.now());
 
-        log.info("Password changed successfully for user {}", userId);
+        // ...kill every OTHER already-issued access token (other devices) via the same
+        // timestamp mechanism LogoutService.logoutAll() uses...
+        String userRevokeKey = LogoutService.USER_REVOKE_PREFIX + userId;
+        long revokeMillis = System.currentTimeMillis();
+        redis.opsForValue().set(userRevokeKey, String.valueOf(revokeMillis),
+                accessTtlMinutes + 1, TimeUnit.MINUTES);
+
+        // ...and blacklist THIS request's own token directly and exactly, so it dies right
+        // now regardless of the one-second race above.
+        logoutService.blacklistAccessToken(rawAccessToken);
+
+        log.info("Password changed successfully for user {} — all sessions invalidated", userId);
     }
 }

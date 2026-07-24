@@ -99,23 +99,50 @@ run_test "Happy path" 200 \
     -H "Authorization: Bearer $ACCESS_TOKEN" \
     -d "{\"currentPassword\":\"$ORIGINAL_PASSWORD\",\"newPassword\":\"$NEW_PASSWORD\"}"
 
-# Test 7: Use new password as currentPassword to change again → 200 (verifies new password was persisted)
+# Test 7: The access token used to make the change is immediately dead — not just refresh
+# tokens revoked, the ACCESS token itself must stop working right away (not wait out its
+# remaining TTL), otherwise a leaked/stale token would keep granting access after the user
+# changed password specifically because they suspected it was compromised.
 echo ""
-echo "--- Test 7: New password accepted as currentPassword (verify change persisted) ---"
-run_test "New password accepted as currentPassword" 200 \
+echo "--- Test 7: Access token used for the change is invalidated immediately ---"
+run_test "Old access token rejected immediately after change" 401 \
+    -X GET "$BASE_URL/api/v1/auth/me" \
+    -H "Authorization: Bearer $ACCESS_TOKEN"
+
+# Test 8: Old password no longer works — login with a fresh token using the new password
+echo ""
+echo "--- Test 8: Login with new password (old token is dead, must re-authenticate) ---"
+# Regression guard: the fresh login must work immediately, even inside the same wall-clock
+# second as the revoke event. Access tokens carry issuedAtMillis for this distinction.
+login_response=$(curl -s -X POST "$BASE_URL/api/v1/auth/login" \
+    -H "Content-Type: application/json" \
+    -d "{\"identifier\":\"$TEST_EMAIL\",\"password\":\"$NEW_PASSWORD\"}")
+ACCESS_TOKEN_2=$(echo "$login_response" | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4)
+if [ -n "$ACCESS_TOKEN_2" ]; then
+    echo "PASS: Login with new password succeeds, fresh token obtained"
+    PASS=$((PASS + 1))
+else
+    echo "FAIL: Could not log in with new password. Body: $login_response"
+    FAIL=$((FAIL + 1))
+fi
+
+# Test 9: With the fresh token, change again — verifies new password was actually persisted
+# (not just that the old token died) and that the endpoint still works on a second call.
+echo ""
+echo "--- Test 9: Change password again with fresh token (verify persisted, still works) ---"
+run_test "Second change with fresh token" 200 \
     -X POST "$BASE_URL/api/v1/auth/change-password" \
     -H "Content-Type: application/json" \
-    -H "Authorization: Bearer $ACCESS_TOKEN" \
+    -H "Authorization: Bearer $ACCESS_TOKEN_2" \
     -d "{\"currentPassword\":\"$NEW_PASSWORD\",\"newPassword\":\"$SECOND_NEW_PASSWORD\"}"
 
-# Test 8: Use original password as currentPassword → 401 (old password no longer valid)
+# Test 10: Original (pre-change) password rejected on login — old password no longer valid
 echo ""
-echo "--- Test 8: Original password rejected as currentPassword ---"
-run_test "Original password rejected" 401 \
-    -X POST "$BASE_URL/api/v1/auth/change-password" \
+echo "--- Test 10: Original password rejected on login ---"
+run_test "Original password rejected on login" 401 \
+    -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -H "Authorization: Bearer $ACCESS_TOKEN" \
-    -d "{\"currentPassword\":\"$ORIGINAL_PASSWORD\",\"newPassword\":\"AnyNew@999\"}"
+    -d "{\"identifier\":\"$TEST_EMAIL\",\"password\":\"$ORIGINAL_PASSWORD\"}"
 
 echo ""
 echo "=== Results ==="

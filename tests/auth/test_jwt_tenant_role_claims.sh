@@ -45,7 +45,7 @@ echo "--- Setup: Login as platform admin ---"
 login_resp=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d '{"email":"admin@fams.com","password":"Admin@1234"}')
+    -d '{"identifier":"admin@fams.com","password":"Admin@1234"}')
 login_body=$(echo "$login_resp" | head -n -1)
 login_status=$(echo "$login_resp" | tail -n 1)
 if [ "$login_status" -ne 200 ]; then
@@ -129,7 +129,7 @@ echo "--- Test 2: Token after role assignment has tenantId ---"
 login2_resp=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d '{"email":"admin@fams.com","password":"Admin@1234"}')
+    -d '{"identifier":"admin@fams.com","password":"Admin@1234"}')
 login2_body=$(echo "$login2_resp" | head -n -1)
 login2_status=$(echo "$login2_resp" | tail -n 1)
 if [ "$login2_status" -ne 200 ]; then

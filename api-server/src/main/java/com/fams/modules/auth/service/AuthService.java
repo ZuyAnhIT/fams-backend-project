@@ -7,6 +7,7 @@ import com.fams.modules.auth.entity.RefreshToken;
 import com.fams.modules.auth.entity.User;
 import com.fams.modules.auth.repository.RefreshTokenRepository;
 import com.fams.modules.auth.repository.UserRepository;
+import com.fams.modules.auth.util.PhoneNumbers;
 import com.fams.modules.rbac.entity.UserRole;
 import com.fams.modules.rbac.repository.UserRoleRepository;
 import com.fams.modules.tenant.repository.TenantRepository;
@@ -243,25 +244,9 @@ public class AuthService {
                     .orElseThrow(() -> new InvalidCredentialsException("Invalid credentials"));
         }
 
-        String normalizedPhone = normalizePhone(trimmed);
+        String normalizedPhone = PhoneNumbers.normalize(trimmed);
         return userRepository.findByPhoneAndDeletedAtIsNull(normalizedPhone)
                 .orElseThrow(() -> new InvalidCredentialsException("Invalid credentials"));
-    }
-
-    /**
-     * Chuẩn hoá số điện thoại về E.164 — PHẢI đồng nhất với
-     * RegisterService.normalizePhone() vì đây là cùng một dữ liệu lưu trong
-     * cột users.phone. Nếu hai nơi chuẩn hoá khác nhau, user đăng ký bằng
-     * "0912..." sẽ không login lại được vì tra theo "+84912..." bị lệch.
-     */
-    private String normalizePhone(String phone) {
-        String cleaned = phone.trim();
-        if (cleaned.startsWith("0")) {
-            cleaned = "+84" + cleaned.substring(1);
-        } else if (!cleaned.startsWith("+")) {
-            cleaned = "+" + cleaned;
-        }
-        return cleaned;
     }
 
     /**
