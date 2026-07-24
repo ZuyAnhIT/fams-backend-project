@@ -7,6 +7,8 @@ import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
 
+import java.util.UUID;
+
 @Data
 @Schema(description = "Create a new tenant (company workspace)")
 public class CreateTenantRequest {
@@ -47,11 +49,18 @@ public class CreateTenantRequest {
     @Size(min = 3, max = 3, message = "Currency code must be exactly 3 characters")
     private String currencyCode;
 
-    @Schema(description = "Issue #12 (docs/issues/ISSUES.md): optional email of a different person " +
-            "to invite as this tenant's admin/owner. If omitted (or equal to the caller's own email), " +
-            "the creator becomes the tenant admin as before. If set to someone else, an invitation " +
-            "email is sent to THEM (not the creator) — the creator still keeps admin access too, so " +
-            "the tenant is never left without anyone able to manage it while the invite is pending.",
+    @Schema(description = "Platform-provisioning only (requires the `tenants:create` permission — Platform "
+            + "Admin or Platform Staff). The UUID of an EXISTING FAMS user to assign as this tenant's owner/"
+            + "TENANT_ADMIN — that person must already have an account (this does not send an invitation or "
+            + "create a user). Ignored (and must be omitted) for a self-service creation, where the caller "
+            + "always becomes their own tenant's owner. Exactly one of ownerUserId/ownerEmail is required "
+            + "when provisioning on behalf of someone else.",
+            example = "550e8400-e29b-41d4-a716-446655440000")
+    private UUID ownerUserId;
+
+    @Schema(description = "Platform-provisioning only — alternative to ownerUserId: look up the existing "
+            + "owner by email instead of UUID. Returns 404 if no account with this email exists (this is "
+            + "intentionally NOT an invitation — the person must already be a registered FAMS user).",
             example = "owner@example.com")
     @Email(message = "ownerEmail must be a valid email address")
     private String ownerEmail;

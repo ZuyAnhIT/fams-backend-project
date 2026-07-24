@@ -57,7 +57,7 @@ echo "--- Setup: Login as platform admin ---"
 login_response=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d '{"email":"admin@fams.com","password":"Admin@1234"}')
+    -d '{"identifier":"admin@fams.com","password":"Admin@1234"}')
 login_body=$(echo "$login_response" | head -n -1)
 login_status=$(echo "$login_response" | tail -n 1)
 
@@ -72,14 +72,23 @@ if [ -z "$ADMIN_TOKEN" ]; then
 fi
 echo "Admin token obtained."
 
+# --- Setup: Register an existing user to be the tenant's owner (now required — see
+# TenantService.createTenant, platform-admin-provisioned tenants assign a direct owner) ---
+TS=$(date +%s)
+OWNER_EMAIL="tenant_detail_owner_${TS}@fams.com"
+curl -s -o /dev/null -X POST "$BASE_URL/api/v1/auth/register" -H "Content-Type: application/json" \
+    -d "{\"email\":\"$OWNER_EMAIL\",\"password\":\"TestPass1\",\"displayName\":\"Detail Owner\"}"
+docker exec fams-postgres psql -U fams_user -d fams_db -q -c \
+    "UPDATE users SET email_verified = true WHERE email = '$OWNER_EMAIL';" > /dev/null
+
 # --- Setup: Create a test tenant ---
 echo "--- Setup: Create a test tenant ---"
-SLUG="test-detail-$(date +%s)"
+SLUG="test-detail-${TS}"
 create_response=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/tenants" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"name\":\"Detail Test Tenant\",\"slug\":\"$SLUG\",\"industry\":\"tech\",\"countryCode\":\"VN\"}")
+    -d "{\"name\":\"Detail Test Tenant\",\"slug\":\"$SLUG\",\"industry\":\"tech\",\"countryCode\":\"VN\",\"ownerEmail\":\"$OWNER_EMAIL\"}")
 create_body=$(echo "$create_response" | head -n -1)
 create_status=$(echo "$create_response" | tail -n 1)
 

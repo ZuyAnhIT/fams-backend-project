@@ -829,13 +829,13 @@ Cần Bearer token.
 Thành công `200`, `data: null`. Gửi email chứa link xác thực tới địa chỉ **mới**:
 
 ```text
-{APP_BASE_URL}/api/v1/auth/profile/email/confirm-change?token=<changeToken>
+{APP_FRONTEND_URL}/verify-email?token=<changeToken>&mode=email-change
 ```
 
-Web có thể để link gọi thẳng API, hoặc cấu hình proxy chuyển GET path trên sang
-`/verify-email?token=<changeToken>&mode=email-change` để hiển thị trang kết quả thân thiện. Khi dùng
-trang frontend, tham số `mode=email-change` giúp route gọi đúng API bước 2 dưới đây thay vì API xác
-thực email đăng ký ở mục 3.3; hai loại token nằm ở namespace khác nhau.
+Frontend hiển thị trang kết quả thân thiện rồi gọi BFF/API xác nhận tương ứng. Tham số
+`mode=email-change` giúp route gọi đúng API bước 2 dưới đây thay vì API xác thực email đăng ký ở
+mục 3.3; hai loại token nằm ở namespace khác nhau. Frontend vẫn có thể giữ proxy cho các link cũ
+từng trỏ thẳng tới `/api/v1/auth/profile/email/confirm-change`.
 
 Lỗi:
 

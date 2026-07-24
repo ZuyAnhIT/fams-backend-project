@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # Tests for PATCH /api/v1/tenants/{id} (update tenant profile)
 # Usage: BASE_URL=http://localhost:8080 bash test_update_tenant.sh
+#
+# Owner-only by product decision (24/07/2026): whoever provisions a tenant — including
+# Platform Admin/Staff — does NOT retain edit rights afterward. Only the assigned owner
+# can PATCH the tenant's profile. See TenantService.updateTenant.
 
 set -euo pipefail
 
@@ -36,7 +40,7 @@ echo "--- Setup: Login as platform admin ---"
 login_response=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d '{"email":"admin@fams.com","password":"Admin@1234"}')
+    -d '{"identifier":"admin@fams.com","password":"Admin@1234"}')
 
 login_body=$(echo "$login_response" | head -n -1)
 login_status=$(echo "$login_response" | tail -n 1)
@@ -49,13 +53,28 @@ fi
 ADMIN_TOKEN=$(echo "$login_body" | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4)
 echo "Admin token obtained."
 
-# Create a tenant to update
+# Register the tenant's owner (must already exist — platform-admin creation assigns a
+# direct owner, not an invitation) and a separate regular (non-owner) user for Test 6.
 TS=$(date +%s)
+OWNER_EMAIL="update_tenant_owner_${TS}@fams.com"
+curl -s -o /dev/null -X POST "$BASE_URL/api/v1/auth/register" -H "Content-Type: application/json" \
+    -d "{\"email\":\"$OWNER_EMAIL\",\"password\":\"TestPass1\",\"displayName\":\"Update Test Owner\"}"
+docker exec fams-postgres psql -U fams_user -d fams_db -q -c \
+    "UPDATE users SET email_verified = true WHERE email = '$OWNER_EMAIL';" > /dev/null
+OWNER_LOGIN=$(curl -s -X POST "$BASE_URL/api/v1/auth/login" -H "Content-Type: application/json" \
+    -d "{\"identifier\":\"$OWNER_EMAIL\",\"password\":\"TestPass1\"}")
+OWNER_TOKEN=$(echo "$OWNER_LOGIN" | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4)
+echo "Owner token obtained."
+
+REGULAR_TOKEN=$(register_verified_test_user_token "$BASE_URL" "Regular")
+echo "Regular user token obtained."
+
+# Create a tenant to update, assigned to OWNER_EMAIL
 create_body=$(curl -s \
     -X POST "$BASE_URL/api/v1/tenants" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"name\":\"Update Test Corp\",\"slug\":\"update-test-$TS\"}")
+    -d "{\"name\":\"Update Test Corp\",\"slug\":\"update-test-$TS\",\"ownerEmail\":\"$OWNER_EMAIL\"}")
 
 TENANT_ID=$(echo "$create_body" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 if [ -z "$TENANT_ID" ]; then
@@ -63,19 +82,15 @@ if [ -z "$TENANT_ID" ]; then
     echo "Body: $create_body"
     exit 1
 fi
-echo "Test tenant created: id=$TENANT_ID"
-
-# Register a regular (non-admin) user
-REGULAR_TOKEN=$(register_verified_test_user_token "$BASE_URL" "Regular")
-echo "Regular user token obtained."
+echo "Test tenant created: id=$TENANT_ID owner=$OWNER_EMAIL"
 echo ""
 
-# Test 1: Happy path — platform admin updates any field
-echo "--- Test 1: Happy path (platform admin updates name and timezone) ---"
+# Test 1: Happy path — the OWNER updates their own tenant
+echo "--- Test 1: Happy path (owner updates name and timezone) ---"
 update_response=$(curl -s -w "\n%{http_code}" \
     -X PATCH "$BASE_URL/api/v1/tenants/$TENANT_ID" \
     -H "Content-Type: application/json" \
-    -H "Authorization: Bearer $ADMIN_TOKEN" \
+    -H "Authorization: Bearer $OWNER_TOKEN" \
     -d '{"name":"Updated Corp Name","timezone":"Asia/Ho_Chi_Minh","industry":"Finance","countryCode":"VN"}')
 
 update_body=$(echo "$update_response" | head -n -1)
@@ -98,13 +113,13 @@ else
     FAIL=$((FAIL + 1))
 fi
 
-# Test 2: Partial update (only one field)
+# Test 2: Partial update (only one field), still as owner
 echo ""
 echo "--- Test 2: Partial update (logoUrl only) ---"
 partial_response=$(curl -s -w "\n%{http_code}" \
     -X PATCH "$BASE_URL/api/v1/tenants/$TENANT_ID" \
     -H "Content-Type: application/json" \
-    -H "Authorization: Bearer $ADMIN_TOKEN" \
+    -H "Authorization: Bearer $OWNER_TOKEN" \
     -d '{"logoUrl":"https://example.com/logo.png"}')
 
 partial_body=$(echo "$partial_response" | head -n -1)
@@ -125,23 +140,23 @@ else
     FAIL=$((FAIL + 1))
 fi
 
-# Test 3: Validation error — name too short
+# Test 3: Validation error — name too short (as owner)
 echo ""
 echo "--- Test 3: Validation error (name too short) ---"
 run_test "Name too short" 400 \
     -X PATCH "$BASE_URL/api/v1/tenants/$TENANT_ID" \
     -H "Content-Type: application/json" \
-    -H "Authorization: Bearer $ADMIN_TOKEN" \
+    -H "Authorization: Bearer $OWNER_TOKEN" \
     -d '{"name":"X"}'
 
-# Test 4: Not found — non-existent tenant id
+# Test 4: Not found — non-existent tenant id (as owner; owner-check never reached)
 echo ""
 echo "--- Test 4: Not found ---"
 FAKE_ID="00000000-0000-0000-0000-000000000000"
 run_test "Not found" 404 \
     -X PATCH "$BASE_URL/api/v1/tenants/$FAKE_ID" \
     -H "Content-Type: application/json" \
-    -H "Authorization: Bearer $ADMIN_TOKEN" \
+    -H "Authorization: Bearer $OWNER_TOKEN" \
     -d '{"name":"Ghost Corp"}'
 
 # Test 5: Unauthenticated → 401
@@ -161,20 +176,31 @@ run_test "Non-owner forbidden" 403 \
     -H "Authorization: Bearer $REGULAR_TOKEN" \
     -d '{"name":"Hacked Corp"}'
 
-# Test 7: Duplicate domain conflict → 409
+# Test 7: Platform Admin — including the admin who PROVISIONED this very tenant — is now
+# ALSO forbidden from editing it. This is the core behavior change: provisioning rights
+# (create + assign owner/plan) are separate from ongoing edit rights, which belong solely
+# to the assigned owner.
 echo ""
-echo "--- Test 7: Duplicate domain conflict ---"
-# First create another tenant with a specific domain
+echo "--- Test 7: Forbidden (platform admin, even the one who provisioned it) ---"
+run_test "Platform admin forbidden" 403 \
+    -X PATCH "$BASE_URL/api/v1/tenants/$TENANT_ID" \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer $ADMIN_TOKEN" \
+    -d '{"name":"Admin Overreach Corp"}'
+
+# Test 8: Duplicate domain conflict → 409 (as owner)
+echo ""
+echo "--- Test 8: Duplicate domain conflict ---"
 DOMAIN="unique-domain-$TS.example.com"
 curl -s -o /dev/null -X POST "$BASE_URL/api/v1/tenants" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"name\":\"Domain Corp\",\"slug\":\"domain-corp-$TS\",\"domain\":\"$DOMAIN\"}"
+    -d "{\"name\":\"Domain Corp\",\"slug\":\"domain-corp-$TS\",\"domain\":\"$DOMAIN\",\"ownerEmail\":\"$OWNER_EMAIL\"}"
 
 run_test "Duplicate domain" 409 \
     -X PATCH "$BASE_URL/api/v1/tenants/$TENANT_ID" \
     -H "Content-Type: application/json" \
-    -H "Authorization: Bearer $ADMIN_TOKEN" \
+    -H "Authorization: Bearer $OWNER_TOKEN" \
     -d "{\"domain\":\"$DOMAIN\"}"
 
 echo ""

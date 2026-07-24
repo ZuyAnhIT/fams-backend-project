@@ -50,6 +50,8 @@ public class AuthService {
     private final BCryptPasswordEncoder passwordEncoder;
     private final StringRedisTemplate redis;
     private final AuditLogService auditLogService;
+    private final EmailService emailService;
+    private final String frontendUrl;
     private final int accessTtlMinutes;
     private final int refreshTtlDays;
 
@@ -62,6 +64,8 @@ public class AuthService {
             BCryptPasswordEncoder passwordEncoder,
             StringRedisTemplate redis,
             AuditLogService auditLogService,
+            EmailService emailService,
+            @Value("${app.frontend-url}") String frontendUrl,
             @Value("${app.jwt.access-ttl-minutes}") int accessTtlMinutes,
             @Value("${app.jwt.refresh-ttl-days}") int refreshTtlDays) {
         this.userRepository = userRepository;
@@ -72,6 +76,8 @@ public class AuthService {
         this.passwordEncoder = passwordEncoder;
         this.redis = redis;
         this.auditLogService = auditLogService;
+        this.emailService = emailService;
+        this.frontendUrl = frontendUrl;
         this.accessTtlMinutes = accessTtlMinutes;
         this.refreshTtlDays = refreshTtlDays;
     }
@@ -114,6 +120,15 @@ public class AuthService {
                 user.setLockedUntil(lockUntil);
                 userRepository.save(user);
                 log.warn("Account locked for user {} until {}", user.getId(), lockUntil);
+
+                // Give the real owner an immediate way back in instead of only a timer —
+                // PasswordResetService.resetPassword clears lockedUntil as soon as the reset
+                // succeeds, so this link is a genuine unlock path, not just a notice.
+                if (user.getEmail() != null) {
+                    String forgotPasswordUrl = frontendUrl + "/forgot-password";
+                    emailService.sendAccountLockedEmail(user.getEmail(), lockUntil.toString(), forgotPasswordUrl);
+                }
+
                 throw new AccountLockedException(lockUntil);
             }
 

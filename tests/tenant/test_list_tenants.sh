@@ -36,7 +36,7 @@ echo "--- Setup: Login as platform admin ---"
 login_response=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d '{"email":"admin@fams.com","password":"Admin@1234"}')
+    -d '{"identifier":"admin@fams.com","password":"Admin@1234"}')
 
 login_body=$(echo "$login_response" | head -n -1)
 login_status=$(echo "$login_response" | tail -n 1)
@@ -53,17 +53,25 @@ if [ -z "$ADMIN_TOKEN" ]; then
 fi
 echo "Admin token obtained."
 
-# Seed a couple of tenants for list tests
+# Register an existing user to own the seed tenants (platform-admin-provisioned tenants
+# now require a direct owner assignment — see TenantService.createTenant)
 TS=$(date +%s)
+SEED_OWNER_EMAIL="list_tenants_owner_${TS}@fams.com"
+curl -s -o /dev/null -X POST "$BASE_URL/api/v1/auth/register" -H "Content-Type: application/json" \
+    -d "{\"email\":\"$SEED_OWNER_EMAIL\",\"password\":\"TestPass1\",\"displayName\":\"List Tenants Owner\"}"
+docker exec fams-postgres psql -U fams_user -d fams_db -q -c \
+    "UPDATE users SET email_verified = true WHERE email = '$SEED_OWNER_EMAIL';" > /dev/null
+
+# Seed a couple of tenants for list tests
 curl -s -o /dev/null -X POST "$BASE_URL/api/v1/tenants" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"name\":\"Alpha Corp\",\"slug\":\"alpha-corp-$TS\",\"industry\":\"Finance\",\"countryCode\":\"US\"}"
+    -d "{\"name\":\"Alpha Corp\",\"slug\":\"alpha-corp-$TS\",\"industry\":\"Finance\",\"countryCode\":\"US\",\"ownerEmail\":\"$SEED_OWNER_EMAIL\"}"
 
 curl -s -o /dev/null -X POST "$BASE_URL/api/v1/tenants" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"name\":\"Beta Corp\",\"slug\":\"beta-corp-$TS\",\"industry\":\"Tech\",\"countryCode\":\"VN\"}"
+    -d "{\"name\":\"Beta Corp\",\"slug\":\"beta-corp-$TS\",\"industry\":\"Tech\",\"countryCode\":\"VN\",\"ownerEmail\":\"$SEED_OWNER_EMAIL\"}"
 
 echo "Seed tenants created."
 echo ""

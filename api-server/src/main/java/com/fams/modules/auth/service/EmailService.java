@@ -45,6 +45,30 @@ public class EmailService {
         sendSafely(msg, "password reset", to);
     }
 
+    /**
+     * Security alert sent the moment an account gets locked from repeated failed logins
+     * (see AuthService.login / AppConstants.MAX_FAILED_ATTEMPTS). Gives the real owner two
+     * ways back in: wait out {@code lockedUntil}, or prove identity via password reset right
+     * now — PasswordResetService.resetPassword clears the lock as soon as that succeeds, so
+     * this is a genuine alternative, not just a suggestion.
+     */
+    @Async
+    public void sendAccountLockedEmail(String to, String lockedUntilFormatted, String forgotPasswordUrl) {
+        SimpleMailMessage msg = new SimpleMailMessage();
+        msg.setFrom(from);
+        msg.setTo(to);
+        msg.setSubject("FAMS - Your account has been temporarily locked");
+        msg.setText(
+                "We locked your FAMS account after several failed login attempts.\n\n" +
+                "It will unlock automatically at: " + lockedUntilFormatted + "\n\n" +
+                "If this was you and you'd like back in sooner, reset your password now:\n\n" +
+                forgotPasswordUrl + "\n\n" +
+                "If you did not attempt to log in, someone else may be trying to access your account — " +
+                "resetting your password now is recommended."
+        );
+        sendSafely(msg, "account locked", to);
+    }
+
     @Async
     public void sendInvitationEmail(String to, String acceptUrl, int expiryDays) {
         SimpleMailMessage msg = new SimpleMailMessage();

@@ -34,18 +34,26 @@ echo "--- Setup: Login as platform admin ---"
 login_body=$(curl -s \
     -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d '{"email":"admin@fams.com","password":"Admin@1234"}')
+    -d '{"identifier":"admin@fams.com","password":"Admin@1234"}')
 ADMIN_TOKEN=$(echo "$login_body" | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4)
 [ -z "$ADMIN_TOKEN" ] && echo "SETUP FAILED: no admin token" && exit 1
 echo "Admin token obtained."
 
-# Create a tenant
+# Register an existing user to be the tenant's owner (now required for platform-admin-
+# provisioned tenants — see TenantService.createTenant, direct assignment not an invitation)
 TS=$(date +%s)
+OWNER_EMAIL="ip_whitelist_owner_${TS}@fams.com"
+curl -s -o /dev/null -X POST "$BASE_URL/api/v1/auth/register" -H "Content-Type: application/json" \
+    -d "{\"email\":\"$OWNER_EMAIL\",\"password\":\"TestPass1\",\"displayName\":\"IP Whitelist Owner\"}"
+docker exec fams-postgres psql -U fams_user -d fams_db -q -c \
+    "UPDATE users SET email_verified = true WHERE email = '$OWNER_EMAIL';" > /dev/null
+
+# Create a tenant
 create_body=$(curl -s \
     -X POST "$BASE_URL/api/v1/tenants" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"name\":\"IP Test Corp\",\"slug\":\"ip-test-$TS\"}")
+    -d "{\"name\":\"IP Test Corp\",\"slug\":\"ip-test-$TS\",\"ownerEmail\":\"$OWNER_EMAIL\"}")
 TENANT_ID=$(echo "$create_body" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 [ -z "$TENANT_ID" ] && echo "SETUP FAILED: no tenant id" && exit 1
 echo "Tenant created: id=$TENANT_ID"

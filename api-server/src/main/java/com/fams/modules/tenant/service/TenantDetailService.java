@@ -14,6 +14,7 @@ import com.fams.modules.tenant.entity.Tenant;
 import com.fams.modules.tenant.repository.TenantRepository;
 import com.fams.shared.exception.ResourceNotFoundException;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -48,10 +49,22 @@ public class TenantDetailService {
         this.scheduledCheckRepository = scheduledCheckRepository;
     }
 
+    /**
+     * @param isPrivilegedCaller true for a Platform Admin or a caller holding the
+     *                           {@code tenants:read} permission (e.g. Platform Staff) — this
+     *                           flag is resolved by the controller since it needs the caller's
+     *                           granted authorities, not just the platform-admin bit. A tenant's
+     *                           own owner is always allowed regardless of this flag: they need
+     *                           their own plan/limits/usage to build a "Billing & Usage" screen.
+     */
     @Transactional(readOnly = true)
-    public TenantDetailResponse getDetail(UUID tenantId) {
+    public TenantDetailResponse getDetail(UUID tenantId, UUID userId, boolean isPrivilegedCaller) {
         Tenant tenant = tenantRepository.findByIdAndDeletedAtIsNull(tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Tenant not found: " + tenantId));
+
+        if (!isPrivilegedCaller && !userId.equals(tenant.getOwnerId())) {
+            throw new AccessDeniedException("You do not have permission to view this tenant's detail");
+        }
 
         // Subscription (optional — tenant may not have one yet)
         TenantSubscription sub = subscriptionRepository.findByTenantId(tenantId).orElse(null);

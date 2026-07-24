@@ -17,6 +17,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.util.UriComponentsBuilder;
 
 import java.util.UUID;
 
@@ -31,20 +32,20 @@ public class UserProfileService {
     private final EmailVerificationService emailVerificationService;
     private final EmailService emailService;
     private final PhoneOtpService phoneOtpService;
-    private final String baseUrl;
+    private final String frontendUrl;
 
     public UserProfileService(UserRepository userRepository,
                               AvatarStorageService avatarStorageService,
                               EmailVerificationService emailVerificationService,
                               EmailService emailService,
                               PhoneOtpService phoneOtpService,
-                              @Value("${app.base-url}") String baseUrl) {
+                              @Value("${app.frontend-url}") String frontendUrl) {
         this.userRepository = userRepository;
         this.avatarStorageService = avatarStorageService;
         this.emailVerificationService = emailVerificationService;
         this.emailService = emailService;
         this.phoneOtpService = phoneOtpService;
-        this.baseUrl = baseUrl;
+        this.frontendUrl = frontendUrl;
     }
 
     /**
@@ -165,7 +166,13 @@ public class UserProfileService {
         });
 
         String token = emailVerificationService.generateChangeToken(userId, normalized);
-        String verificationUrl = baseUrl + "/api/v1/auth/profile/email/confirm-change?token=" + token;
+        String verificationUrl = UriComponentsBuilder.fromUriString(frontendUrl)
+                .path("/verify-email")
+                .queryParam("token", token)
+                .queryParam("mode", "email-change")
+                .build()
+                .encode()
+                .toUriString();
         emailService.sendVerificationEmail(normalized, verificationUrl);
         log.info("Email change requested for user {}", userId);
     }

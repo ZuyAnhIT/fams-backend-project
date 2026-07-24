@@ -3,6 +3,7 @@ package com.fams.shared.security;
 import com.fams.modules.auth.service.LogoutService;
 import com.fams.modules.rbac.repository.PermissionRepository;
 import com.fams.modules.rbac.repository.UserRoleRepository;
+import com.fams.modules.tenant.service.IpWhitelistGuard;
 import com.fams.modules.tenant.service.TenantService;
 import io.jsonwebtoken.Claims;
 import jakarta.servlet.FilterChain;
@@ -38,15 +39,29 @@ public class JwtAuthFilter extends OncePerRequestFilter {
     private final StringRedisTemplate redis;
     private final UserRoleRepository userRoleRepository;
     private final PermissionRepository permissionRepository;
+    private final IpWhitelistGuard ipWhitelistGuard;
 
     public JwtAuthFilter(JwtProvider jwtProvider,
                          StringRedisTemplate redis,
                          UserRoleRepository userRoleRepository,
-                         PermissionRepository permissionRepository) {
+                         PermissionRepository permissionRepository,
+                         IpWhitelistGuard ipWhitelistGuard) {
         this.jwtProvider = jwtProvider;
         this.redis = redis;
         this.userRoleRepository = userRoleRepository;
         this.permissionRepository = permissionRepository;
+        this.ipWhitelistGuard = ipWhitelistGuard;
+    }
+
+    /** Same X-Forwarded-For-aware extraction as HttpRequestUtils.currentIpAddress(), but
+     *  reading straight from the filter's own request parameter — RequestContextHolder
+     *  isn't reliably populated this early in the chain (before DispatcherServlet). */
+    private String clientIpFrom(HttpServletRequest request) {
+        String forwardedFor = request.getHeader("X-Forwarded-For");
+        if (StringUtils.hasText(forwardedFor)) {
+            return forwardedFor.split(",")[0].trim();
+        }
+        return request.getRemoteAddr();
     }
 
     private boolean isTenantSuspended(String tenantId) {
@@ -173,9 +188,27 @@ public class JwtAuthFilter extends OncePerRequestFilter {
                 if (!Boolean.TRUE.equals(isPlatformAdmin) && isTenantSuspended(tenantId)) {
                     log.debug("Rejecting request — tenant {} is suspended", tenantId);
                     response.setStatus(HttpServletResponse.SC_FORBIDDEN);
-                    response.setContentType("application/json");
+                    response.setContentType("application/json;charset=UTF-8");
                     response.getWriter().write("{\"success\":false,\"message\":\"Tenant account is suspended\",\"data\":null}");
                     return;
+                }
+
+                // Platform Admin bypasses the tenant's own IP whitelist — it's the tenant's
+                // security control over ITS users, not something that should block support
+                // access. Opt-in per tenant: a tenant with zero active whitelist entries is
+                // unrestricted (see IpWhitelistGuard).
+                if (!Boolean.TRUE.equals(isPlatformAdmin) && StringUtils.hasText(tenantId)) {
+                    String clientIp = clientIpFrom(request);
+                    if (!ipWhitelistGuard.isAllowed(UUID.fromString(tenantId), clientIp)) {
+                        log.debug("Rejecting request — IP {} not whitelisted for tenant {}", clientIp, tenantId);
+                        response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+                        response.setContentType("application/json;charset=UTF-8");
+                        response.getWriter().write(
+                                "{\"success\":false,\"message\":\"Access from this IP address is not allowed for this tenant\","
+                                + "\"data\":null,\"errorCode\":\"IP_NOT_WHITELISTED\","
+                                + "\"userMessage\":\"Truy cập bị từ chối do địa chỉ IP không nằm trong danh sách cho phép của công ty bạn.\"}");
+                        return;
+                    }
                 }
 
                 Set<String> permissions = Boolean.TRUE.equals(isPlatformAdmin)
