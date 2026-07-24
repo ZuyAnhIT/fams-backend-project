@@ -89,11 +89,16 @@ check_contains "Not found has userMessage in Vietnamese" "$nf_resp" 'Không tìm
 echo ""
 echo "--- 4. Access denied (403) ---"
 TS=$(date +%s)
+TENANT_OWNER_EMAIL="err_corp_owner_${TS}@fams.com"
+curl -s -o /dev/null -X POST "$BASE_URL/api/v1/auth/register" -H "Content-Type: application/json" \
+    -d "{\"email\":\"$TENANT_OWNER_EMAIL\",\"password\":\"TestPass1\",\"displayName\":\"Err Corp Owner\"}"
+docker exec fams-postgres psql -U fams_user -d fams_db -q -c \
+    "UPDATE users SET email_verified = true WHERE email = '$TENANT_OWNER_EMAIL';" > /dev/null
 t_resp=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/tenants" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"name\":\"Err Corp ${TS}\",\"slug\":\"err-corp-${TS}\"}")
+    -d "{\"name\":\"Err Corp ${TS}\",\"slug\":\"err-corp-${TS}\",\"ownerEmail\":\"$TENANT_OWNER_EMAIL\"}")
 if [ "$(echo "$t_resp" | tail -n 1)" -ne 201 ]; then echo "SETUP FAILED: create tenant"; exit 1; fi
 TENANT_ID=$(echo "$t_resp" | head -n -1 | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 

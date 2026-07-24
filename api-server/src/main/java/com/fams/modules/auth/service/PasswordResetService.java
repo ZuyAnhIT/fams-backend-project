@@ -107,6 +107,14 @@ public class PasswordResetService {
                 .orElseThrow(() -> new IllegalArgumentException("Invalid or expired password reset token"));
 
         user.setPasswordHash(passwordEncoder.encode(request.getNewPassword()));
+
+        // Proving control of the account's email is treated as equivalent to waiting out
+        // AppConstants.LOCK_DURATION_MINUTES — unlocks immediately rather than making someone
+        // who just verified their identity keep waiting on a timer (see AuthService.login,
+        // where the lockout email links here specifically for this reason).
+        user.setFailedLoginAttempts(0);
+        user.setLockedUntil(null);
+
         userRepository.save(user);
 
         // Consume the token immediately to prevent replay

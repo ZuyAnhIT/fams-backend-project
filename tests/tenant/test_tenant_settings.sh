@@ -36,7 +36,7 @@ echo "--- Setup: Login as platform admin ---"
 login_body=$(curl -s \
     -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d '{"email":"admin@fams.com","password":"Admin@1234"}')
+    -d '{"identifier":"admin@fams.com","password":"Admin@1234"}')
 
 ADMIN_TOKEN=$(echo "$login_body" | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4)
 if [ -z "$ADMIN_TOKEN" ]; then
@@ -45,13 +45,21 @@ if [ -z "$ADMIN_TOKEN" ]; then
 fi
 echo "Admin token obtained."
 
-# Create a tenant for settings tests
+# Register an existing user to be the tenant's owner (now required for platform-admin-
+# provisioned tenants — see TenantService.createTenant, direct assignment not an invitation)
 TS=$(date +%s)
+OWNER_EMAIL="tenant_settings_owner_${TS}@fams.com"
+curl -s -o /dev/null -X POST "$BASE_URL/api/v1/auth/register" -H "Content-Type: application/json" \
+    -d "{\"email\":\"$OWNER_EMAIL\",\"password\":\"TestPass1\",\"displayName\":\"Settings Owner\"}"
+docker exec fams-postgres psql -U fams_user -d fams_db -q -c \
+    "UPDATE users SET email_verified = true WHERE email = '$OWNER_EMAIL';" > /dev/null
+
+# Create a tenant for settings tests
 create_body=$(curl -s \
     -X POST "$BASE_URL/api/v1/tenants" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"name\":\"Settings Test Corp\",\"slug\":\"settings-test-$TS\"}")
+    -d "{\"name\":\"Settings Test Corp\",\"slug\":\"settings-test-$TS\",\"ownerEmail\":\"$OWNER_EMAIL\"}")
 
 TENANT_ID=$(echo "$create_body" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 if [ -z "$TENANT_ID" ]; then
@@ -59,6 +67,18 @@ if [ -z "$TENANT_ID" ]; then
     exit 1
 fi
 echo "Test tenant created: id=$TENANT_ID"
+
+# Log in as the assigned owner — PATCH settings is owner-only (see TenantSettingsService.
+# assertOwner), matching updateTenant's policy: even the platform admin who provisioned the
+# tenant cannot change it afterward, only the assigned owner can.
+OWNER_LOGIN=$(curl -s -X POST "$BASE_URL/api/v1/auth/login" -H "Content-Type: application/json" \
+    -d "{\"identifier\":\"$OWNER_EMAIL\",\"password\":\"TestPass1\"}")
+OWNER_TOKEN=$(echo "$OWNER_LOGIN" | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4)
+if [ -z "$OWNER_TOKEN" ]; then
+    echo "SETUP FAILED: Could not obtain owner token"
+    exit 1
+fi
+echo "Owner token obtained."
 
 # Register a regular user (non-owner)
 REGULAR_TOKEN=$(register_verified_test_user_token "$BASE_URL" "Regular")
@@ -91,13 +111,13 @@ else
     FAIL=$((FAIL + 1))
 fi
 
-# Test 2: PATCH settings — update date format and brand colors
+# Test 2: PATCH settings — update date format and brand colors (owner-only)
 echo ""
 echo "--- Test 2: PATCH settings (update dateFormat and brand colors) ---"
 patch_response=$(curl -s -w "\n%{http_code}" \
     -X PATCH "$BASE_URL/api/v1/tenants/$TENANT_ID/settings" \
     -H "Content-Type: application/json" \
-    -H "Authorization: Bearer $ADMIN_TOKEN" \
+    -H "Authorization: Bearer $OWNER_TOKEN" \
     -d '{"dateFormat":"MM/DD/YYYY","timeFormat":"h:mm a","brandPrimaryColor":"#3B82F6","brandSecondaryColor":"#10B981","brandAccentColor":"#F59E0B"}')
 
 patch_body=$(echo "$patch_response" | head -n -1)
@@ -149,10 +169,10 @@ echo "--- Test 4: Invalid brand color format ---"
 run_test "Invalid hex color" 400 \
     -X PATCH "$BASE_URL/api/v1/tenants/$TENANT_ID/settings" \
     -H "Content-Type: application/json" \
-    -H "Authorization: Bearer $ADMIN_TOKEN" \
+    -H "Authorization: Bearer $OWNER_TOKEN" \
     -d '{"brandPrimaryColor":"not-a-color"}'
 
-# Test 5: Tenant not found → 404
+# Test 5: Tenant not found → 404 (still checked against the owner, so 404 wins over 403)
 echo ""
 echo "--- Test 5: Tenant not found ---"
 FAKE_ID="00000000-0000-0000-0000-000000000000"
@@ -163,7 +183,7 @@ run_test "Tenant not found (GET)" 404 \
 run_test "Tenant not found (PATCH)" 404 \
     -X PATCH "$BASE_URL/api/v1/tenants/$FAKE_ID/settings" \
     -H "Content-Type: application/json" \
-    -H "Authorization: Bearer $ADMIN_TOKEN" \
+    -H "Authorization: Bearer $OWNER_TOKEN" \
     -d '{"dateFormat":"YYYY-MM-DD"}'
 
 # Test 6: Unauthenticated → 401
@@ -188,6 +208,21 @@ run_test "Non-owner forbidden PATCH" 403 \
     -X PATCH "$BASE_URL/api/v1/tenants/$TENANT_ID/settings" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $REGULAR_TOKEN" \
+    -d '{"dateFormat":"YYYY-MM-DD"}'
+
+# Test 8: Platform admin (even the one who provisioned this tenant) may still VIEW settings
+# but may NOT change them — only the assigned owner can (see TenantSettingsService.assertOwner,
+# matching the same owner-only policy as PATCH /tenants/{id}).
+echo ""
+echo "--- Test 8: Platform admin can view but not update settings ---"
+run_test "Platform admin can GET settings" 200 \
+    -X GET "$BASE_URL/api/v1/tenants/$TENANT_ID/settings" \
+    -H "Authorization: Bearer $ADMIN_TOKEN"
+
+run_test "Platform admin forbidden PATCH" 403 \
+    -X PATCH "$BASE_URL/api/v1/tenants/$TENANT_ID/settings" \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer $ADMIN_TOKEN" \
     -d '{"dateFormat":"YYYY-MM-DD"}'
 
 echo ""

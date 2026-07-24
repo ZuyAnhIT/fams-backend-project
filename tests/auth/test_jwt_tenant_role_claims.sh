@@ -82,11 +82,16 @@ fi
 echo ""
 echo "--- Setup: Create test tenant ---"
 TS=$(date +%s)
+TENANT_OWNER_EMAIL="jwt_claim_owner_${TS}@fams.com"
+curl -s -o /dev/null -X POST "$BASE_URL/api/v1/auth/register" -H "Content-Type: application/json" \
+    -d "{\"email\":\"$TENANT_OWNER_EMAIL\",\"password\":\"TestPass1\",\"displayName\":\"JWT Claim Owner\"}"
+docker exec fams-postgres psql -U fams_user -d fams_db -q -c \
+    "UPDATE users SET email_verified = true WHERE email = '$TENANT_OWNER_EMAIL';" > /dev/null
 t_resp=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/tenants" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"name\":\"JWT Claim Corp\",\"slug\":\"jwt-claim-$TS\"}")
+    -d "{\"name\":\"JWT Claim Corp\",\"slug\":\"jwt-claim-$TS\",\"ownerEmail\":\"$TENANT_OWNER_EMAIL\"}")
 t_body=$(echo "$t_resp" | head -n -1)
 t_status=$(echo "$t_resp" | tail -n 1)
 if [ "$t_status" -ne 201 ]; then

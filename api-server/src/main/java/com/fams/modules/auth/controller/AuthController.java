@@ -46,11 +46,16 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.util.UriComponentsBuilder;
+
+import java.net.URI;
 import java.util.UUID;
 
 @Slf4j
@@ -72,6 +77,7 @@ public class AuthController {
     private final LoginTotpService loginTotpService;
     private final GoogleLoginService googleLoginService;
     private final RefreshTokenService refreshTokenService;
+    private final String frontendUrl;
 
     public AuthController(HealthCheckRepository healthCheckRepository,
                           AuthService authService,
@@ -85,7 +91,8 @@ public class AuthController {
                           TotpService totpService,
                           LoginTotpService loginTotpService,
                           GoogleLoginService googleLoginService,
-                          RefreshTokenService refreshTokenService) {
+                          RefreshTokenService refreshTokenService,
+                          @Value("${app.frontend-url}") String frontendUrl) {
         this.healthCheckRepository = healthCheckRepository;
         this.authService = authService;
         this.firebasePhoneLoginService = firebasePhoneLoginService;
@@ -99,6 +106,7 @@ public class AuthController {
         this.loginTotpService = loginTotpService;
         this.googleLoginService = googleLoginService;
         this.refreshTokenService = refreshTokenService;
+        this.frontendUrl = frontendUrl;
     }
 
     @Operation(summary = "Health check", description = "Returns a simple liveness string. No auth required.")
@@ -211,7 +219,14 @@ public class AuthController {
     })
     @SecurityRequirements({})
     @GetMapping("/verify-email")
-    public ResponseEntity<ApiResponse<Void>> verifyEmail(@RequestParam String token) {
+    public ResponseEntity<?> verifyEmail(
+            @RequestParam String token,
+            @RequestHeader(value = HttpHeaders.ACCEPT, required = false) String accept) {
+        if (acceptsHtml(accept)) {
+            return ResponseEntity.status(302)
+                    .location(buildFrontendVerificationUri(token, false))
+                    .build();
+        }
         log.info("Email verification attempt");
         emailVerificationService.verifyToken(token);
         return ResponseEntity.ok(new ApiResponse<>(true, "Email verified successfully. You can now log in.", null));
@@ -445,10 +460,36 @@ public class AuthController {
     })
     @SecurityRequirements({})
     @GetMapping("/profile/email/confirm-change")
-    public ResponseEntity<ApiResponse<Void>> confirmEmailChange(@RequestParam String token) {
+    public ResponseEntity<?> confirmEmailChange(
+            @RequestParam String token,
+            @RequestHeader(value = HttpHeaders.ACCEPT, required = false) String accept) {
+        if (acceptsHtml(accept)) {
+            return ResponseEntity.status(302)
+                    .location(buildFrontendVerificationUri(token, true))
+                    .build();
+        }
         log.info("Email change confirmation attempt");
         emailVerificationService.confirmEmailChange(token);
         return ResponseEntity.ok(new ApiResponse<>(true, "Email changed and verified successfully.", null));
+    }
+
+    /**
+     * Old email templates linked directly to these JSON endpoints. Browsers now get
+     * redirected to the real frontend page, while API/BFF clients explicitly asking
+     * for JSON keep the original behaviour and consume the one-time token there.
+     */
+    private boolean acceptsHtml(String accept) {
+        return StringUtils.hasText(accept) && accept.contains(MediaType.TEXT_HTML_VALUE);
+    }
+
+    private URI buildFrontendVerificationUri(String token, boolean emailChange) {
+        UriComponentsBuilder builder = UriComponentsBuilder.fromUriString(frontendUrl)
+                .path("/verify-email")
+                .queryParam("token", token);
+        if (emailChange) {
+            builder.queryParam("mode", "email-change");
+        }
+        return builder.build().encode().toUri();
     }
 
     @Operation(summary = "Request to add/change phone (step 1 of 2)",

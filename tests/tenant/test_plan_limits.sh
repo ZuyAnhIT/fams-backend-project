@@ -35,7 +35,7 @@ echo "--- Setup: Login as platform admin ---"
 login_response=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d '{"email":"admin@fams.com","password":"Admin@1234"}')
+    -d '{"identifier":"admin@fams.com","password":"Admin@1234"}')
 login_body=$(echo "$login_response" | head -n -1)
 login_status=$(echo "$login_response" | tail -n 1)
 if [ "$login_status" -ne 200 ]; then
@@ -45,14 +45,24 @@ fi
 ADMIN_TOKEN=$(echo "$login_body" | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4)
 echo "Admin token obtained."
 
+# --- Setup: Register an existing user to be the tenant's owner ---
+# Platform-admin-provisioned tenants now require an existing FAMS user as owner (direct
+# assignment, not an invitation) — see TenantService.createTenant.
+TS=$(date +%s)
+OWNER_EMAIL="plan_limits_owner_${TS}@fams.com"
+curl -s -o /dev/null -X POST "$BASE_URL/api/v1/auth/register" -H "Content-Type: application/json" \
+    -d "{\"email\":\"$OWNER_EMAIL\",\"password\":\"TestPass1\",\"displayName\":\"Plan Limits Owner\"}"
+docker exec fams-postgres psql -U fams_user -d fams_db -q -c \
+    "UPDATE users SET email_verified = true WHERE email = '$OWNER_EMAIL';" > /dev/null
+
 # --- Setup: Create a test tenant ---
 echo "--- Setup: Create a test tenant ---"
-SLUG="limits-test-$(date +%s)"
+SLUG="limits-test-${TS}"
 create_resp=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/tenants" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"name\":\"Limits Test Tenant\",\"slug\":\"$SLUG\",\"industry\":\"tech\",\"countryCode\":\"VN\"}")
+    -d "{\"name\":\"Limits Test Tenant\",\"slug\":\"$SLUG\",\"industry\":\"tech\",\"countryCode\":\"VN\",\"ownerEmail\":\"$OWNER_EMAIL\"}")
 create_body=$(echo "$create_resp" | head -n -1)
 create_status=$(echo "$create_resp" | tail -n 1)
 if [ "$create_status" -ne 201 ]; then
@@ -63,44 +73,18 @@ TENANT_ID=$(echo "$create_body" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -
 echo "Tenant created: $TENANT_ID"
 
 # --- Setup: Assign 'trial' plan (max_employees=5, max_sites=1) ---
-echo "--- Setup: Assign trial plan ---"
-plans_resp=$(curl -s -X GET "$BASE_URL/api/v1/plans" -H "Authorization: Bearer $ADMIN_TOKEN")
-TRIAL_PLAN_ID=$(echo "$plans_resp" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4 || true)
-# Find the trial plan ID specifically
-TRIAL_PLAN_ID=$(echo "$plans_resp" \
-    | grep -o '"id":"[^"]*","name":"trial"' \
-    | grep -o '"id":"[^"]*"' \
-    | cut -d'"' -f4 || true)
-
-if [ -z "$TRIAL_PLAN_ID" ]; then
-    # Try alternate parsing
-    TRIAL_PLAN_ID=$(echo "$plans_resp" | python3 -c "
-import sys, json
-data = json.load(sys.stdin)
-plans = data.get('data', {}).get('content', [])
-for p in plans:
-    if p.get('name') == 'trial':
-        print(p['id'])
-        break
-" 2>/dev/null || true)
-fi
-
-if [ -z "$TRIAL_PLAN_ID" ]; then
-    echo "SETUP FAILED: Cannot find trial plan ID"
+# TenantService.createTenant now auto-assigns the tenant's subscription at creation time
+# (the default lowest-cost/trial plan, since no planId was given in the Setup step above) —
+# no separate "assign subscription" call is needed or possible anymore (POST .../subscription
+# would 409, since one already exists). Confirm it landed on the plan this test needs.
+echo "--- Setup: Verify auto-assigned subscription is the trial plan ---"
+sub_resp=$(curl -s -X GET "$BASE_URL/api/v1/tenants/$TENANT_ID/subscription" -H "Authorization: Bearer $ADMIN_TOKEN")
+sub_plan_name=$(echo "$sub_resp" | grep -o '"planName":"[^"]*"' | head -1 | cut -d'"' -f4 || true)
+if [ "$sub_plan_name" != "trial" ]; then
+    echo "SETUP FAILED: Expected auto-assigned plan 'trial', got '$sub_plan_name'"
     exit 1
 fi
-echo "Trial plan ID: $TRIAL_PLAN_ID"
-
-sub_status=$(curl -s -o /dev/null -w "%{http_code}" \
-    -X POST "$BASE_URL/api/v1/tenants/$TENANT_ID/subscription" \
-    -H "Content-Type: application/json" \
-    -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"planId\":\"$TRIAL_PLAN_ID\",\"billingCycle\":\"MONTHLY\"}")
-if [ "$sub_status" -ne 201 ]; then
-    echo "SETUP FAILED: Cannot assign subscription (HTTP $sub_status)"
-    exit 1
-fi
-echo "Trial subscription assigned."
+echo "Confirmed: tenant is on the trial plan (max_employees=5, max_sites=1)."
 echo ""
 
 # ============================================================

@@ -88,30 +88,40 @@ public class TenantController {
     }
 
     @Operation(summary = "Get tenant operational detail",
-        description = "Returns the full operational view of a tenant: profile, subscription, plan limits, and current usage counts. Restricted to Platform Admins.")
+        description = "Returns the full operational view of a tenant: profile, subscription, plan limits, and "
+            + "current usage counts. Callable by a Platform Admin/Staff (tenants:read) for any tenant, or by the "
+            + "tenant's own owner for their own tenant — e.g. to build a self-service \"Billing & Usage\" screen.")
     @ApiResponses({
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Detail returned",
             content = @Content(schema = @Schema(implementation = TenantDetailResponse.class))),
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Unauthorized"),
-        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "Platform Admin role required"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "Not this tenant's owner and not a Platform Admin/Staff"),
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "Tenant not found")
     })
     @GetMapping("/{id}/detail")
-    @PreAuthorize("hasRole('PLATFORM_ADMIN') or hasAuthority('tenants:read')")
     public ResponseEntity<ApiResponse<TenantDetailResponse>> getTenantDetail(
             @Parameter(description = "Tenant UUID") @PathVariable UUID id,
             @AuthenticationPrincipal FamsUserDetails userDetails) {
         log.info("Get tenant detail id={} by userId={}", id, userDetails.getUserId());
-        TenantDetailResponse response = tenantDetailService.getDetail(id);
+        boolean isPrivileged = userDetails.isPlatformAdmin()
+                || userDetails.getAuthorities().stream()
+                        .anyMatch(a -> "tenants:read".equals(a.getAuthority()));
+        TenantDetailResponse response = tenantDetailService.getDetail(id, userDetails.getUserId(), isPrivileged);
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 
     @Operation(summary = "Create a tenant",
-        description = "Issue #3 (docs/issues/ISSUES.md): provisions a new company workspace. Any authenticated "
-            + "user may self-serve create a company — they become that company's TENANT_ADMIN automatically and "
-            + "the tenant starts on the default (lowest-tier, zero-cost) plan. A user may own/belong to multiple "
-            + "companies at once. Platform Admins may also call this (e.g. provisioning on behalf of a customer); "
-            + "in that case no membership role is auto-assigned to the admin, matching prior behavior.")
+        description = "Two modes depending on the caller: (1) Self-service — any authenticated user may create "
+            + "their own company; they become its TENANT_ADMIN automatically, the tenant starts on the default "
+            + "trial/zero-cost plan, and ownerUserId/ownerEmail must be omitted. A user may own/belong to "
+            + "multiple companies at once. (2) Platform provisioning — callers with the tenants:create "
+            + "permission (Platform Admin, or Platform Staff) MUST provide ownerUserId or ownerEmail identifying "
+            + "an EXISTING FAMS user to assign as owner (this is a direct assignment, not an invitation — 404 if "
+            + "that account doesn't exist); the tenant starts active rather than trial. In BOTH modes the tenant "
+            + "always starts on the default trial/zero-cost plan — there is no way to pick a paid plan at "
+            + "creation time (online payment isn't built yet); upgrading is a separate action via "
+            + "PATCH /{id}/subscription. The provisioning caller is not made a member and cannot edit the "
+            + "tenant's profile afterward (see PATCH /{id}) — only the assigned owner can.")
     @ApiResponses({
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "201", description = "Tenant created",
             content = @Content(schema = @Schema(implementation = TenantResponse.class))),
@@ -123,14 +133,20 @@ public class TenantController {
     public ResponseEntity<ApiResponse<TenantResponse>> createTenant(
             @Valid @RequestBody CreateTenantRequest request,
             @AuthenticationPrincipal FamsUserDetails userDetails) {
-        log.info("Create tenant request: slug={} by userId={}", request.getSlug(), userDetails.getUserId());
+        boolean canProvisionForOthers = userDetails.isPlatformAdmin()
+                || userDetails.getAuthorities().stream()
+                        .anyMatch(a -> "tenants:create".equals(a.getAuthority()));
+        log.info("Create tenant request: slug={} by userId={} provisioning={}",
+                request.getSlug(), userDetails.getUserId(), canProvisionForOthers);
         TenantResponse response = tenantService.createTenant(
-                request, userDetails.getUserId(), userDetails.isPlatformAdmin());
+                request, userDetails.getUserId(), canProvisionForOthers);
         return ResponseEntity.status(201).body(ApiResponse.success(response));
     }
 
     @Operation(summary = "Update tenant profile",
-        description = "Updates name, domain, logo, industry, timezone, locale, and currency for a tenant. Callable by the tenant's Company Admin or a Platform Admin.")
+        description = "Updates name, domain, logo, industry, timezone, locale, and currency for a tenant. "
+            + "Owner-only — including for Platform Admin/Staff: whoever provisioned this tenant does not retain "
+            + "edit rights after creation, only the assigned owner does (see POST /tenants).")
     @ApiResponses({
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Tenant updated",
             content = @Content(schema = @Schema(implementation = TenantResponse.class))),
@@ -145,12 +161,14 @@ public class TenantController {
             @Valid @RequestBody UpdateTenantRequest request,
             @AuthenticationPrincipal FamsUserDetails userDetails) {
         log.info("Update tenant id={} by userId={}", id, userDetails.getUserId());
-        TenantResponse response = tenantService.updateTenant(id, request, userDetails.getUserId(), userDetails.isPlatformAdmin());
+        TenantResponse response = tenantService.updateTenant(id, request, userDetails.getUserId());
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 
     @Operation(summary = "Get tenant UI settings",
-        description = "Returns display/branding settings (date format, time format, brand colors) for the tenant. Callable by the tenant's admin or a Platform Admin.")
+        description = "Returns display/branding settings (date format, time format, brand colors) for the tenant. "
+            + "Callable by any active member of the tenant (owner or regular employee) or a Platform Admin — every "
+            + "member's client needs these to render dates/currency/branding consistently, not just the owner.")
     @ApiResponses({
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Settings returned",
             content = @Content(schema = @Schema(implementation = TenantSettingsResponse.class))),
@@ -168,13 +186,15 @@ public class TenantController {
     }
 
     @Operation(summary = "Update tenant UI settings",
-        description = "Updates date format, time format, and brand colors for the tenant. Callable by the tenant's admin or a Platform Admin.")
+        description = "Updates date format, time format, and brand colors for the tenant. Owner-only — including "
+            + "Platform Admin/Staff, consistent with PATCH /{id} (tenant profile): they can view these settings "
+            + "but not change them.")
     @ApiResponses({
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Settings updated",
             content = @Content(schema = @Schema(implementation = TenantSettingsResponse.class))),
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Validation error"),
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Unauthorized"),
-        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "Insufficient permissions"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "Only the tenant's owner may update its settings"),
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "Tenant not found")
     })
     @PatchMapping("/{id}/settings")
@@ -183,7 +203,7 @@ public class TenantController {
             @Valid @RequestBody UpdateTenantSettingsRequest request,
             @AuthenticationPrincipal FamsUserDetails userDetails) {
         log.info("Update settings tenantId={} by userId={}", id, userDetails.getUserId());
-        TenantSettingsResponse response = tenantSettingsService.updateSettings(id, request, userDetails.getUserId(), userDetails.isPlatformAdmin());
+        TenantSettingsResponse response = tenantSettingsService.updateSettings(id, request, userDetails.getUserId());
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 

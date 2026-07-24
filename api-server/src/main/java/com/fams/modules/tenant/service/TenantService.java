@@ -2,8 +2,6 @@ package com.fams.modules.tenant.service;
 
 import com.fams.modules.auth.entity.User;
 import com.fams.modules.auth.repository.UserRepository;
-import com.fams.modules.employee.dto.request.InviteEmployeeRequest;
-import com.fams.modules.employee.service.EmployeeInvitationService;
 import com.fams.modules.rbac.entity.Role;
 import com.fams.modules.rbac.entity.UserRole;
 import com.fams.modules.rbac.repository.RoleRepository;
@@ -11,6 +9,7 @@ import com.fams.modules.rbac.repository.UserRoleRepository;
 import com.fams.modules.subscription.entity.TenantSubscription;
 import com.fams.modules.subscription.entity.TenantSubscription.BillingCycle;
 import com.fams.modules.subscription.entity.TenantSubscription.SubscriptionStatus;
+import com.fams.modules.subscription.entity.Plan;
 import com.fams.modules.subscription.repository.PlanRepository;
 import com.fams.modules.subscription.repository.TenantSubscriptionRepository;
 import com.fams.modules.tenant.dto.request.CreateTenantRequest;
@@ -53,15 +52,13 @@ public class TenantService {
     private final RoleRepository roleRepository;
     private final UserRoleRepository userRoleRepository;
     private final StringRedisTemplate redis;
-    private final EmployeeInvitationService employeeInvitationService;
 
     public TenantService(TenantRepository tenantRepository, UserRepository userRepository,
                          PlanRepository planRepository,
                          TenantSubscriptionRepository subscriptionRepository,
                          RoleRepository roleRepository,
                          UserRoleRepository userRoleRepository,
-                         StringRedisTemplate redis,
-                         EmployeeInvitationService employeeInvitationService) {
+                         StringRedisTemplate redis) {
         this.tenantRepository = tenantRepository;
         this.userRepository = userRepository;
         this.planRepository = planRepository;
@@ -69,22 +66,34 @@ public class TenantService {
         this.roleRepository = roleRepository;
         this.userRoleRepository = userRoleRepository;
         this.redis = redis;
-        this.employeeInvitationService = employeeInvitationService;
     }
 
     /**
-     * Issue #3 (docs/issues/ISSUES.md): self-serve company creation. Any authenticated
-     * user may call this (see TenantController — the old PLATFORM_ADMIN-only restriction
-     * was lifted). When a regular user creates a tenant, they're auto-assigned TENANT_ADMIN
-     * for it so they can actually manage what they just created — nothing before this
-     * linked the creator into `user_roles` at all, so a self-serve caller would have ended
-     * up locked out of their own new company. Platform Admins keep the old behavior (no
-     * auto-membership) since they're typically provisioning on behalf of a customer, not
-     * joining the company themselves. A user can own/belong to any number of tenants —
-     * `user_roles` has no constraint limiting a user to one tenant.
+     * Two distinct creation paths, matching how real multi-tenant SaaS platforms (Slack,
+     * Notion, HubSpot...) separate self-serve signup from platform-side provisioning:
+     *
+     * <p><b>Self-service</b> ({@code canProvisionForOthers=false}): any authenticated user
+     * creates their OWN company. They become its TENANT_ADMIN automatically, the tenant
+     * starts in {@code trial} status on the default (lowest-cost/free) plan, and none of
+     * {@code ownerUserId}/{@code ownerEmail}/{@code planId} may be set — a regular user
+     * cannot assign someone else as owner or pick a paid plan for free.
+     *
+     * <p><b>Platform provisioning</b> ({@code canProvisionForOthers=true} — caller is a
+     * Platform Admin or holds the {@code tenants:create} permission, e.g. Platform Staff):
+     * the caller MUST name an existing FAMS user (by {@code ownerUserId} or
+     * {@code ownerEmail}) to become the tenant's owner/TENANT_ADMIN — this is a direct
+     * assignment, not an invitation, because the person is required to already have an
+     * account. The tenant starts {@code active} (not trial). Every tenant — self-service or
+     * platform-provisioned — is always assigned the lowest-cost/default (trial) plan at
+     * creation; online payment isn't built yet, so no creation path may pick a paid plan.
+     * Upgrading a tenant to a paid plan is a separate, deliberate action via
+     * {@code PATCH /tenants/{id}/subscription}. The provisioning caller is NOT made a
+     * member of the tenant themselves and, per product decision, loses the ability to edit
+     * the tenant's profile once created — see {@link #updateTenant} — ongoing management
+     * belongs solely to the assigned owner.
      */
     @Transactional
-    public TenantResponse createTenant(CreateTenantRequest request, UUID createdByUserId, boolean createdByPlatformAdmin) {
+    public TenantResponse createTenant(CreateTenantRequest request, UUID createdByUserId, boolean canProvisionForOthers) {
         if (tenantRepository.findBySlugAndDeletedAtIsNull(request.getSlug()).isPresent()) {
             throw new DuplicateResourceException("Slug '" + request.getSlug() + "' is already taken");
         }
@@ -92,6 +101,22 @@ public class TenantService {
         if (StringUtils.hasText(request.getDomain())
                 && tenantRepository.findByDomainAndDeletedAtIsNull(request.getDomain()).isPresent()) {
             throw new DuplicateResourceException("Domain '" + request.getDomain() + "' is already registered");
+        }
+
+        UUID ownerId;
+
+        if (canProvisionForOthers) {
+            if (request.getOwnerUserId() == null && !StringUtils.hasText(request.getOwnerEmail())) {
+                throw new IllegalArgumentException(
+                        "ownerUserId or ownerEmail is required — the assigned owner must already have a FAMS account");
+            }
+            ownerId = resolveExistingOwner(request).getId();
+        } else {
+            if (request.getOwnerUserId() != null || StringUtils.hasText(request.getOwnerEmail())) {
+                throw new AccessDeniedException(
+                        "Only Platform Admins/Staff (tenants:create) may assign an owner at creation");
+            }
+            ownerId = createdByUserId;
         }
 
         Tenant tenant = Tenant.builder()
@@ -103,77 +128,77 @@ public class TenantService {
                 .timezone(StringUtils.hasText(request.getTimezone()) ? request.getTimezone() : "UTC")
                 .locale(StringUtils.hasText(request.getLocale()) ? request.getLocale() : "en")
                 .currencyCode(StringUtils.hasText(request.getCurrencyCode()) ? request.getCurrencyCode() : "USD")
-                .status("trial")
-                .ownerId(createdByUserId)
+                .status(canProvisionForOthers ? "active" : "trial")
+                .ownerId(ownerId)
                 .build();
 
         tenantRepository.save(tenant);
-        log.info("Tenant created: id={} slug={} by userId={}", tenant.getId(), tenant.getSlug(), createdByUserId);
+        log.info("Tenant created: id={} slug={} ownerId={} by userId={} provisioned={}",
+                tenant.getId(), tenant.getSlug(), ownerId, createdByUserId, canProvisionForOthers);
 
-        planRepository.findByIsActiveTrueAndDeletedAtIsNullOrderBySortOrderAsc().stream()
-                .findFirst()
-                .ifPresentOrElse(
-                        defaultPlan -> {
-                            TenantSubscription sub = TenantSubscription.builder()
-                                    .tenantId(tenant.getId())
-                                    .planId(defaultPlan.getId())
-                                    .status(SubscriptionStatus.TRIAL)
-                                    .billingCycle(BillingCycle.MONTHLY)
-                                    .build();
-                            subscriptionRepository.save(sub);
-                            log.info("Default trial subscription created: tenantId={} planId={}",
-                                    tenant.getId(), defaultPlan.getId());
-                        },
-                        () -> log.warn("No active plan found — tenant {} created without a subscription", tenant.getId())
-                );
+        // Every new tenant always starts on the default (lowest sortOrder) plan — no
+        // creation path may pick a paid plan since online payment isn't built yet. Upgrading
+        // is a deliberate, separate action via PATCH /tenants/{id}/subscription.
+        Plan planToAssign = planRepository.findByIsActiveTrueAndDeletedAtIsNullOrderBySortOrderAsc()
+                .stream().findFirst().orElse(null);
+
+        if (planToAssign != null) {
+            TenantSubscription sub = TenantSubscription.builder()
+                    .tenantId(tenant.getId())
+                    .planId(planToAssign.getId())
+                    .status(SubscriptionStatus.TRIAL)
+                    .billingCycle(BillingCycle.MONTHLY)
+                    .build();
+            subscriptionRepository.save(sub);
+            log.info("Subscription created: tenantId={} planId={} status=TRIAL", tenant.getId(), planToAssign.getId());
+        } else {
+            log.warn("No active plan found — tenant {} created without a subscription", tenant.getId());
+        }
 
         Role tenantAdminRole = roleRepository.findByNameAndTenantIdIsNull("TENANT_ADMIN").orElse(null);
         if (tenantAdminRole == null) {
-            log.error("TENANT_ADMIN role not found — tenant {} created with no admin membership/invite", tenant.getId());
-        }
-
-        if (!createdByPlatformAdmin && tenantAdminRole != null) {
+            log.error("TENANT_ADMIN role not found — tenant {} created with no admin membership", tenant.getId());
+        } else {
             UserRole membership = UserRole.builder()
-                    .userId(createdByUserId)
+                    .userId(ownerId)
                     .role(tenantAdminRole)
                     .tenantId(tenant.getId())
                     .assignedBy(createdByUserId)
                     .build();
             userRoleRepository.save(membership);
-            log.info("Creator auto-assigned TENANT_ADMIN: userId={} tenantId={}",
-                    createdByUserId, tenant.getId());
-        }
-
-        // Issue #12 (docs/issues/ISSUES.md): if the creator named a different person as owner,
-        // invite THAT person as tenant admin — the creator keeps their own admin access too (set
-        // above, unaffected by this), so the tenant is never left with no one able to manage it
-        // while the invite is still pending.
-        if (StringUtils.hasText(request.getOwnerEmail()) && tenantAdminRole != null) {
-            String ownerEmail = request.getOwnerEmail().trim().toLowerCase();
-            String creatorEmail = userRepository.findById(createdByUserId)
-                    .map(User::getEmail)
-                    .map(String::toLowerCase)
-                    .orElse(null);
-            if (!ownerEmail.equals(creatorEmail)) {
-                InviteEmployeeRequest inviteRequest = new InviteEmployeeRequest();
-                inviteRequest.setEmail(ownerEmail);
-                inviteRequest.setRoleId(tenantAdminRole.getId());
-                employeeInvitationService.sendInvitation(tenant.getId(), inviteRequest, createdByUserId, createdByPlatformAdmin);
-                log.info("Owner invitation sent: tenantId={} ownerEmail={} invitedBy={}",
-                        tenant.getId(), ownerEmail, createdByUserId);
-            }
+            log.info("Owner assigned TENANT_ADMIN: userId={} tenantId={} assignedBy={}",
+                    ownerId, tenant.getId(), createdByUserId);
         }
 
         return toResponse(tenant);
     }
 
+    private User resolveExistingOwner(CreateTenantRequest request) {
+        if (request.getOwnerUserId() != null) {
+            return userRepository.findByIdAndDeletedAtIsNull(request.getOwnerUserId())
+                    .orElseThrow(() -> new ResourceNotFoundException("Owner user not found: " + request.getOwnerUserId()));
+        }
+        String email = request.getOwnerEmail().trim().toLowerCase();
+        return userRepository.findByEmailAndDeletedAtIsNull(email)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "No existing account found for owner email '" + email + "' — the owner must already be registered"));
+    }
+
+    /**
+     * Owner-only, by product decision — including for Platform Admin/Staff. Whoever
+     * provisioned the tenant (see {@link #createTenant}) can set its initial basic info and
+     * assign the owner/plan, but does not retain edit rights afterward: once a tenant has an
+     * assigned owner, only that owner manages its profile going forward. Platform-level
+     * administrative actions (suspend/reactivate/cancel/subscription changes) are separate
+     * endpoints, unaffected by this restriction.
+     */
     @Transactional
-    public TenantResponse updateTenant(UUID tenantId, UpdateTenantRequest request, UUID userId, boolean isPlatformAdmin) {
+    public TenantResponse updateTenant(UUID tenantId, UpdateTenantRequest request, UUID userId) {
         Tenant tenant = tenantRepository.findByIdAndDeletedAtIsNull(tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Tenant not found: " + tenantId));
 
-        if (!isPlatformAdmin && !userId.equals(tenant.getOwnerId())) {
-            throw new AccessDeniedException("You do not have permission to update this tenant");
+        if (!userId.equals(tenant.getOwnerId())) {
+            throw new AccessDeniedException("Only this tenant's owner may update its profile");
         }
 
         if (StringUtils.hasText(request.getDomain())

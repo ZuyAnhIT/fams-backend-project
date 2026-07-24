@@ -13,6 +13,8 @@ public interface TenantIpWhitelistRepository extends JpaRepository<TenantIpWhite
 
     List<TenantIpWhitelist> findByTenantIdAndDeletedAtIsNullOrderByCreatedAtDesc(UUID tenantId);
 
+    List<TenantIpWhitelist> findByTenantIdAndIsActiveTrueAndDeletedAtIsNull(UUID tenantId);
+
     Page<TenantIpWhitelist> findByTenantIdAndDeletedAtIsNull(UUID tenantId, Pageable pageable);
 
     Optional<TenantIpWhitelist> findByIdAndTenantIdAndDeletedAtIsNull(UUID id, UUID tenantId);

@@ -60,9 +60,10 @@ app:
   # Frontend origin (web/mobile deep-link) for the two emailed links a human clicks
   # straight into a UI screen: password reset and email verification. Deliberately
   # separate from app.base-url — that one is the API server's own origin, used where a
-  # link is meant to hit this backend directly (TOTP QR page, email-change confirm) or
+  # link is meant to hit this backend directly (for example the TOTP QR page) or
   # by other services that build URLs against this server. Web frontend serves
-  # /reset-password and /verify-email routes at this origin; the native app registers
+  # /reset-password and /verify-email routes at this origin, including email-change
+  # confirmation via /verify-email?mode=email-change; the native app registers
   # the same paths as Android App Links / iOS Universal Links (falls back to its custom
   # scheme when this isn't a real HTTPS domain yet — see fams-front-app-project docs
   # 07/08). See PasswordResetService, RegisterService, EmailVerificationService.

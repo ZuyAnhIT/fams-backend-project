@@ -62,6 +62,8 @@ public interface UserRoleRepository extends JpaRepository<UserRole, UUID> {
 
     boolean existsByRoleIdAndDeletedAtIsNull(UUID roleId);
 
+    boolean existsByUserIdAndTenantIdAndDeletedAtIsNull(UUID userId, UUID tenantId);
+
     @Query("SELECT ur FROM UserRole ur JOIN FETCH ur.role WHERE ur.id = :id AND ur.deletedAt IS NULL")
     java.util.Optional<UserRole> findActiveById(@Param("id") UUID id);
 

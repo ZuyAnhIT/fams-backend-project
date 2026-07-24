@@ -40,12 +40,28 @@ docker exec fams-postgres psql -U fams_user -d fams_db -q -c \
     "UPDATE users SET email_verified = true WHERE email = '$EMAIL';" > /dev/null
 USER_ID=$(docker exec fams-postgres psql -U fams_user -d fams_db -t -c "SELECT id FROM users WHERE email='$EMAIL';" | tr -d ' ')
 
+# Platform-admin-provisioned tenants now require an existing-user owner (see
+# TenantService.createTenant) — use a throwaway owner for all three, distinct from $EMAIL,
+# since $EMAIL's TENANT_ADMIN role in T1/T2 (and deliberate absence in T3) is assigned
+# explicitly below via POST /user-roles; assigning $EMAIL as owner here too would just
+# duplicate that same role assignment.
+register_throwaway_owner() {
+    local email="$1"
+    curl -s -o /dev/null -X POST "$BASE_URL/api/v1/auth/register" -H "Content-Type: application/json" \
+        -d "{\"email\":\"$email\",\"password\":\"TestPass1\",\"displayName\":\"Throwaway Owner\"}"
+    docker exec fams-postgres psql -U fams_user -d fams_db -q -c \
+        "UPDATE users SET email_verified = true WHERE email = '$email';" > /dev/null
+}
+T1_OWNER="switch_corp1_owner_${TS}@fams.com"; register_throwaway_owner "$T1_OWNER"
+T2_OWNER="switch_corp2_owner_${TS}@fams.com"; register_throwaway_owner "$T2_OWNER"
+T3_OWNER="switch_corp3_owner_${TS}@fams.com"; register_throwaway_owner "$T3_OWNER"
+
 T1=$(curl -s -X POST "$BASE_URL/api/v1/tenants" -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"name\":\"Switch Corp1 $TS\",\"slug\":\"switch-corp1-$TS\"}" | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['id'])")
+    -d "{\"name\":\"Switch Corp1 $TS\",\"slug\":\"switch-corp1-$TS\",\"ownerEmail\":\"$T1_OWNER\"}" | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['id'])")
 T2=$(curl -s -X POST "$BASE_URL/api/v1/tenants" -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"name\":\"Switch Corp2 $TS\",\"slug\":\"switch-corp2-$TS\"}" | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['id'])")
+    -d "{\"name\":\"Switch Corp2 $TS\",\"slug\":\"switch-corp2-$TS\",\"ownerEmail\":\"$T2_OWNER\"}" | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['id'])")
 T3=$(curl -s -X POST "$BASE_URL/api/v1/tenants" -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"name\":\"Switch Corp3 (no role) $TS\",\"slug\":\"switch-corp3-$TS\"}" | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['id'])")
+    -d "{\"name\":\"Switch Corp3 (no role) $TS\",\"slug\":\"switch-corp3-$TS\",\"ownerEmail\":\"$T3_OWNER\"}" | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['id'])")
 echo "user=$USER_ID t1=$T1 t2=$T2 t3(no role)=$T3"
 
 TENANT_ADMIN_ROLE=$(docker exec fams-postgres psql -U fams_user -d fams_db -t -c \

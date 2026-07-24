@@ -36,7 +36,7 @@ echo "--- Setup: Login as platform admin ---"
 login_response=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d '{"email":"admin@fams.com","password":"Admin@1234"}')
+    -d '{"identifier":"admin@fams.com","password":"Admin@1234"}')
 login_body=$(echo "$login_response" | head -n -1)
 login_status=$(echo "$login_response" | tail -n 1)
 
@@ -51,14 +51,23 @@ if [ -z "$ADMIN_TOKEN" ]; then
 fi
 echo "Admin token obtained."
 
+# --- Setup: Register an existing user to be the tenant's owner (now required — see
+# TenantService.createTenant, platform-admin-provisioned tenants assign a direct owner) ---
+TS=$(date +%s)
+OWNER_EMAIL="tenant_status_owner_${TS}@fams.com"
+curl -s -o /dev/null -X POST "$BASE_URL/api/v1/auth/register" -H "Content-Type: application/json" \
+    -d "{\"email\":\"$OWNER_EMAIL\",\"password\":\"TestPass1\",\"displayName\":\"Status Owner\"}"
+docker exec fams-postgres psql -U fams_user -d fams_db -q -c \
+    "UPDATE users SET email_verified = true WHERE email = '$OWNER_EMAIL';" > /dev/null
+
 # --- Setup: Create a test tenant ---
 echo "--- Setup: Create a test tenant ---"
-SLUG="test-suspend-$(date +%s)"
+SLUG="test-suspend-${TS}"
 create_response=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/tenants" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"name\":\"Suspend Test Tenant\",\"slug\":\"$SLUG\",\"industry\":\"tech\",\"countryCode\":\"VN\"}")
+    -d "{\"name\":\"Suspend Test Tenant\",\"slug\":\"$SLUG\",\"industry\":\"tech\",\"countryCode\":\"VN\",\"ownerEmail\":\"$OWNER_EMAIL\"}")
 create_body=$(echo "$create_response" | head -n -1)
 create_status=$(echo "$create_response" | tail -n 1)
 
@@ -149,13 +158,19 @@ echo "Test tenant restored to active."
 echo ""
 echo "=== Cancel Endpoint ==="
 
-# Create a fresh tenant for cancel tests
+# Create a fresh tenant for cancel tests (owner now required for admin-provisioned tenants)
+CANCEL_OWNER_EMAIL="tenant_cancel_owner_$(date +%s)@fams.com"
+curl -s -o /dev/null -X POST "$BASE_URL/api/v1/auth/register" -H "Content-Type: application/json" \
+    -d "{\"email\":\"$CANCEL_OWNER_EMAIL\",\"password\":\"TestPass1\",\"displayName\":\"Cancel Test Owner\"}"
+docker exec fams-postgres psql -U fams_user -d fams_db -q -c \
+    "UPDATE users SET email_verified = true WHERE email = '$CANCEL_OWNER_EMAIL';" > /dev/null
+
 CANCEL_SLUG="test-cancel-$(date +%s)"
 cancel_tenant_body=$(curl -s \
     -X POST "$BASE_URL/api/v1/tenants" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"name\":\"Cancel Test Tenant\",\"slug\":\"$CANCEL_SLUG\"}")
+    -d "{\"name\":\"Cancel Test Tenant\",\"slug\":\"$CANCEL_SLUG\",\"ownerEmail\":\"$CANCEL_OWNER_EMAIL\"}")
 CANCEL_TENANT_ID=$(echo "$cancel_tenant_body" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 echo "Cancel test tenant: $CANCEL_TENANT_ID"
 

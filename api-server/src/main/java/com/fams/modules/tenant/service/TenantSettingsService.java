@@ -1,5 +1,6 @@
 package com.fams.modules.tenant.service;
 
+import com.fams.modules.rbac.repository.UserRoleRepository;
 import com.fams.modules.tenant.dto.request.UpdateTenantSettingsRequest;
 import com.fams.modules.tenant.dto.response.TenantSettingsResponse;
 import com.fams.modules.tenant.entity.TenantSettings;
@@ -20,16 +21,19 @@ public class TenantSettingsService {
 
     private final TenantRepository tenantRepository;
     private final TenantSettingsRepository settingsRepository;
+    private final UserRoleRepository userRoleRepository;
 
     public TenantSettingsService(TenantRepository tenantRepository,
-                                 TenantSettingsRepository settingsRepository) {
+                                 TenantSettingsRepository settingsRepository,
+                                 UserRoleRepository userRoleRepository) {
         this.tenantRepository = tenantRepository;
         this.settingsRepository = settingsRepository;
+        this.userRoleRepository = userRoleRepository;
     }
 
     @Transactional
     public TenantSettingsResponse getSettings(UUID tenantId, UUID userId, boolean isPlatformAdmin) {
-        assertTenantAccessible(tenantId, userId, isPlatformAdmin);
+        assertTenantViewable(tenantId, userId, isPlatformAdmin);
 
         TenantSettings settings = settingsRepository.findByTenantId(tenantId)
                 .orElseGet(() -> createDefaults(tenantId));
@@ -37,10 +41,16 @@ public class TenantSettingsService {
         return toResponse(settings);
     }
 
+    /**
+     * Owner-only, matching TenantService.updateTenant's product decision (24/07/2026):
+     * display/branding settings are part of the same "company configuration" surface as the
+     * tenant profile — Platform Admin/Staff can VIEW them (for support) but not change them,
+     * even for a tenant they provisioned.
+     */
     @Transactional
     public TenantSettingsResponse updateSettings(UUID tenantId, UpdateTenantSettingsRequest request,
-                                                 UUID userId, boolean isPlatformAdmin) {
-        assertTenantAccessible(tenantId, userId, isPlatformAdmin);
+                                                 UUID userId) {
+        assertOwner(tenantId, userId);
 
         TenantSettings settings = settingsRepository.findByTenantId(tenantId)
                 .orElseGet(() -> createDefaults(tenantId));
@@ -61,12 +71,30 @@ public class TenantSettingsService {
         return toResponse(settings);
     }
 
-    private void assertTenantAccessible(UUID tenantId, UUID userId, boolean isPlatformAdmin) {
+    /**
+     * Unlike the tenant profile (owner-or-admin only), display/format settings (date format,
+     * currency-adjacent locale bits, brand colors) are read by every member's own client to
+     * render the app consistently for that company — so GET is open to any active member of
+     * the tenant, not just its owner. PATCH stays owner-only (see updateSettings).
+     */
+    private void assertTenantViewable(UUID tenantId, UUID userId, boolean isPlatformAdmin) {
         var tenant = tenantRepository.findByIdAndDeletedAtIsNull(tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Tenant not found: " + tenantId));
 
-        if (!isPlatformAdmin && !userId.equals(tenant.getOwnerId())) {
+        if (isPlatformAdmin || userId.equals(tenant.getOwnerId())) {
+            return;
+        }
+        if (!userRoleRepository.existsByUserIdAndTenantIdAndDeletedAtIsNull(userId, tenantId)) {
             throw new AccessDeniedException("You do not have permission to access this tenant's settings");
+        }
+    }
+
+    private void assertOwner(UUID tenantId, UUID userId) {
+        var tenant = tenantRepository.findByIdAndDeletedAtIsNull(tenantId)
+                .orElseThrow(() -> new ResourceNotFoundException("Tenant not found: " + tenantId));
+
+        if (!userId.equals(tenant.getOwnerId())) {
+            throw new AccessDeniedException("Only this tenant's owner may update its settings");
         }
     }
 
