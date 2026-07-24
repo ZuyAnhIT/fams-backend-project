@@ -127,6 +127,39 @@ run_test "Unauthenticated avatar upload rejected" 401 \
     -X POST "$BASE_URL/api/v1/auth/profile/avatar" \
     -F "file=@${TMP_PNG};type=image/png"
 
+# Test 7: PATCH /me can no longer set avatarUrl by pasting an arbitrary URL — the only way
+# to set an avatar is a real upload through POST /auth/profile/avatar (S3/MinIO-backed).
+echo ""
+echo "--- Test 7: PATCH /me cannot set avatarUrl by pasting a URL ---"
+before=$(curl -s "$BASE_URL/api/v1/auth/me" -H "Authorization: Bearer $TOKEN" | grep -o '"avatarUrl":"[^"]*"')
+curl -s -o /dev/null -X PATCH "$BASE_URL/api/v1/auth/me" \
+    -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" \
+    -d '{"avatarUrl":"https://evil.example.com/not-uploaded.png"}'
+after=$(curl -s "$BASE_URL/api/v1/auth/me" -H "Authorization: Bearer $TOKEN" | grep -o '"avatarUrl":"[^"]*"')
+if [ "$before" = "$after" ] && ! echo "$after" | grep -q "evil.example.com"; then
+    echo "PASS: Pasted avatarUrl via PATCH /me was ignored (still $after)"
+    PASS=$((PASS + 1))
+else
+    echo "FAIL: PATCH /me accepted a pasted avatarUrl — before=$before after=$after"
+    FAIL=$((FAIL + 1))
+fi
+
+# Test 8: DELETE /profile/avatar removes it — file deleted from storage, field cleared
+echo ""
+echo "--- Test 8: DELETE /profile/avatar removes the current avatar ---"
+del_response=$(curl -s -w "\n%{http_code}" -X DELETE "$BASE_URL/api/v1/auth/profile/avatar" \
+    -H "Authorization: Bearer $TOKEN")
+del_status=$(echo "$del_response" | tail -n 1)
+del_body=$(echo "$del_response" | head -n -1)
+gone_status=$(curl -s -o /dev/null -w "%{http_code}" "$avatar_url2")
+if [ "$del_status" -eq 200 ] && echo "$del_body" | grep -q '"avatarUrl":null' && [ "$gone_status" -eq 404 ]; then
+    echo "PASS: Avatar deleted (avatarUrl:null, file removed from storage — HTTP 404)"
+    PASS=$((PASS + 1))
+else
+    echo "FAIL: Delete avatar — status=$del_status body=$del_body storage_status=$gone_status"
+    FAIL=$((FAIL + 1))
+fi
+
 rm -f "$TMP_PNG" "$TMP_TXT"
 
 echo ""

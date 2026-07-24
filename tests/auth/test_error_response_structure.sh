@@ -45,7 +45,7 @@ echo "--- 1. Invalid credentials (401) ---"
 cred_resp=$(curl -s \
     -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d '{"email":"nobody@nowhere.com","password":"wrongpass123"}')
+    -d '{"identifier":"nobody@nowhere.com","password":"wrongpass123"}')
 check_contains "Error has success:false" "$cred_resp" '"success":false'
 check_contains "Error has errorCode" "$cred_resp" '"errorCode"'
 check_contains "Error code is INVALID_CREDENTIALS" "$cred_resp" '"INVALID_CREDENTIALS"'
@@ -58,7 +58,7 @@ echo "--- 2. Validation error (400) ---"
 val_resp=$(curl -s \
     -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d '{"email":"not-an-email","password":"x"}')
+    -d '{"identifier":"not-an-email","password":"x"}')
 check_contains "Validation error has success:false" "$val_resp" '"success":false'
 check_contains "Validation error has errorCode" "$val_resp" '"errorCode"'
 check_contains "Validation errorCode is VALIDATION_ERROR" "$val_resp" '"VALIDATION_ERROR"'
@@ -70,7 +70,7 @@ echo "--- 3. Resource not found (404) ---"
 login_resp=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d '{"email":"admin@fams.com","password":"Admin@1234"}')
+    -d '{"identifier":"admin@fams.com","password":"Admin@1234"}')
 if [ "$(echo "$login_resp" | tail -n 1)" -ne 200 ]; then
     echo "SETUP FAILED: admin login"
     exit 1
@@ -116,7 +116,7 @@ curl -s -o /dev/null \
 emp_login=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d "{\"email\":\"$EMP_EMAIL\",\"password\":\"Employee@1234\"}")
+    -d "{\"identifier\":\"$EMP_EMAIL\",\"password\":\"Employee@1234\"}")
 EMP_TOKEN=$(echo "$emp_login" | head -n -1 | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4)
 
 ad_resp=$(curl -s \
@@ -143,7 +143,7 @@ echo "--- 6. Success response has no errorCode or userMessage ---"
 ok_resp=$(curl -s \
     -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d '{"email":"admin@fams.com","password":"Admin@1234"}')
+    -d '{"identifier":"admin@fams.com","password":"Admin@1234"}')
 if echo "$ok_resp" | grep -q '"errorCode"'; then
     echo "FAIL: Success response should NOT contain errorCode"
     FAIL=$((FAIL + 1))

@@ -128,7 +128,7 @@ LOGIN_BACKUP_CODE="${codes[0]}"
 DISABLE_BACKUP_CODE="${codes[1]}"
 
 pending=$(curl -s -X POST "$BASE_URL/api/v1/auth/login" -H "Content-Type: application/json" \
-    -d "{\"email\":\"$EMAIL\",\"password\":\"TestPass1\"}" | grep -o '"pendingToken":"[^"]*"' | cut -d'"' -f4)
+    -d "{\"identifier\":\"$EMAIL\",\"password\":\"TestPass1\"}" | grep -o '"pendingToken":"[^"]*"' | cut -d'"' -f4)
 login_status=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE_URL/api/v1/auth/login/totp" \
     -H "Content-Type: application/json" -d "{\"pendingToken\":\"$pending\",\"backupCode\":\"$LOGIN_BACKUP_CODE\"}")
 if [ "$login_status" -eq 200 ]; then
@@ -138,7 +138,7 @@ else
 fi
 
 pending2=$(curl -s -X POST "$BASE_URL/api/v1/auth/login" -H "Content-Type: application/json" \
-    -d "{\"email\":\"$EMAIL\",\"password\":\"TestPass1\"}" | grep -o '"pendingToken":"[^"]*"' | cut -d'"' -f4)
+    -d "{\"identifier\":\"$EMAIL\",\"password\":\"TestPass1\"}" | grep -o '"pendingToken":"[^"]*"' | cut -d'"' -f4)
 reuse_status=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE_URL/api/v1/auth/login/totp" \
     -H "Content-Type: application/json" -d "{\"pendingToken\":\"$pending2\",\"backupCode\":\"$LOGIN_BACKUP_CODE\"}")
 if [ "$reuse_status" -eq 401 ]; then

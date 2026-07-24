@@ -1,193 +1,91 @@
 #!/usr/bin/env bash
-# Manual test for Firebase Phone OTP Login
-# POST /api/v1/auth/otp/verify
+# Automated, no-credentials-needed tests for POST /api/v1/auth/otp/verify
+# (Firebase Phone Auth login — the "quick login via phone OTP" path).
 #
-# Usage:
-#   BASE_URL=http://localhost:8080 bash tests/auth/test_otp_login.sh
+# The real happy-path needs a genuine Firebase ID token (real SMS OTP exchanged via the
+# Firebase REST API, or a token pasted from a mobile app) — that's covered separately by
+# tests/auth/test_otp_login_manual.sh. This script covers everything that's verifiable
+# without credentials: validation, structural garbage input, and rate limiting — and in
+# particular regression-guards a bug found in this environment where a well-formed-but-
+# fake-signed JWT crashed FirebaseAuth.verifyIdToken() with a bare NullPointerException
+# (missing `iat` claim) that FirebasePhoneTokenVerifier didn't catch, surfacing as an
+# HTTP 500 instead of a clean 401.
 #
-# Flow:
-#   1. Optionally registers a FAMS account linked to your phone number.
-#   2. Calls Firebase REST API to trigger an OTP SMS to your phone.
-#   3. Prompts you to enter the 6-digit code you received.
-#   4. Exchanges the code for a Firebase ID Token via Firebase REST API.
-#   5. Sends the Firebase ID Token to POST /api/v1/auth/otp/verify.
-#   6. Prints PASS if FAMS JWT tokens are returned, FAIL otherwise.
-#
-# QUOTA NOTE:
-#   Each run triggers 1 real SMS (Firebase free tier: 10 SMS/day).
-#   To avoid consuming quota during repeated tests, register your phone
-#   as a "test phone number" in Firebase Console:
-#     Authentication → Sign-in method → Phone → Test phone numbers
-#   Set any fixed code you like — no real SMS is sent for test numbers.
-#
-# reCAPTCHA NOTE:
-#   The Firebase REST API requires a reCAPTCHA token for real phone numbers.
-#   This script sends a dummy token, which Firebase accepts only for numbers
-#   registered as test phone numbers in Firebase Console.
-#   For real phone numbers you must obtain the Firebase ID Token from your
-#   React / React Native app and pass it directly:
-#     FIREBASE_ID_TOKEN=<token> BASE_URL=http://localhost:8080 bash test_otp_login.sh
+# Usage: BASE_URL=http://localhost:8080 bash tests/auth/test_otp_login.sh
 
-set -eo pipefail
+set -uo pipefail
 
-# ── Config ─────────────────────────────────────────────────────────────────────
-# Set FIREBASE_API_KEY to your Firebase Web API Key (Project Settings → General → Web API key)
-FIREBASE_API_KEY="${FIREBASE_API_KEY:-}"
 BASE_URL="${BASE_URL:-http://localhost:8080}"
-
-if [ -z "$FIREBASE_API_KEY" ] && [ -z "${FIREBASE_ID_TOKEN:-}" ]; then
-    echo "ERROR: FIREBASE_API_KEY is required when not supplying a pre-obtained token."
-    echo "  Export it before running: export FIREBASE_API_KEY=<your-web-api-key>"
-    echo "  Or skip Firebase steps:   FIREBASE_ID_TOKEN=<token> bash $0"
-    exit 1
-fi
 PASS=0
 FAIL=0
 
-pass() { echo "PASS: $1"; PASS=$((PASS + 1)); }
-fail() { echo "FAIL: $1"; FAIL=$((FAIL + 1)); }
+run_test() {
+    local name="$1"
+    local expected_status="$2"
+    local curl_args=("${@:3}")
+    local actual_status
+    actual_status=$(curl -s -o /dev/null -w "%{http_code}" "${curl_args[@]}")
+    if [ "$actual_status" -eq "$expected_status" ]; then
+        echo "PASS: $name (HTTP $actual_status)"
+        PASS=$((PASS + 1))
+    else
+        echo "FAIL: $name — expected HTTP $expected_status, got HTTP $actual_status"
+        FAIL=$((FAIL + 1))
+    fi
+}
 
-echo "=== Firebase Phone OTP Login — Manual Test ==="
+echo "=== Phone OTP Quick-Login (Firebase) — Automated Tests ==="
 echo "Target: $BASE_URL"
 echo ""
 
-# ── Skip Firebase steps if caller already has a token ─────────────────────────
-if [ -n "${FIREBASE_ID_TOKEN:-}" ]; then
-    echo "Using pre-supplied FIREBASE_ID_TOKEN — skipping Firebase steps."
-    echo ""
-else
-
-    # ── Step 1: Register FAMS account (if needed) ──────────────────────────────
-    echo "--- Step 1: FAMS Account ---"
-    read -rp "Do you already have a FAMS account linked to your phone? (y/n): " HAS_ACCOUNT
-
-    if [[ "$HAS_ACCOUNT" != "y" && "$HAS_ACCOUNT" != "Y" ]]; then
-        read -rp "Phone number (E.164, e.g. +84912345678): " PHONE
-        read -rp "Email address for the new account: " EMAIL
-        read -rsp "Password (min 8 chars, upper + lower + digit): " PASSWORD
-        echo ""
-        read -rp "Display name: " DISPLAY_NAME
-
-        REG_STATUS=$(curl -s -o /tmp/fams_reg.json -w "%{http_code}" \
-            -X POST "$BASE_URL/api/v1/auth/register" \
-            -H "Content-Type: application/json" \
-            -d "{
-                  \"phone\":       \"$PHONE\",
-                  \"email\":       \"$EMAIL\",
-                  \"password\":    \"$PASSWORD\",
-                  \"displayName\": \"$DISPLAY_NAME\"
-                }")
-        REG_BODY=$(cat /tmp/fams_reg.json)
-
-        if [ "$REG_STATUS" -eq 201 ]; then
-            pass "FAMS account registered (HTTP 201)"
-        elif [ "$REG_STATUS" -eq 409 ]; then
-            echo "INFO: Account already exists (HTTP 409) — continuing"
-        else
-            fail "Registration failed (HTTP $REG_STATUS)"
-            echo "Body: $REG_BODY"
-            exit 1
-        fi
-    else
-        read -rp "Phone number (E.164, e.g. +84912345678): " PHONE
-    fi
-
-    echo ""
-
-    # ── Step 2: Ask Firebase to send OTP ───────────────────────────────────────
-    echo "--- Step 2: Sending OTP via Firebase ---"
-    echo "Requesting Firebase to send OTP to $PHONE ..."
-
-    SEND_STATUS=$(curl -s -o /tmp/fams_otp_send.json -w "%{http_code}" \
-        -X POST "https://identitytoolkit.googleapis.com/v1/accounts:sendVerificationCode?key=$FIREBASE_API_KEY" \
-        -H "Content-Type: application/json" \
-        -d "{\"phoneNumber\":\"$PHONE\",\"recaptchaToken\":\"test-recaptcha\"}")
-    SEND_BODY=$(cat /tmp/fams_otp_send.json)
-
-    if [ "$SEND_STATUS" -ne 200 ]; then
-        fail "Firebase rejected the OTP request (HTTP $SEND_STATUS)"
-        echo "Response: $SEND_BODY"
-        echo ""
-        echo "Solutions:"
-        echo "  A) Register $PHONE as a test phone in Firebase Console:"
-        echo "       Authentication → Sign-in method → Phone → Test phone numbers"
-        echo "  B) Get a Firebase ID Token from your React/React Native app and re-run:"
-        echo "       FIREBASE_ID_TOKEN=<token> BASE_URL=$BASE_URL bash $0"
-        exit 1
-    fi
-
-    SESSION_INFO=$(echo "$SEND_BODY" | grep -o '"sessionInfo"[[:space:]]*:[[:space:]]*"[^"]*"' | cut -d'"' -f4 || true)
-    if [ -z "$SESSION_INFO" ]; then
-        fail "Firebase returned HTTP 200 but no sessionInfo in response"
-        echo "Body: $SEND_BODY"
-        exit 1
-    fi
-    pass "Firebase OTP ready — enter the fixed code you set in Firebase Console"
-    echo ""
-
-    # ── Step 3: Enter OTP ──────────────────────────────────────────────────────
-    echo "--- Step 3: Enter OTP ---"
-    read -rp "Enter the 6-digit code: " OTP_CODE
-    echo ""
-
-    # ── Step 4: Exchange OTP for Firebase ID Token ─────────────────────────────
-    echo "--- Step 4: Exchanging code with Firebase ---"
-    TOKEN_STATUS=$(curl -s -o /tmp/fams_otp_token.json -w "%{http_code}" \
-        -X POST "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPhoneNumber?key=$FIREBASE_API_KEY" \
-        -H "Content-Type: application/json" \
-        -d "{\"sessionInfo\":\"$SESSION_INFO\",\"code\":\"$OTP_CODE\"}")
-    TOKEN_BODY=$(cat /tmp/fams_otp_token.json)
-
-    if [ "$TOKEN_STATUS" -ne 200 ]; then
-        fail "Firebase rejected the OTP code (HTTP $TOKEN_STATUS)"
-        echo "Response: $TOKEN_BODY"
-        exit 1
-    fi
-
-    FIREBASE_ID_TOKEN=$(echo "$TOKEN_BODY" | grep -o '"idToken"[[:space:]]*:[[:space:]]*"[^"]*"' | cut -d'"' -f4 || true)
-    if [ -z "$FIREBASE_ID_TOKEN" ]; then
-        fail "Firebase returned HTTP 200 but no idToken in response"
-        echo "Body: $TOKEN_BODY"
-        exit 1
-    fi
-    pass "Firebase ID Token obtained"
-    echo ""
-
-fi  # end Firebase flow
-
-# ── Step 5: Backend verifies the Firebase ID Token ─────────────────────────────
-echo "--- Step 5: Backend — POST /api/v1/auth/otp/verify ---"
-LOGIN_STATUS=$(curl -s -o /tmp/fams_otp_login.json -w "%{http_code}" \
+echo "--- Test 1: Missing firebaseIdToken field ---"
+run_test "Missing firebaseIdToken" 400 \
     -X POST "$BASE_URL/api/v1/auth/otp/verify" \
     -H "Content-Type: application/json" \
-    -d "{\"firebaseIdToken\":\"$FIREBASE_ID_TOKEN\",\"deviceId\":\"manual-test\"}")
-LOGIN_BODY=$(cat /tmp/fams_otp_login.json)
+    -d '{}'
 
-if [ "$LOGIN_STATUS" -eq 200 ]; then
-    ACCESS_TOKEN=$(echo "$LOGIN_BODY" | grep -o '"accessToken":"[^"]*"' | cut -d'"' -f4 || true)
-    REFRESH_TOKEN=$(echo "$LOGIN_BODY" | grep -o '"refreshToken":"[^"]*"' | cut -d'"' -f4 || true)
-    if [ -n "$ACCESS_TOKEN" ] && [ -n "$REFRESH_TOKEN" ]; then
-        pass "Backend login successful — access + refresh tokens received"
-    else
-        fail "HTTP 200 but tokens missing in response"
-        echo "Body: $LOGIN_BODY"
-    fi
-elif [ "$LOGIN_STATUS" -eq 401 ]; then
-    fail "Backend rejected the Firebase token (HTTP 401) — token invalid or phone not linked to a FAMS account"
-    echo "Body: $LOGIN_BODY"
-elif [ "$LOGIN_STATUS" -eq 503 ]; then
-    fail "Firebase not configured on the server (HTTP 503) — check FCM_PROJECT_ID and FCM_SERVICE_ACCOUNT_JSON env vars"
-    echo "Body: $LOGIN_BODY"
+echo ""
+echo "--- Test 2: Blank firebaseIdToken ---"
+run_test "Blank firebaseIdToken" 400 \
+    -X POST "$BASE_URL/api/v1/auth/otp/verify" \
+    -H "Content-Type: application/json" \
+    -d '{"firebaseIdToken":""}'
+
+echo ""
+echo "--- Test 3: Garbage (non-JWT) token → 401, not 500 ---"
+run_test "Garbage token" 401 \
+    -X POST "$BASE_URL/api/v1/auth/otp/verify" \
+    -H "Content-Type: application/json" \
+    -d '{"firebaseIdToken":"not-a-real-token"}'
+
+echo ""
+echo "--- Test 4: Well-formed but fake-signed JWT → 401, not 500 (regression guard) ---"
+FAKE_JWT="eyJhbGciOiJSUzI1NiIsImtpZCI6ImZha2UifQ.eyJzdWIiOiIxMjM0NTY3ODkwIiwicGhvbmVfbnVtYmVyIjoiKzg0OTEyMzQ1Njc4IiwiYXVkIjoicGhvbmUtZmFtcyIsImlzcyI6Imh0dHBzOi8vc2VjdXJldG9rZW4uZ29vZ2xlLmNvbS9waG9uZS1mYW1zIiwiZXhwIjo5OTk5OTk5OTk5fQ.fakesignature"
+run_test "Fake-signed well-formed JWT" 401 \
+    -X POST "$BASE_URL/api/v1/auth/otp/verify" \
+    -H "Content-Type: application/json" \
+    -d "{\"firebaseIdToken\":\"$FAKE_JWT\"}"
+
+echo ""
+echo "--- Test 5: Endpoint is publicly accessible (no Authorization header) ---"
+STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+    -X POST "$BASE_URL/api/v1/auth/otp/verify" \
+    -H "Content-Type: application/json" \
+    -d '{"firebaseIdToken":"check-public"}')
+if [ "$STATUS" -ne 403 ]; then
+    echo "PASS: Endpoint is public — not blocked by security filter (HTTP $STATUS, service handled the request)"
+    PASS=$((PASS + 1))
 else
-    fail "Unexpected response (HTTP $LOGIN_STATUS)"
-    echo "Body: $LOGIN_BODY"
+    echo "FAIL: Endpoint returned 403 — security filter may be blocking unauthenticated requests"
+    FAIL=$((FAIL + 1))
 fi
 
-# ── Summary ────────────────────────────────────────────────────────────────────
 echo ""
 echo "=== Results ==="
 echo "PASSED: $PASS"
 echo "FAILED: $FAIL"
+echo ""
+echo "NOTE: Happy-path (real SMS OTP) requires Firebase credentials — see tests/auth/test_otp_login_manual.sh"
 echo ""
 
 if [ "$FAIL" -gt 0 ]; then

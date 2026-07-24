@@ -35,7 +35,7 @@ sleep 1
 echo "--- Setup: Login to get tokens ---"
 login_response=$(curl -s -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d '{"email":"admin@fams.com","password":"Admin@1234","deviceId":"logout-test-device"}')
+    -d '{"identifier":"admin@fams.com","password":"Admin@1234","deviceId":"logout-test-device"}')
 
 ACCESS_TOKEN=$(echo "$login_response" | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4)
 REFRESH_TOKEN=$(echo "$login_response" | grep -o '"refreshToken":"[^"]*"' | head -1 | cut -d'"' -f4)

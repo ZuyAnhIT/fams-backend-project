@@ -24,6 +24,7 @@ public class LogoutService {
 
     public static final String BLACKLIST_PREFIX = "jwt:blacklist:";
     public static final String USER_REVOKE_PREFIX = "jwt:user_revoke:";
+    public static final String DEVICE_REVOKE_PREFIX = "jwt:user_device_revoke:";
 
     private final StringRedisTemplate redis;
     private final JwtProvider jwtProvider;
@@ -46,7 +47,14 @@ public class LogoutService {
         revokeRefreshToken(rawRefreshToken);
     }
 
-    private void blacklistAccessToken(String rawToken) {
+    /**
+     * Deterministic, race-free way to kill one specific token right now — unlike the
+     * user-wide {@code jwt:user_revoke:} timestamp (see {@link #logoutAll}). Public so other
+     * flows that already hold the raw token
+     * being used for the current request (e.g. {@link ChangePasswordService}) can blacklist
+     * it directly instead of relying on that timestamp comparison for their own token.
+     */
+    public void blacklistAccessToken(String rawToken) {
         try {
             Claims claims = jwtProvider.parseAccessToken(rawToken);
             long expiryMillis = claims.getExpiration().getTime();
@@ -66,8 +74,8 @@ public class LogoutService {
         blacklistAccessToken(rawAccessToken);
 
         String userRevokeKey = USER_REVOKE_PREFIX + userId;
-        long revokeSeconds = System.currentTimeMillis() / 1000;
-        redis.opsForValue().set(userRevokeKey, String.valueOf(revokeSeconds),
+        long revokeMillis = System.currentTimeMillis();
+        redis.opsForValue().set(userRevokeKey, String.valueOf(revokeMillis),
                 accessTtlMinutes + 1, TimeUnit.MINUTES);
 
         refreshTokenRepository.revokeAllActiveByUserId(userId, OffsetDateTime.now());
@@ -116,6 +124,7 @@ public class LogoutService {
     public void logoutSession(UUID userId, UUID sessionId) {
         RefreshToken token = refreshTokenRepository.findByIdAndUserIdAndRevokedAtIsNull(sessionId, userId)
                 .orElseThrow(() -> new ResourceNotFoundException("Session not found"));
+        revokeDeviceAccess(userId, token.getDeviceId());
         token.setRevokedAt(OffsetDateTime.now());
         refreshTokenRepository.save(token);
         log.info("Session {} revoked by user {}", sessionId, userId);
@@ -128,8 +137,21 @@ public class LogoutService {
      */
     @Transactional
     public void logoutAllExceptCurrent(UUID userId, String currentDeviceId) {
+        refreshTokenRepository.findAllActiveByUserId(userId, OffsetDateTime.now()).stream()
+                .map(RefreshToken::getDeviceId)
+                .filter(deviceId -> !Objects.equals(deviceId, currentDeviceId))
+                .filter(Objects::nonNull)
+                .distinct()
+                .forEach(deviceId -> revokeDeviceAccess(userId, deviceId));
         refreshTokenRepository.revokeAllActiveByUserIdExceptDevice(
                 userId, OffsetDateTime.now(), currentDeviceId);
         log.info("Logout-all-except-current executed for user {} (kept device {})", userId, currentDeviceId);
+    }
+
+    private void revokeDeviceAccess(UUID userId, String deviceId) {
+        if (deviceId == null || deviceId.isBlank()) return;
+        String key = DEVICE_REVOKE_PREFIX + userId + ":" + deviceId;
+        redis.opsForValue().set(key, String.valueOf(System.currentTimeMillis()),
+                accessTtlMinutes + 1, TimeUnit.MINUTES);
     }
 }

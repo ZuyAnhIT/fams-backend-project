@@ -29,7 +29,7 @@ echo ""
 
 echo "--- Setup: Login as platform admin, create 2 tenants ---"
 ADMIN_TOKEN=$(curl -s -X POST "$BASE_URL/api/v1/auth/login" -H "Content-Type: application/json" \
-    -d '{"email":"admin@fams.com","password":"Admin@1234"}' | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['accessToken'])")
+    -d '{"identifier":"admin@fams.com","password":"Admin@1234"}' | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['accessToken'])")
 [ -z "$ADMIN_TOKEN" ] && echo "SETUP FAILED: no admin token" && exit 1
 
 TS=$(date +%s)
@@ -58,7 +58,7 @@ echo ""
 
 echo "--- Test 1: Login defaults to the oldest role assignment (tenant 1) ---"
 LOGIN_RESP=$(curl -s -X POST "$BASE_URL/api/v1/auth/login" -H "Content-Type: application/json" \
-    -d "{\"email\":\"$EMAIL\",\"password\":\"TestPass1\"}")
+    -d "{\"identifier\":\"$EMAIL\",\"password\":\"TestPass1\"}")
 ACCESS_TOKEN=$(echo "$LOGIN_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['accessToken'])")
 REFRESH_TOKEN=$(echo "$LOGIN_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['refreshToken'])")
 claim_tenant=$(decode_claim "$ACCESS_TOKEN" tenantId)
@@ -124,7 +124,7 @@ echo ""
 
 echo "--- Test 7: Cannot switch with someone else's refresh token ---"
 OTHER_LOGIN=$(curl -s -X POST "$BASE_URL/api/v1/auth/login" -H "Content-Type: application/json" \
-    -d '{"email":"admin@fams.com","password":"Admin@1234"}')
+    -d '{"identifier":"admin@fams.com","password":"Admin@1234"}')
 OTHER_REFRESH=$(echo "$OTHER_LOGIN" | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['refreshToken'])")
 status=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE_URL/api/v1/auth/switch-tenant" \
     -H "Content-Type: application/json" -H "Authorization: Bearer $REFRESHED_ACCESS" \

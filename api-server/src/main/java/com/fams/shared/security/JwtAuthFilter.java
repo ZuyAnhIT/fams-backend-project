@@ -129,14 +129,38 @@ public class JwtAuthFilter extends OncePerRequestFilter {
             try {
                 Claims claims = jwtProvider.parseAccessToken(token);
                 UUID userId = UUID.fromString(claims.getSubject());
+                String deviceId = claims.get("deviceId", String.class);
 
                 String userRevokeKey = LogoutService.USER_REVOKE_PREFIX + userId;
                 String revokeTimestampStr = redis.opsForValue().get(userRevokeKey);
                 if (revokeTimestampStr != null) {
-                    long revokeSeconds = Long.parseLong(revokeTimestampStr);
-                    long tokenIssuedAtSeconds = claims.getIssuedAt().getTime() / 1000;
-                    if (tokenIssuedAtSeconds <= revokeSeconds) {
-                        log.debug("Token predates logout-all event — skipping authentication");
+                    long storedRevokeTimestamp = Long.parseLong(revokeTimestampStr);
+                    // Backward-compatible with second-resolution values left in Redis by a
+                    // pre-upgrade process; all newly written values are milliseconds.
+                    long revokeMillis = storedRevokeTimestamp < 100_000_000_000L
+                            ? storedRevokeTimestamp * 1000
+                            : storedRevokeTimestamp;
+                    Number issuedAtMillisClaim = claims.get("issuedAtMillis", Number.class);
+                    long tokenIssuedAtMillis = issuedAtMillisClaim != null
+                            ? issuedAtMillisClaim.longValue()
+                            : claims.getIssuedAt().getTime();
+                    if (tokenIssuedAtMillis <= revokeMillis) {
+                        log.debug("Token predates logout-all/change-password event — skipping authentication");
+                        filterChain.doFilter(request, response);
+                        return;
+                    }
+                }
+
+                String deviceRevokeKey = LogoutService.DEVICE_REVOKE_PREFIX + userId + ":" + deviceId;
+                String deviceRevokeTimestamp = redis.opsForValue().get(deviceRevokeKey);
+                if (deviceRevokeTimestamp != null) {
+                    long revokeMillis = Long.parseLong(deviceRevokeTimestamp);
+                    Number issuedAtMillisClaim = claims.get("issuedAtMillis", Number.class);
+                    long tokenIssuedAtMillis = issuedAtMillisClaim != null
+                            ? issuedAtMillisClaim.longValue()
+                            : claims.getIssuedAt().getTime();
+                    if (tokenIssuedAtMillis <= revokeMillis) {
+                        log.debug("Token predates device logout event — skipping authentication");
                         filterChain.doFilter(request, response);
                         return;
                     }
@@ -145,7 +169,6 @@ public class JwtAuthFilter extends OncePerRequestFilter {
                 String email = claims.get("email", String.class);
                 Boolean isPlatformAdmin = claims.get("isPlatformAdmin", Boolean.class);
                 String tenantId = claims.get("tenantId", String.class);
-                String deviceId = claims.get("deviceId", String.class);
 
                 if (!Boolean.TRUE.equals(isPlatformAdmin) && isTenantSuspended(tenantId)) {
                     log.debug("Rejecting request — tenant {} is suspended", tenantId);

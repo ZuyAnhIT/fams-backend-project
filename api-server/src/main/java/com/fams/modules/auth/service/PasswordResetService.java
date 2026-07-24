@@ -11,6 +11,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.util.UriComponentsBuilder;
 
 import java.time.OffsetDateTime;
 import java.util.Optional;
@@ -31,7 +32,7 @@ public class PasswordResetService {
     private final RefreshTokenRepository refreshTokenRepository;
     private final BCryptPasswordEncoder passwordEncoder;
     private final EmailService emailService;
-    private final String baseUrl;
+    private final String frontendUrl;
     private final int rateLimitMax;
 
     public PasswordResetService(
@@ -40,14 +41,14 @@ public class PasswordResetService {
             RefreshTokenRepository refreshTokenRepository,
             BCryptPasswordEncoder passwordEncoder,
             EmailService emailService,
-            @Value("${app.base-url}") String baseUrl,
+            @Value("${app.frontend-url}") String frontendUrl,
             @Value("${app.password-reset.rate-limit-max:3}") int rateLimitMax) {
         this.redis = redis;
         this.userRepository = userRepository;
         this.refreshTokenRepository = refreshTokenRepository;
         this.passwordEncoder = passwordEncoder;
         this.emailService = emailService;
-        this.baseUrl = baseUrl;
+        this.frontendUrl = frontendUrl;
         this.rateLimitMax = rateLimitMax;
     }
 
@@ -78,7 +79,17 @@ public class PasswordResetService {
         redis.opsForValue().set(RESET_TOKEN_PREFIX + token, user.getId().toString(),
                 TOKEN_TTL_HOURS, TimeUnit.HOURS);
 
-        String resetUrl = baseUrl + "/api/v1/auth/reset-password?token=" + token;
+        // Points at the FRONTEND's /reset-password screen (web page or native app deep
+        // link — see fams-front-app-project docs 07/08), not the backend API path directly:
+        // the API endpoint that actually processes the token is POST-only, so a browser/
+        // phone opening this link via a plain click could never hit it. The frontend page
+        // collects the new password and calls POST /auth/reset-password itself.
+        String resetUrl = UriComponentsBuilder.fromUriString(frontendUrl)
+                .path("/reset-password")
+                .queryParam("token", token)
+                .build()
+                .encode()
+                .toUriString();
         emailService.sendPasswordResetEmail(email, resetUrl);
         log.info("Password reset email sent for user id={}", user.getId());
     }

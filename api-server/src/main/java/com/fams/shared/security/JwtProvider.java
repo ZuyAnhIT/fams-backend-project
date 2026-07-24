@@ -46,6 +46,10 @@ public class JwtProvider {
                 .claim("isPlatformAdmin", isPlatformAdmin)
                 .claim("tenantId", tenantId != null ? tenantId.toString() : null)
                 .claim("role", role)
+                // JWT's standard iat claim is serialized at second precision. Keep an
+                // explicit millisecond timestamp so logout-all/change-password can reject
+                // every older token without accidentally rejecting an immediate fresh login.
+                .claim("issuedAtMillis", now.getTime())
                 .issuedAt(now)
                 .expiration(expiry);
 

@@ -15,9 +15,13 @@ import org.springframework.web.server.ResponseStatusException;
  * OTP send/verify with Firebase directly; the backend only ever sees the resulting ID
  * token and must confirm it's genuine before trusting the phone number inside it.
  *
- * Shared by {@link FirebasePhoneLoginService} (phone login) and {@link RegisterService}
- * (phone registration, issue #1 in docs/issues/ISSUES.md) so both flows verify phone
- * ownership the same way instead of duplicating the Firebase Admin SDK call.
+ * Used by {@link FirebasePhoneLoginService} for "login with phone" ({@code POST
+ * /auth/otp/verify}) — a client that already integrates the Firebase client SDK for phone
+ * auth can skip password login entirely. This is now the ONLY flow using this class: phone
+ * REGISTRATION was switched to an in-house SMS OTP instead (see {@link PhoneOtpService},
+ * {@link SmsService}), so it no longer requires a Firebase client SDK integration on top of
+ * FAMS's own accounts. The two are intentionally independent — registering by phone does
+ * not require the Firebase client SDK, but logging in via this fast-path endpoint does.
  */
 @Slf4j
 @Component
@@ -50,6 +54,15 @@ public class FirebasePhoneTokenVerifier {
             return FirebaseAuth.getInstance().verifyIdToken(idToken);
         } catch (FirebaseAuthException e) {
             log.warn("Firebase ID token verification failed: {}", e.getMessage());
+            throw new InvalidOtpException();
+        } catch (RuntimeException e) {
+            // The Firebase Admin SDK's token parser throws bare NullPointerException (not
+            // FirebaseAuthException) for some malformed-but-JWT-shaped inputs — e.g. a token
+            // missing the `iat` claim — instead of the documented exception type. Any input we
+            // don't control that isn't a genuine Firebase-issued token must still resolve to
+            // "invalid token" (401), never a 500.
+            log.warn("Firebase ID token verification threw unexpected {}: {}",
+                    e.getClass().getSimpleName(), e.getMessage());
             throw new InvalidOtpException();
         }
     }

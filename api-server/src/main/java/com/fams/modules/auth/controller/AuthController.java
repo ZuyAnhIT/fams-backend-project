@@ -398,6 +398,101 @@ public class AuthController {
         return ResponseEntity.ok(ApiResponse.success(profile));
     }
 
+    @Operation(summary = "Remove avatar",
+        description = "Deletes the current avatar (from S3/MinIO storage, if it was one FAMS uploaded) and clears "
+            + "it from the profile. Requires Bearer token.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Avatar removed",
+            content = @Content(schema = @Schema(implementation = UserProfileResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Unauthorized")
+    })
+    @DeleteMapping("/profile/avatar")
+    public ResponseEntity<ApiResponse<UserProfileResponse>> deleteAvatar(
+            @AuthenticationPrincipal FamsUserDetails userDetails) {
+        log.info("Avatar removal for user {}", userDetails.getUserId());
+        UserProfileResponse profile = userProfileService.deleteAvatar(userDetails.getUserId());
+        return ResponseEntity.ok(ApiResponse.success(profile));
+    }
+
+    @Operation(summary = "Request to add/change email (step 1 of 2)",
+        description = "Fills in the missing email for a phone-only account, or changes the existing one. "
+            + "Sends a verification link to the NEW address — nothing is written to the account until that "
+            + "link is clicked via GET /auth/profile/email/confirm-change, so the account's existing verified "
+            + "login channel (e.g. phone) keeps working the whole time this is pending. Requires Bearer token.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Verification email sent"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Validation error"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Unauthorized"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "409", description = "Email already in use by another account")
+    })
+    @PostMapping("/profile/email/request-change")
+    public ResponseEntity<ApiResponse<Void>> requestEmailChange(
+            @Valid @RequestBody com.fams.modules.auth.dto.request.RequestEmailChangeRequest request,
+            @AuthenticationPrincipal FamsUserDetails userDetails) {
+        log.info("Email change requested by user {}", userDetails.getUserId());
+        userProfileService.requestEmailChange(userDetails.getUserId(), request.getEmail());
+        return ResponseEntity.ok(new ApiResponse<>(true,
+                "Verification link sent to the new email address. It becomes active once you click it.", null));
+    }
+
+    @Operation(summary = "Confirm email change (step 2 of 2)",
+        description = "Activates the pending email from POST /auth/profile/email/request-change. "
+            + "No auth required — the token in the link is the proof.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Email changed and verified"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Token missing, invalid, or expired"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "409", description = "Email was claimed by another account while this link was pending")
+    })
+    @SecurityRequirements({})
+    @GetMapping("/profile/email/confirm-change")
+    public ResponseEntity<ApiResponse<Void>> confirmEmailChange(@RequestParam String token) {
+        log.info("Email change confirmation attempt");
+        emailVerificationService.confirmEmailChange(token);
+        return ResponseEntity.ok(new ApiResponse<>(true, "Email changed and verified successfully.", null));
+    }
+
+    @Operation(summary = "Request to add/change phone (step 1 of 2)",
+        description = "Fills in the missing phone for an email-only account, or changes the existing one. "
+            + "Sends a 6-digit OTP via SMS (dev mode: logged to server console, see SmsService) — nothing is "
+            + "written to the account until POST /auth/profile/phone/confirm-change succeeds, so the account's "
+            + "existing verified login channel keeps working the whole time this is pending. Requires Bearer token.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "OTP sent"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Validation error"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Unauthorized"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "409", description = "Phone already in use by another account"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "429", description = "OTP requested too many times, please wait")
+    })
+    @PostMapping("/profile/phone/request-change")
+    public ResponseEntity<ApiResponse<Void>> requestPhoneChange(
+            @Valid @RequestBody com.fams.modules.auth.dto.request.RequestPhoneChangeRequest request,
+            @AuthenticationPrincipal FamsUserDetails userDetails) {
+        log.info("Phone change OTP requested by user {}", userDetails.getUserId());
+        userProfileService.requestPhoneChange(userDetails.getUserId(), request.getPhone());
+        return ResponseEntity.ok(new ApiResponse<>(true,
+                "OTP sent to the new phone number. Valid for 5 minutes.", null));
+    }
+
+    @Operation(summary = "Confirm phone change with OTP (step 2 of 2)",
+        description = "Activates the pending phone number using the OTP from "
+            + "POST /auth/profile/phone/request-change. Requires Bearer token.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Phone changed and verified",
+            content = @Content(schema = @Schema(implementation = UserProfileResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Wrong or expired OTP"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Unauthorized"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "409", description = "Phone was claimed by another account while this OTP was pending")
+    })
+    @PostMapping("/profile/phone/confirm-change")
+    public ResponseEntity<ApiResponse<UserProfileResponse>> confirmPhoneChange(
+            @Valid @RequestBody com.fams.modules.auth.dto.request.ConfirmPhoneChangeRequest request,
+            @AuthenticationPrincipal FamsUserDetails userDetails) {
+        log.info("Phone change confirmation by user {}", userDetails.getUserId());
+        UserProfileResponse profile = userProfileService.confirmPhoneChange(
+                userDetails.getUserId(), request.getPhone(), request.getOtpCode());
+        return ResponseEntity.ok(ApiResponse.success(profile));
+    }
+
     @Operation(summary = "Change password",
         description = "Changes the authenticated user's password. Current password must be provided for verification.")
     @ApiResponses({
@@ -408,9 +503,13 @@ public class AuthController {
     @PostMapping("/change-password")
     public ResponseEntity<ApiResponse<Void>> changePassword(
             @Valid @RequestBody ChangePasswordRequest request,
-            @AuthenticationPrincipal FamsUserDetails userDetails) {
+            @AuthenticationPrincipal FamsUserDetails userDetails,
+            HttpServletRequest httpRequest) {
+        String authHeader = httpRequest.getHeader("Authorization");
+        String rawAccessToken = (StringUtils.hasText(authHeader) && authHeader.startsWith("Bearer "))
+                ? authHeader.substring(7) : "";
         log.info("Change password requested by user {}", userDetails.getUserId());
-        changePasswordService.changePassword(userDetails.getUserId(), request);
+        changePasswordService.changePassword(userDetails.getUserId(), request, rawAccessToken);
         return ResponseEntity.ok(ApiResponse.success(null));
     }
 
