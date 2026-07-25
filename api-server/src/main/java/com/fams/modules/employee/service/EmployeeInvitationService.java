@@ -40,6 +40,7 @@ import org.springframework.util.StringUtils;
 
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
@@ -57,7 +58,7 @@ public class EmployeeInvitationService {
     private final EmailService emailService;
     private final JwtProvider jwtProvider;
     private final BCryptPasswordEncoder passwordEncoder;
-    private final String appBaseUrl;
+    private final String frontendUrl;
     private final int invitationExpiryDays;
     private final int accessTtlMinutes;
     private final int refreshTtlDays;
@@ -73,7 +74,7 @@ public class EmployeeInvitationService {
             EmailService emailService,
             JwtProvider jwtProvider,
             BCryptPasswordEncoder passwordEncoder,
-            @Value("${app.base-url}") String appBaseUrl,
+            @Value("${app.frontend-url}") String frontendUrl,
             @Value("${app.invitation.expiry-days:7}") int invitationExpiryDays,
             @Value("${app.jwt.access-ttl-minutes}") int accessTtlMinutes,
             @Value("${app.jwt.refresh-ttl-days}") int refreshTtlDays) {
@@ -87,7 +88,7 @@ public class EmployeeInvitationService {
         this.emailService = emailService;
         this.jwtProvider = jwtProvider;
         this.passwordEncoder = passwordEncoder;
-        this.appBaseUrl = appBaseUrl;
+        this.frontendUrl = frontendUrl;
         this.invitationExpiryDays = invitationExpiryDays;
         this.accessTtlMinutes = accessTtlMinutes;
         this.refreshTtlDays = refreshTtlDays;
@@ -141,7 +142,8 @@ public class EmployeeInvitationService {
         int clampedSize = Math.min(size, 100);
         PageRequest pageable = PageRequest.of(page, clampedSize, Sort.by(Sort.Direction.DESC, "createdAt"));
         Specification<EmployeeInvitation> spec = EmployeeInvitationSpecification.build(tenantId, status, email);
-        Page<InvitationResponse> resultPage = invitationRepository.findAll(spec, pageable).map(this::toResponse);
+        Page<InvitationResponse> resultPage = invitationRepository.findAll(spec, pageable)
+                .map(inv -> toResponse(inv, false));
         return PageResponse.from(resultPage);
     }
 
@@ -191,12 +193,12 @@ public class EmployeeInvitationService {
 
         invitation = invitationRepository.save(invitation);
 
-        String acceptUrl = appBaseUrl + "/api/v1/invitations/accept?token=" + invitation.getToken();
+        String acceptUrl = frontendUrl + "/accept-invite?type=tenant&token=" + invitation.getToken();
         emailService.sendInvitationEmail(normalizedEmail, acceptUrl, invitationExpiryDays);
 
         log.info("Invitation sent: id={} email={} tenantId={} by={}", invitation.getId(), normalizedEmail, tenantId, callerUserId);
 
-        return toResponse(invitation);
+        return toResponse(invitation, true);
     }
 
     @Transactional
@@ -226,7 +228,7 @@ public class EmployeeInvitationService {
         invitationRepository.save(invitation);
 
         log.info("Invitation cancelled: id={} tenantId={} by={}", invitationId, tenantId, callerUserId);
-        return toResponse(invitation);
+        return toResponse(invitation, false);
     }
 
     @Transactional
@@ -316,34 +318,52 @@ public class EmployeeInvitationService {
         invitation.setStatus("accepted");
         invitationRepository.save(invitation);
 
-        // Create employee profile if not already linked for this user+tenant
+        // Create (or link) the employee profile for this user+tenant.
         boolean hasProfile = employeeRepository
                 .existsByTenantIdAndUserIdAndDeletedAtIsNull(invitation.getTenantId(), user.getId());
         if (!hasProfile) {
-            String firstName;
-            String lastName;
-            if (StringUtils.hasText(invitation.getFirstName())) {
-                firstName = invitation.getFirstName();
-                lastName = StringUtils.hasText(invitation.getLastName()) ? invitation.getLastName() : "";
+            // HR may have already created a login-less Employee record for this same person
+            // (manual creation, worker without an account yet) before this invitation was
+            // ever sent — e.g. onboarding a site worker's HR record first, inviting them to
+            // the app later. Link the new account to THAT existing record instead of creating
+            // a second, disconnected one: otherwise every assignment/workspace/Face ID
+            // enrollment already tied to the manual record would be orphaned from the login.
+            Optional<Employee> existingUnlinked = employeeRepository
+                    .findByTenantIdAndEmailIgnoreCaseAndUserIdIsNullAndDeletedAtIsNull(
+                            invitation.getTenantId(), invitation.getEmail());
+
+            if (existingUnlinked.isPresent()) {
+                Employee employee = existingUnlinked.get();
+                employee.setUserId(user.getId());
+                employeeRepository.save(employee);
+                log.info("Existing employee record linked to new account via invitation: employeeId={} userId={} tenantId={}",
+                        employee.getId(), user.getId(), invitation.getTenantId());
             } else {
-                String displayName = StringUtils.hasText(request.getDisplayName())
-                        ? request.getDisplayName().trim()
-                        : user.getDisplayName();
-                int spaceIdx = displayName != null ? displayName.indexOf(' ') : -1;
-                firstName = (spaceIdx > 0) ? displayName.substring(0, spaceIdx) : (displayName != null ? displayName : "");
-                lastName  = (spaceIdx > 0) ? displayName.substring(spaceIdx + 1).trim() : "";
+                String firstName;
+                String lastName;
+                if (StringUtils.hasText(invitation.getFirstName())) {
+                    firstName = invitation.getFirstName();
+                    lastName = StringUtils.hasText(invitation.getLastName()) ? invitation.getLastName() : "";
+                } else {
+                    String displayName = StringUtils.hasText(request.getDisplayName())
+                            ? request.getDisplayName().trim()
+                            : user.getDisplayName();
+                    int spaceIdx = displayName != null ? displayName.indexOf(' ') : -1;
+                    firstName = (spaceIdx > 0) ? displayName.substring(0, spaceIdx) : (displayName != null ? displayName : "");
+                    lastName  = (spaceIdx > 0) ? displayName.substring(spaceIdx + 1).trim() : "";
+                }
+                Employee employee = Employee.builder()
+                        .tenantId(invitation.getTenantId())
+                        .userId(user.getId())
+                        .firstName(firstName)
+                        .lastName(lastName)
+                        .email(invitation.getEmail())
+                        .status("active")
+                        .build();
+                employeeRepository.save(employee);
+                log.info("Employee profile created via invitation: employeeId={} userId={} tenantId={}",
+                        employee.getId(), user.getId(), invitation.getTenantId());
             }
-            Employee employee = Employee.builder()
-                    .tenantId(invitation.getTenantId())
-                    .userId(user.getId())
-                    .firstName(firstName)
-                    .lastName(lastName)
-                    .email(invitation.getEmail())
-                    .status("active")
-                    .build();
-            employeeRepository.save(employee);
-            log.info("Employee profile created via invitation: employeeId={} userId={} tenantId={}",
-                    employee.getId(), user.getId(), invitation.getTenantId());
         }
 
         log.info("Invitation accepted: invitationId={} userId={} tenantId={}",
@@ -391,7 +411,16 @@ public class EmployeeInvitationService {
                 .build();
     }
 
-    private InvitationResponse toResponse(EmployeeInvitation inv) {
+    /**
+     * @param includeToken true ONLY for the create/send response — the accept-invitation
+     *                     token is a bearer credential (anyone holding it can accept the
+     *                     invite and become a tenant member). It must never appear again
+     *                     after that single response, e.g. from GET /invitations (list) or
+     *                     the cancel response — otherwise anyone with employees:read could
+     *                     read a pending invite's token and accept it themselves instead of
+     *                     the intended recipient.
+     */
+    private InvitationResponse toResponse(EmployeeInvitation inv, boolean includeToken) {
         return InvitationResponse.builder()
                 .id(inv.getId())
                 .tenantId(inv.getTenantId())
@@ -405,7 +434,7 @@ public class EmployeeInvitationService {
                 .expiresAt(inv.getExpiresAt())
                 .createdAt(inv.getCreatedAt())
                 .updatedAt(inv.getUpdatedAt())
-                .token(inv.getToken())
+                .token(includeToken ? inv.getToken() : null)
                 .build();
     }
 }

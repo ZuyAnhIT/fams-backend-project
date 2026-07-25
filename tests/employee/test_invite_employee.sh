@@ -58,7 +58,7 @@ tenant_response=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/tenants" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"name\":\"Invite Test Corp\",\"slug\":\"$UNIQUE_SLUG\"}")
+    -d "{\"name\":\"Invite Test Corp\",\"slug\":\"$UNIQUE_SLUG\",\"ownerEmail\":\"admin@fams.com\"}")
 
 tenant_body=$(echo "$tenant_response" | head -n -1)
 tenant_status=$(echo "$tenant_response" | tail -n 1)

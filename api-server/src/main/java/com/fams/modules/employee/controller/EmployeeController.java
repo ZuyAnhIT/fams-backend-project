@@ -223,8 +223,7 @@ public class EmployeeController {
     @Operation(
         summary = "Get employee detail",
         description = "Returns the full employee profile including roles, workspace memberships, " +
-                      "site/shift assignments, and Face ID status. Workspace, assignment, and Face ID " +
-                      "fields are empty until those modules are implemented. " +
+                      "site/shift assignments (most recent first, all statuses), and Face ID status. " +
                       "Requires employees:read permission. Callable by TENANT_ADMIN, HR_MANAGER, or SITE_SUPERVISOR."
     )
     @ApiResponses({

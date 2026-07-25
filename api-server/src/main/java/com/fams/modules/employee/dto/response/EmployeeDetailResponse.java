@@ -1,5 +1,6 @@
 package com.fams.modules.employee.dto.response;
 
+import com.fams.modules.assignment.dto.response.AssignmentResponse;
 import com.fams.modules.rbac.dto.response.UserRoleResponse;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Builder;
@@ -60,11 +61,11 @@ public class EmployeeDetailResponse {
     @Schema(description = "Active roles held by this employee within the tenant")
     private List<UserRoleResponse> roles;
 
-    @Schema(description = "Workspace memberships — populated when workspace module is implemented (tasks 43-47)")
-    private List<Object> workspaces;
+    @Schema(description = "Workspaces this employee belongs to")
+    private List<EmployeeWorkspaceMembershipResponse> workspaces;
 
-    @Schema(description = "Site/shift assignments — populated when assignment module is implemented (tasks 63-66)")
-    private List<Object> assignments;
+    @Schema(description = "Site/shift assignments for this employee, most recent first")
+    private List<AssignmentResponse> assignments;
 
     @Schema(description = "Face ID enrollment status for this employee")
     private FaceIdStatusDto faceId;

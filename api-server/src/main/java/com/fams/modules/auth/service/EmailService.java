@@ -85,6 +85,22 @@ public class EmailService {
         sendSafely(msg, "invitation", to);
     }
 
+    @Async
+    public void sendPlatformInvitationEmail(String to, String acceptUrl, int expiryDays) {
+        SimpleMailMessage msg = new SimpleMailMessage();
+        msg.setFrom(from);
+        msg.setTo(to);
+        msg.setSubject("FAMS - You have been invited to join the platform team");
+        msg.setText(
+                "You have been invited to join the FAMS (Field Attendance Management System) platform team.\n\n" +
+                "Click the link below to accept your invitation and set up your account:\n\n" +
+                acceptUrl + "\n\n" +
+                "This invitation will expire in " + expiryDays + " days.\n\n" +
+                "If you did not expect this invitation, please ignore this email."
+        );
+        sendSafely(msg, "platform invitation", to);
+    }
+
     /**
      * Deliberately NOT async and NOT wrapped by {@link #sendSafely}: the only caller,
      * {@code UserDeviceService.sendEmailFallback}, already has its own try/catch that

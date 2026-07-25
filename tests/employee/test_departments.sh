@@ -49,7 +49,7 @@ t_resp=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/tenants" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"name\":\"Dept Test Corp\",\"slug\":\"dept-test-${TS}\"}")
+    -d "{\"name\":\"Dept Test Corp\",\"slug\":\"dept-test-${TS}\",\"ownerEmail\":\"admin@fams.com\"}")
 t_body=$(echo "$t_resp" | head -n -1)
 t_status=$(echo "$t_resp" | tail -n 1)
 if [ "$t_status" -ne 201 ]; then
@@ -64,7 +64,7 @@ t2_resp=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/tenants" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"name\":\"Other Corp\",\"slug\":\"other-${TS}\"}")
+    -d "{\"name\":\"Other Corp\",\"slug\":\"other-${TS}\",\"ownerEmail\":\"admin@fams.com\"}")
 t2_body=$(echo "$t2_resp" | head -n -1)
 t2_status=$(echo "$t2_resp" | tail -n 1)
 if [ "$t2_status" -ne 201 ]; then
