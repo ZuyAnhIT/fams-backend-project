@@ -23,6 +23,7 @@ import com.fams.modules.shift.repository.ShiftRepository;
 import com.fams.modules.site.entity.Site;
 import com.fams.modules.site.repository.SiteRepository;
 import com.fams.modules.rbac.repository.UserRoleRepository;
+import com.fams.modules.rbac.service.SiteScopeService;
 import com.fams.shared.exception.BusinessException;
 import com.fams.shared.exception.DuplicateResourceException;
 import com.fams.shared.exception.ResourceNotFoundException;
@@ -64,6 +65,7 @@ public class CheckinService {
     private final GeofenceRepository geofenceRepository;
     private final CheckinRepository checkinRepository;
     private final UserRoleRepository userRoleRepository;
+    private final SiteScopeService siteScopeService;
     private final AttendanceSummaryService attendanceSummaryService;
     private final FaceVerifyJobPublisher faceVerifyJobPublisher;
 
@@ -74,6 +76,7 @@ public class CheckinService {
                           GeofenceRepository geofenceRepository,
                           CheckinRepository checkinRepository,
                           UserRoleRepository userRoleRepository,
+                          SiteScopeService siteScopeService,
                           AttendanceSummaryService attendanceSummaryService,
                           FaceVerifyJobPublisher faceVerifyJobPublisher) {
         this.employeeRepository = employeeRepository;
@@ -83,6 +86,7 @@ public class CheckinService {
         this.geofenceRepository = geofenceRepository;
         this.checkinRepository = checkinRepository;
         this.userRoleRepository = userRoleRepository;
+        this.siteScopeService = siteScopeService;
         this.attendanceSummaryService = attendanceSummaryService;
         this.faceVerifyJobPublisher = faceVerifyJobPublisher;
     }
@@ -455,12 +459,38 @@ public class CheckinService {
             }
         }
 
+        Optional<Set<UUID>> allowedSiteIds =
+                siteScopeService.resolveAllowedSiteIds(callerUserId, tenantId, callerIsPlatformAdmin);
+        UUID effectiveSiteFilter = siteId;
+        if (allowedSiteIds.isPresent()) {
+            if (siteId != null) {
+                // Caller explicitly asked for one site — only honor it if it's actually
+                // within their allowed set, otherwise they'd see another site's data.
+                if (!allowedSiteIds.get().contains(siteId)) {
+                    throw new AccessDeniedException("You do not have permission to view check-ins for this site");
+                }
+            } else if (allowedSiteIds.get().size() == 1) {
+                // No explicit siteId requested and the caller is scoped to exactly one site —
+                // filter to it directly (CheckinSpecification only takes a single siteId).
+                effectiveSiteFilter = allowedSiteIds.get().iterator().next();
+            } else if (allowedSiteIds.get().isEmpty()) {
+                return PageResponse.from(Page.empty(PageRequest.of(page, size)));
+            } else {
+                // Scoped to multiple sites with no explicit siteId requested — listCheckins'
+                // underlying CheckinSpecification only supports a single siteId filter today,
+                // so a multi-site supervisor must page through one site at a time via the
+                // siteId query param instead of getting a merged multi-site view.
+                throw new AccessDeniedException(
+                        "You are scoped to multiple sites — pass a specific siteId to list its check-ins");
+            }
+        }
+
         String resolvedSort = SORTABLE_FIELDS.contains(sortBy) ? sortBy : "checkInAt";
         Sort.Direction dir = "asc".equalsIgnoreCase(sortDir) ? Sort.Direction.ASC : Sort.Direction.DESC;
         PageRequest pageable = PageRequest.of(page, size, Sort.by(dir, resolvedSort));
 
         Specification<CheckinRecord> spec =
-                CheckinSpecification.build(tenantId, employeeId, siteId, status, from, to);
+                CheckinSpecification.build(tenantId, employeeId, effectiveSiteFilter, status, from, to);
 
         Page<CheckinResponse> resultPage = checkinRepository.findAll(spec, pageable)
                 .map(this::toCheckinResponse);
@@ -520,6 +550,10 @@ public class CheckinService {
                 .findByIdAndTenantIdAndDeletedAtIsNull(checkinId, tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Check-in record not found: " + checkinId));
 
+        if (!siteScopeService.isSiteAllowed(callerUserId, tenantId, record.getSiteId(), callerIsPlatformAdmin)) {
+            throw new AccessDeniedException("You do not have permission to override check-ins for this site");
+        }
+
         if (record.getStatus().equals(request.getStatus())) {
             throw new IllegalStateException(
                     "Check-in is already in status '" + request.getStatus() + "' — no change needed");
@@ -551,6 +585,10 @@ public class CheckinService {
         CheckinRecord record = checkinRepository
                 .findByIdAndTenantIdAndDeletedAtIsNull(checkinId, tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Check-in record not found: " + checkinId));
+
+        if (!siteScopeService.isSiteAllowed(callerUserId, tenantId, record.getSiteId(), callerIsPlatformAdmin)) {
+            throw new AccessDeniedException("You do not have permission to view check-in details for this site");
+        }
 
         Employee employee = employeeRepository
                 .findByIdAndTenantIdAndDeletedAtIsNull(record.getEmployeeId(), tenantId)

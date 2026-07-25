@@ -4,6 +4,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 
+import java.util.List;
 import java.util.UUID;
 
 @Data
@@ -21,4 +22,9 @@ public class AssignRoleRequest {
     @Schema(description = "UUID of the tenant within which the role is granted", example = "550e8400-e29b-41d4-a716-446655440003")
     @NotNull(message = "tenantId is required")
     private UUID tenantId;
+
+    @Schema(description = "Optional: restrict this specific assignment to one or more sites within the tenant "
+            + "(e.g. a SITE_SUPERVISOR who should only see/manage their own site). Omit or send an empty list for "
+            + "the default, unrestricted behavior — access across the whole tenant, unchanged from before.")
+    private List<UUID> siteIds;
 }

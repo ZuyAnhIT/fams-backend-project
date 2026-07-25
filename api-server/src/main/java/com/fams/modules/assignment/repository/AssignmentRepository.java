@@ -9,8 +9,10 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDate;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 public interface AssignmentRepository extends JpaRepository<Assignment, UUID>,
@@ -28,6 +30,19 @@ public interface AssignmentRepository extends JpaRepository<Assignment, UUID>,
             UUID siteId, UUID tenantId, Pageable pageable);
 
     long countBySiteIdAndStatusAndDeletedAtIsNull(UUID siteId, String status);
+
+    /** Used by EmployeeService to filter the employee list/detail down to a site-scoped
+     *  caller's allowed sites — any (not just currently active) assignment linking the
+     *  employee to one of those sites is enough for them to remain visible. */
+    @Query("SELECT DISTINCT a.employeeId FROM Assignment a "
+            + "WHERE a.tenantId = :tenantId AND a.siteId IN :siteIds AND a.deletedAt IS NULL")
+    Set<UUID> findDistinctEmployeeIdsByTenantIdAndSiteIdIn(
+            @Param("tenantId") UUID tenantId, @Param("siteIds") Collection<UUID> siteIds);
+
+    /** Used to check whether a single employee falls within a site-scoped caller's allowed
+     *  sites, for EmployeeService.getEmployee (no need to fetch the whole ID set). */
+    boolean existsByTenantIdAndEmployeeIdAndSiteIdInAndDeletedAtIsNull(
+            UUID tenantId, UUID employeeId, Collection<UUID> siteIds);
 
     // Issue #14 (docs/issues/ISSUES.md): the 6 date-scoped "is this assignment active on this
     // exact date" queries below are native SQL (not JPQL) because they need Postgres's bitwise

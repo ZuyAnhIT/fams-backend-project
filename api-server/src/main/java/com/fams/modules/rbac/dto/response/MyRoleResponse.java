@@ -40,4 +40,10 @@ public class MyRoleResponse {
 
     @Schema(description = "List of permission names granted by this role", example = "[\"roles:create\",\"employees:read\"]")
     private List<String> permissions;
+
+    @Schema(description = "Sites this assignment is restricted to. Empty means unrestricted — the full tenant.")
+    private List<UUID> siteIds;
+
+    @Schema(description = "Same sites as siteIds, with display names resolved — avoids a follow-up GET /sites call just to show scope. Empty means unrestricted.")
+    private List<SiteRefResponse> sites;
 }

@@ -73,7 +73,7 @@ echo "--- Test 3: Existing admin email ---"
 run_test "Register - existing admin email" 409 \
     -X POST "$BASE_URL/api/v1/auth/register" \
     -H "Content-Type: application/json" \
-    -d '{"email":"admin@fams.com","password":"TestPass1","displayName":"Admin Copy"}'
+    -d '{"identifier":"admin@fams.com","password":"TestPass1","displayName":"Admin Copy"}'
 
 # Test 4: Phone registration WITHOUT an otpCode → 400 INVALID_ARGUMENT
 # (Issue #1, docs/issues/ISSUES.md: phone registration used to activate the account

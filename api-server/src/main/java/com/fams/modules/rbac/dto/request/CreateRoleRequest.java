@@ -2,7 +2,6 @@ package com.fams.modules.rbac.dto.request;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
 
@@ -13,8 +12,9 @@ import java.util.UUID;
 @Schema(description = "Create a new custom role within a tenant")
 public class CreateRoleRequest {
 
-    @Schema(description = "ID of the tenant that owns this role", example = "550e8400-e29b-41d4-a716-446655440000")
-    @NotNull(message = "Tenant ID is required")
+    @Schema(description = "ID of the tenant that owns this role. Omit to create a PLATFORM-scoped custom role "
+            + "instead (Platform Admin only) — used to build an internal staff hierarchy above/below PLATFORM_STAFF, "
+            + "separate from any tenant.", example = "550e8400-e29b-41d4-a716-446655440000")
     private UUID tenantId;
 
     @Schema(description = "Unique role name within the tenant (1–100 chars)", example = "Site Supervisor")

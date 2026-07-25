@@ -31,7 +31,7 @@ echo ""
 echo "--- Setup: platform admin login ---"
 login_resp=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d '{"email":"admin@fams.com","password":"Admin@1234"}')
+    -d '{"identifier":"admin@fams.com","password":"Admin@1234"}')
 login_status=$(echo "$login_resp" | tail -n 1)
 if [ "$login_status" -ne 200 ]; then echo "SETUP FAILED: admin login (HTTP $login_status)"; exit 1; fi
 ADMIN_TOKEN=$(echo "$login_resp" | head -n -1 | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4)

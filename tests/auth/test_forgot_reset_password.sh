@@ -34,7 +34,7 @@ echo "--- Test 1: Forgot password with known email ---"
 run_test "Forgot password - known email" 200 \
     -X POST "$BASE_URL/api/v1/auth/forgot-password" \
     -H "Content-Type: application/json" \
-    -d '{"email":"admin@fams.com"}'
+    -d '{"identifier":"admin@fams.com"}'
 
 # Test 2: Unknown email → 200 (generic message — must not reveal whether email exists)
 echo ""

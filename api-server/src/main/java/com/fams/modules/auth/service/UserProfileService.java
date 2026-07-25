@@ -98,12 +98,19 @@ public class UserProfileService {
         return toResponse(user);
     }
 
+    private static final java.util.Set<String> USER_SORTABLE_FIELDS =
+            java.util.Set.of("email", "displayName", "createdAt", "lastLoginAt");
+
     @Transactional(readOnly = true)
-    public PageResponse<UserProfileResponse> searchUsers(String search, int page, int size) {
+    public PageResponse<UserProfileResponse> searchUsers(String search, Boolean isActive, Boolean isPlatformAdmin,
+                                                         String sortBy, String sortDir, int page, int size) {
         int clampedSize = Math.min(size, 100);
-        PageRequest pageable = PageRequest.of(page, clampedSize, Sort.by(Sort.Direction.ASC, "email"));
+        String resolvedSortBy = USER_SORTABLE_FIELDS.contains(sortBy) ? sortBy : "email";
+        Sort.Direction direction = "desc".equalsIgnoreCase(sortDir) ? Sort.Direction.DESC : Sort.Direction.ASC;
+        PageRequest pageable = PageRequest.of(page, clampedSize, Sort.by(direction, resolvedSortBy));
         return PageResponse.from(
-                userRepository.findAll(UserSpecification.build(search), pageable).map(this::toResponse));
+                userRepository.findAll(UserSpecification.build(search, isActive, isPlatformAdmin), pageable)
+                        .map(this::toResponse));
     }
 
     /**
@@ -246,6 +253,8 @@ public class UserProfileService {
                 .address(user.getAddress())
                 .googleLinked(user.getGoogleId() != null)
                 .isActive(user.isActive())
+                .isPlatformAdmin(user.isPlatformAdmin())
+                .lastLoginAt(user.getLastLoginAt())
                 .createdAt(user.getCreatedAt())
                 .updatedAt(user.getUpdatedAt())
                 .build();

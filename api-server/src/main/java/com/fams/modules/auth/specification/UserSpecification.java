@@ -13,6 +13,10 @@ public class UserSpecification {
     private UserSpecification() {}
 
     public static Specification<User> build(String search) {
+        return build(search, null, null);
+    }
+
+    public static Specification<User> build(String search, Boolean isActive, Boolean isPlatformAdmin) {
         return (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
 
@@ -24,6 +28,14 @@ public class UserSpecification {
                         cb.like(cb.lower(root.get("email")), like),
                         cb.like(cb.lower(root.get("displayName")), like)
                 ));
+            }
+
+            if (isActive != null) {
+                predicates.add(cb.equal(root.get("isActive"), isActive));
+            }
+
+            if (isPlatformAdmin != null) {
+                predicates.add(cb.equal(root.get("isPlatformAdmin"), isPlatformAdmin));
             }
 
             return cb.and(predicates.toArray(new Predicate[0]));

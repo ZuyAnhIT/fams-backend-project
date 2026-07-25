@@ -8,6 +8,7 @@ import com.fams.modules.randomcheck.dto.response.RandomCheckConfigResponse;
 import com.fams.modules.randomcheck.entity.RandomCheckConfig;
 import com.fams.modules.randomcheck.repository.RandomCheckConfigRepository;
 import com.fams.modules.rbac.repository.UserRoleRepository;
+import com.fams.modules.rbac.service.SiteScopeService;
 import com.fams.modules.site.repository.SiteRepository;
 import com.fams.shared.exception.DuplicateResourceException;
 import com.fams.shared.exception.ResourceNotFoundException;
@@ -33,13 +34,16 @@ public class RandomCheckConfigService {
     private final RandomCheckConfigRepository configRepository;
     private final UserRoleRepository userRoleRepository;
     private final SiteRepository siteRepository;
+    private final SiteScopeService siteScopeService;
 
     public RandomCheckConfigService(RandomCheckConfigRepository configRepository,
                                     UserRoleRepository userRoleRepository,
-                                    SiteRepository siteRepository) {
+                                    SiteRepository siteRepository,
+                                    SiteScopeService siteScopeService) {
         this.configRepository = configRepository;
         this.userRoleRepository = userRoleRepository;
         this.siteRepository = siteRepository;
+        this.siteScopeService = siteScopeService;
     }
 
     @Transactional
@@ -80,6 +84,7 @@ public class RandomCheckConfigService {
                                                         CreateRandomCheckConfigRequest req,
                                                         UUID callerId, boolean callerIsPlatformAdmin) {
         checkPermission(callerId, tenantId, callerIsPlatformAdmin);
+        assertSiteInScope(callerId, tenantId, siteId, callerIsPlatformAdmin);
         validateSchedulingFields(req.getAllowedStartTime(), req.getAllowedEndTime(),
                 req.getChecksPerShift(), req.getMinIntervalMinutes());
 
@@ -115,6 +120,7 @@ public class RandomCheckConfigService {
     public RandomCheckConfigResponse getSiteOverride(UUID tenantId, UUID siteId,
                                                      UUID callerId, boolean callerIsPlatformAdmin) {
         checkPermission(callerId, tenantId, callerIsPlatformAdmin);
+        assertSiteInScope(callerId, tenantId, siteId, callerIsPlatformAdmin);
 
         siteRepository.findByIdAndTenantIdAndDeletedAtIsNull(siteId, tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Site not found: " + siteId));
@@ -136,7 +142,14 @@ public class RandomCheckConfigService {
     @Transactional(readOnly = true)
     public List<RandomCheckConfigResponse> listConfigs(UUID tenantId, UUID callerId, boolean callerIsPlatformAdmin) {
         checkPermission(callerId, tenantId, callerIsPlatformAdmin);
+        java.util.Optional<Set<UUID>> allowedSiteIds =
+                siteScopeService.resolveAllowedSiteIds(callerId, tenantId, callerIsPlatformAdmin);
         return configRepository.findAllByTenant(tenantId).stream()
+                // Tenant-wide default configs (siteId null) always stay visible — they're not
+                // site-specific data. Site overrides are filtered to the caller's allowed sites.
+                .filter(c -> c.getSiteId() == null
+                        || allowedSiteIds.isEmpty()
+                        || allowedSiteIds.get().contains(c.getSiteId()))
                 .map(this::toResponse)
                 .collect(Collectors.toList());
     }
@@ -146,6 +159,7 @@ public class RandomCheckConfigService {
         checkPermission(callerId, tenantId, callerIsPlatformAdmin);
         RandomCheckConfig config = configRepository.findByIdAndTenant(configId, tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Random check config not found: " + configId));
+        assertConfigInScope(callerId, tenantId, config, callerIsPlatformAdmin);
         return toResponse(config);
     }
 
@@ -157,6 +171,7 @@ public class RandomCheckConfigService {
 
         RandomCheckConfig config = configRepository.findByIdAndTenant(configId, tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Random check config not found: " + configId));
+        assertConfigInScope(callerId, tenantId, config, callerIsPlatformAdmin);
 
         LocalTime effectiveStart = req.getAllowedStartTime() != null ? req.getAllowedStartTime() : config.getAllowedStartTime();
         LocalTime effectiveEnd   = req.getAllowedEndTime()   != null ? req.getAllowedEndTime()   : config.getAllowedEndTime();
@@ -186,6 +201,7 @@ public class RandomCheckConfigService {
 
         RandomCheckConfig config = configRepository.findByIdAndTenant(configId, tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Random check config not found: " + configId));
+        assertConfigInScope(callerId, tenantId, config, callerIsPlatformAdmin);
 
         config.setApplicableRoles(toRolesString(req.getApplicableRoles()));
         config = configRepository.save(config);
@@ -202,6 +218,7 @@ public class RandomCheckConfigService {
 
         RandomCheckConfig config = configRepository.findByIdAndTenant(configId, tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Random check config not found: " + configId));
+        assertConfigInScope(callerId, tenantId, config, callerIsPlatformAdmin);
 
         config.setCheckMode(req.getCheckMode());
         config = configRepository.save(config);
@@ -216,6 +233,7 @@ public class RandomCheckConfigService {
 
         RandomCheckConfig config = configRepository.findByIdAndTenant(configId, tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Random check config not found: " + configId));
+        assertConfigInScope(callerId, tenantId, config, callerIsPlatformAdmin);
 
         config.setDeletedAt(OffsetDateTime.now());
         configRepository.save(config);
@@ -243,6 +261,20 @@ public class RandomCheckConfigService {
         Set<String> perms = userRoleRepository.findPermissionNamesByUserIdAndTenantId(callerId, tenantId);
         if (!perms.contains(PERM_CONFIGURE)) {
             throw new AccessDeniedException("Missing permission: " + PERM_CONFIGURE);
+        }
+    }
+
+    private void assertSiteInScope(UUID callerId, UUID tenantId, UUID siteId, boolean callerIsPlatformAdmin) {
+        if (!siteScopeService.isSiteAllowed(callerId, tenantId, siteId, callerIsPlatformAdmin)) {
+            throw new AccessDeniedException("You do not have permission to configure random checks for this site");
+        }
+    }
+
+    /** Tenant-wide default configs (siteId null) aren't site-restricted access — only a
+     *  per-site override config needs the caller's site scope checked. */
+    private void assertConfigInScope(UUID callerId, UUID tenantId, RandomCheckConfig config, boolean callerIsPlatformAdmin) {
+        if (config.getSiteId() != null) {
+            assertSiteInScope(callerId, tenantId, config.getSiteId(), callerIsPlatformAdmin);
         }
     }
 

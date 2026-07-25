@@ -6,6 +6,7 @@ import org.springframework.data.jpa.domain.Specification;
 import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
 
@@ -14,11 +15,26 @@ public class SiteSpecification {
     private SiteSpecification() {}
 
     public static Specification<Site> build(UUID tenantId, String search, String status) {
+        return build(tenantId, search, status, null);
+    }
+
+    /**
+     * @param restrictToSiteIds null = no site-scope restriction (caller unrestricted); a
+     *                          non-null collection restricts results to those site IDs (see
+     *                          SiteScopeService). Callers must short-circuit an EMPTY
+     *                          collection themselves — Criteria's {@code id IN ()} is invalid.
+     */
+    public static Specification<Site> build(UUID tenantId, String search, String status,
+                                             Collection<UUID> restrictToSiteIds) {
         return (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
 
             predicates.add(cb.equal(root.get("tenantId"), tenantId));
             predicates.add(cb.isNull(root.get("deletedAt")));
+
+            if (restrictToSiteIds != null) {
+                predicates.add(root.get("id").in(restrictToSiteIds));
+            }
 
             if (StringUtils.hasText(search)) {
                 String like = "%" + search.toLowerCase() + "%";

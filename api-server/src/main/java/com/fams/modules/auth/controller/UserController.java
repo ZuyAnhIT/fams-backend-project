@@ -28,9 +28,12 @@ public class UserController {
     }
 
     @Operation(
-        summary = "Search users",
-        description = "Returns a paginated list of users matching the search query (email or display name). " +
-                      "Restricted to Platform Admins. Useful for looking up a userId before assigning a tenant role."
+        summary = "Search users (platform-wide directory)",
+        description = "Returns a paginated, searchable, sortable, filterable list of every user account on the "
+            + "platform. Restricted to Platform Admins. Two primary uses: (1) autocomplete/lookup for the "
+            + "ownerUserId field when provisioning a tenant on a customer's behalf (POST /tenants), and (2) "
+            + "browsing/managing FAMS's own internal staff before assigning a platform-scoped role "
+            + "(POST /user-roles/platform) — filter isPlatformAdmin=true to see just the current platform team."
     )
     @ApiResponses({
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "User list returned"),
@@ -41,10 +44,16 @@ public class UserController {
     @PreAuthorize("hasRole('PLATFORM_ADMIN')")
     public ResponseEntity<ApiResponse<PageResponse<UserProfileResponse>>> searchUsers(
             @Parameter(description = "Search by email or display name") @RequestParam(required = false) String search,
+            @Parameter(description = "Filter by account active/inactive status") @RequestParam(required = false) Boolean isActive,
+            @Parameter(description = "Filter to platform-admin accounts only (true) or non-admin accounts only (false)") @RequestParam(required = false) Boolean isPlatformAdmin,
+            @Parameter(description = "Sort field: email, displayName, createdAt, lastLoginAt") @RequestParam(defaultValue = "email") String sortBy,
+            @Parameter(description = "Sort direction: asc or desc") @RequestParam(defaultValue = "asc") String sortDir,
             @Parameter(description = "Zero-based page index") @RequestParam(defaultValue = "0") @Min(0) int page,
             @Parameter(description = "Page size (1–100)") @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
-        log.info("Search users: search={} page={} size={}", search, page, size);
-        PageResponse<UserProfileResponse> response = userProfileService.searchUsers(search, page, size);
+        log.info("Search users: search={} isActive={} isPlatformAdmin={} sortBy={} page={} size={}",
+                search, isActive, isPlatformAdmin, sortBy, page, size);
+        PageResponse<UserProfileResponse> response =
+                userProfileService.searchUsers(search, isActive, isPlatformAdmin, sortBy, sortDir, page, size);
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 }

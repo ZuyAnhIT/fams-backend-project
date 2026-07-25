@@ -32,7 +32,7 @@ echo ""
 login_resp=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d '{"email":"admin@fams.com","password":"Admin@1234"}')
+    -d '{"identifier":"admin@fams.com","password":"Admin@1234"}')
 if [ "$(echo "$login_resp" | tail -n 1)" -ne 200 ]; then
     echo "SETUP FAILED: login"; exit 1
 fi

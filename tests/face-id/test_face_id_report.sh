@@ -38,7 +38,7 @@ echo ""
 login_resp=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d '{"email":"admin@fams.com","password":"Admin@1234"}')
+    -d '{"identifier":"admin@fams.com","password":"Admin@1234"}')
 [ "$(echo "$login_resp" | tail -n 1)" -ne 200 ] && { echo "SETUP FAILED: login"; exit 1; }
 ADMIN_TOKEN=$(echo "$login_resp" | head -n -1 | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4)
 

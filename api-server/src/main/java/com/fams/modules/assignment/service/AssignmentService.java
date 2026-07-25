@@ -10,6 +10,7 @@ import com.fams.modules.assignment.util.DayOfWeekBitmask;
 import com.fams.modules.employee.repository.EmployeeRepository;
 import com.fams.modules.randomcheck.service.ScheduledCheckCancelService;
 import com.fams.modules.rbac.repository.UserRoleRepository;
+import com.fams.modules.rbac.service.SiteScopeService;
 import com.fams.modules.shift.repository.ShiftRepository;
 import com.fams.modules.site.repository.SiteRepository;
 import com.fams.modules.tenant.repository.TenantRepository;
@@ -44,6 +45,7 @@ public class AssignmentService {
     private final ShiftRepository shiftRepository;
     private final TenantRepository tenantRepository;
     private final UserRoleRepository userRoleRepository;
+    private final SiteScopeService siteScopeService;
     private final ScheduledCheckCancelService scheduledCheckCancelService;
 
     public AssignmentService(AssignmentRepository assignmentRepository,
@@ -52,6 +54,7 @@ public class AssignmentService {
                              ShiftRepository shiftRepository,
                              TenantRepository tenantRepository,
                              UserRoleRepository userRoleRepository,
+                             SiteScopeService siteScopeService,
                              ScheduledCheckCancelService scheduledCheckCancelService) {
         this.assignmentRepository = assignmentRepository;
         this.siteRepository = siteRepository;
@@ -59,7 +62,14 @@ public class AssignmentService {
         this.shiftRepository = shiftRepository;
         this.tenantRepository = tenantRepository;
         this.userRoleRepository = userRoleRepository;
+        this.siteScopeService = siteScopeService;
         this.scheduledCheckCancelService = scheduledCheckCancelService;
+    }
+
+    private void assertSiteInScope(UUID callerUserId, UUID tenantId, UUID siteId, boolean callerIsPlatformAdmin) {
+        if (!siteScopeService.isSiteAllowed(callerUserId, tenantId, siteId, callerIsPlatformAdmin)) {
+            throw new AccessDeniedException("You do not have permission to act on this site");
+        }
     }
 
     @Transactional
@@ -77,6 +87,7 @@ public class AssignmentService {
                         "You do not have permission to create assignments in this tenant");
             }
         }
+        assertSiteInScope(callerUserId, tenantId, siteId, callerIsPlatformAdmin);
 
         siteRepository.findByIdAndTenantIdAndDeletedAtIsNull(siteId, tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Site not found: " + siteId));
@@ -144,6 +155,7 @@ public class AssignmentService {
                         "You do not have permission to list assignments in this tenant");
             }
         }
+        assertSiteInScope(callerUserId, tenantId, siteId, callerIsPlatformAdmin);
 
         siteRepository.findByIdAndTenantIdAndDeletedAtIsNull(siteId, tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Site not found: " + siteId));
@@ -175,6 +187,7 @@ public class AssignmentService {
                         "You do not have permission to update assignments in this tenant");
             }
         }
+        assertSiteInScope(callerUserId, tenantId, siteId, callerIsPlatformAdmin);
 
         siteRepository.findByIdAndTenantIdAndDeletedAtIsNull(siteId, tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Site not found: " + siteId));
@@ -239,6 +252,7 @@ public class AssignmentService {
                         "You do not have permission to cancel assignments in this tenant");
             }
         }
+        assertSiteInScope(callerUserId, tenantId, siteId, callerIsPlatformAdmin);
 
         siteRepository.findByIdAndTenantIdAndDeletedAtIsNull(siteId, tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Site not found: " + siteId));

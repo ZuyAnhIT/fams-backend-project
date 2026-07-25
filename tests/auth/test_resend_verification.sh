@@ -56,7 +56,7 @@ echo "--- Test 3: Resend for already-verified account ---"
 run_test "Resend - already verified (no-op)" 200 \
     -X POST "$BASE_URL/api/v1/auth/resend-verification" \
     -H "Content-Type: application/json" \
-    -d '{"email":"admin@fams.com"}'
+    -d '{"identifier":"admin@fams.com"}'
 
 # Test 4: Invalid email format → 400
 echo ""

@@ -23,7 +23,7 @@ echo "--- Setup: Login as platform admin ---"
 login_resp=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d '{"email":"admin@fams.com","password":"Admin@1234"}')
+    -d '{"identifier":"admin@fams.com","password":"Admin@1234"}')
 login_body=$(echo "$login_resp" | head -n -1)
 login_status=$(echo "$login_resp" | tail -n 1)
 [ "$login_status" -ne 200 ] && echo "FATAL: admin login failed (HTTP $login_status)" && exit 1
@@ -38,7 +38,7 @@ tenant_resp=$(curl -s \
     -X POST "$BASE_URL/api/v1/tenants" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"name\":\"Role Detail Corp\",\"slug\":\"role-detail-$TS\"}")
+    -d "{\"name\":\"Role Detail Corp\",\"slug\":\"role-detail-$TS\",\"ownerEmail\":\"admin@fams.com\"}")
 TENANT_ID=$(echo "$tenant_resp" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 [ -z "$TENANT_ID" ] && echo "FATAL: could not create tenant" && exit 1
 echo "Tenant created: id=$TENANT_ID"

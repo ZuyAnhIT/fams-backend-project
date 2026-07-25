@@ -24,11 +24,17 @@ public class RoleResponse {
     @Schema(description = "True for built-in system roles that cannot be modified or deleted")
     private boolean isSystem;
 
+    @Schema(description = "False if this custom role has been deactivated — existing holders keep it, but it can no longer be assigned to new users. Always true for system roles.")
+    private boolean isActive;
+
     @Schema(description = "Tenant that owns this role (null for platform-wide system roles)")
     private UUID tenantId;
 
     @Schema(description = "Number of permissions assigned to this role", example = "5")
     private int permissionCount;
+
+    @Schema(description = "Number of users currently holding this role (active assignments). Useful before attempting to delete — DELETE is blocked while this is > 0.", example = "3")
+    private long assignmentCount;
 
     @Schema(description = "Creation timestamp (UTC)")
     private OffsetDateTime createdAt;
