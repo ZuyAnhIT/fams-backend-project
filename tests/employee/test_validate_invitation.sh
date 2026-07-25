@@ -49,7 +49,7 @@ t_resp=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/tenants" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"name\":\"Validate Corp $TS\",\"slug\":\"validate-corp-$TS\"}")
+    -d "{\"name\":\"Validate Corp $TS\",\"slug\":\"validate-corp-$TS\",\"ownerEmail\":\"admin@fams.com\"}")
 t_body=$(echo "$t_resp" | head -n -1)
 t_status=$(echo "$t_resp" | tail -n 1)
 if [ "$t_status" -ne 201 ]; then

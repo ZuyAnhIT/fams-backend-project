@@ -64,6 +64,9 @@ public class EmployeeService {
     private final DepartmentRepository departmentRepository;
     private final AssignmentRepository assignmentRepository;
     private final SiteScopeService siteScopeService;
+    private final com.fams.modules.workspace.repository.WorkspaceMemberRepository workspaceMemberRepository;
+    private final com.fams.modules.workspace.repository.WorkspaceRepository workspaceRepository;
+    private final com.fams.modules.assignment.service.AssignmentService assignmentService;
 
     public EmployeeService(EmployeeRepository employeeRepository,
                            UserRoleRepository userRoleRepository,
@@ -73,7 +76,10 @@ public class EmployeeService {
                            TenantSettingsService tenantSettingsService,
                            DepartmentRepository departmentRepository,
                            AssignmentRepository assignmentRepository,
-                           SiteScopeService siteScopeService) {
+                           SiteScopeService siteScopeService,
+                           com.fams.modules.workspace.repository.WorkspaceMemberRepository workspaceMemberRepository,
+                           com.fams.modules.workspace.repository.WorkspaceRepository workspaceRepository,
+                           com.fams.modules.assignment.service.AssignmentService assignmentService) {
         this.employeeRepository = employeeRepository;
         this.userRoleRepository = userRoleRepository;
         this.tenantRepository = tenantRepository;
@@ -83,6 +89,9 @@ public class EmployeeService {
         this.departmentRepository = departmentRepository;
         this.assignmentRepository = assignmentRepository;
         this.siteScopeService = siteScopeService;
+        this.workspaceMemberRepository = workspaceMemberRepository;
+        this.workspaceRepository = workspaceRepository;
+        this.assignmentService = assignmentService;
     }
 
     @Transactional
@@ -331,8 +340,12 @@ public class EmployeeService {
                 .hiredDate(employee.getHiredDate())
                 .avatarUrl(employee.getAvatarUrl())
                 .roles(roles)
-                .workspaces(Collections.emptyList())
-                .assignments(Collections.emptyList())
+                .workspaces(resolveWorkspaceMemberships(employee.getId(), tenantId))
+                .assignments(assignmentRepository
+                        .findByTenantIdAndEmployeeIdAndDeletedAtIsNullOrderByStartDateDesc(tenantId, employee.getId())
+                        .stream()
+                        .map(assignmentService::toResponse)
+                        .toList())
                 .faceId(faceProfileRepository
                         .findByEmployeeIdAndTenantId(employee.getId(), tenantId)
                         .map(FaceIdService::toDto)
@@ -346,6 +359,28 @@ public class EmployeeService {
                 .createdAt(employee.getCreatedAt())
                 .updatedAt(employee.getUpdatedAt())
                 .build();
+    }
+
+    private List<com.fams.modules.employee.dto.response.EmployeeWorkspaceMembershipResponse> resolveWorkspaceMemberships(
+            UUID employeeId, UUID tenantId) {
+        List<com.fams.modules.workspace.entity.WorkspaceMember> memberships =
+                workspaceMemberRepository.findByEmployeeIdAndTenantIdAndDeletedAtIsNull(employeeId, tenantId);
+        if (memberships.isEmpty()) {
+            return Collections.emptyList();
+        }
+        Map<UUID, String> workspaceNamesById = workspaceRepository
+                .findByTenantIdAndDeletedAtIsNullOrderByNameAsc(tenantId).stream()
+                .collect(Collectors.toMap(com.fams.modules.workspace.entity.Workspace::getId,
+                        com.fams.modules.workspace.entity.Workspace::getName));
+        return memberships.stream()
+                .map(m -> com.fams.modules.employee.dto.response.EmployeeWorkspaceMembershipResponse.builder()
+                        .id(m.getId())
+                        .workspaceId(m.getWorkspaceId())
+                        .workspaceName(workspaceNamesById.get(m.getWorkspaceId()))
+                        .role(m.getRole())
+                        .assignedAt(m.getCreatedAt())
+                        .build())
+                .toList();
     }
 
     /** Site-scoped callers may only view an employee who has (or had) an assignment at one

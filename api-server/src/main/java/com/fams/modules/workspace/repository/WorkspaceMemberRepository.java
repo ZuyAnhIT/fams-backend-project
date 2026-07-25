@@ -5,6 +5,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -17,4 +18,8 @@ public interface WorkspaceMemberRepository extends JpaRepository<WorkspaceMember
 
     Optional<WorkspaceMember> findByIdAndWorkspaceIdAndTenantIdAndDeletedAtIsNull(
             UUID id, UUID workspaceId, UUID tenantId);
+
+    /** Used by EmployeeService.getEmployee to show every workspace this employee belongs to
+     *  on the employee detail screen. */
+    List<WorkspaceMember> findByEmployeeIdAndTenantIdAndDeletedAtIsNull(UUID employeeId, UUID tenantId);
 }

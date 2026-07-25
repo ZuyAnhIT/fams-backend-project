@@ -38,7 +38,7 @@ t_resp=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/tenants" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"name\":\"Import Corp\",\"slug\":\"import-corp-${TS}\"}")
+    -d "{\"name\":\"Import Corp\",\"slug\":\"import-corp-${TS}\",\"ownerEmail\":\"admin@fams.com\"}")
 t_body=$(echo "$t_resp" | head -n -1)
 if [ "$(echo "$t_resp" | tail -n 1)" -ne 201 ]; then
     echo "SETUP FAILED: Could not create tenant"

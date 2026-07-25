@@ -49,7 +49,7 @@ t_resp=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/tenants" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"name\":\"Update Emp Corp\",\"slug\":\"upd-emp-${TS}\"}")
+    -d "{\"name\":\"Update Emp Corp\",\"slug\":\"upd-emp-${TS}\",\"ownerEmail\":\"admin@fams.com\"}")
 t_body=$(echo "$t_resp" | head -n -1)
 if [ "$(echo "$t_resp" | tail -n 1)" -ne 201 ]; then
     echo "SETUP FAILED: Could not create tenant"
@@ -180,7 +180,7 @@ other_t=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/tenants" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"name\":\"Other\",\"slug\":\"other-upd-${TS}\"}")
+    -d "{\"name\":\"Other\",\"slug\":\"other-upd-${TS}\",\"ownerEmail\":\"admin@fams.com\"}")
 OTHER_TENANT=$(echo "$other_t" | head -n -1 | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 run_test "Cross-tenant employee not found" 404 \
     -X PATCH "$BASE_URL/api/v1/tenants/$OTHER_TENANT/employees/$EMP1_ID" \

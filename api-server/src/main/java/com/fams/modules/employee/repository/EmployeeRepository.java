@@ -22,6 +22,11 @@ public interface EmployeeRepository extends JpaRepository<Employee, UUID>, JpaSp
 
     Optional<Employee> findByUserIdAndTenantIdAndDeletedAtIsNull(UUID userId, UUID tenantId);
 
+    /** Used when an invitation is accepted: if HR already created a manual (login-less)
+     *  Employee record for this same person earlier, link the new account to THAT record
+     *  instead of creating a duplicate — see EmployeeInvitationService.acceptInvitation. */
+    Optional<Employee> findByTenantIdAndEmailIgnoreCaseAndUserIdIsNullAndDeletedAtIsNull(UUID tenantId, String email);
+
     boolean existsByTenantIdAndEmployeeCodeAndDeletedAtIsNullAndIdNot(UUID tenantId, String employeeCode, UUID id);
 
     long countByTenantIdAndDeletedAtIsNull(UUID tenantId);

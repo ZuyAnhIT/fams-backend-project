@@ -31,6 +31,12 @@ public interface AssignmentRepository extends JpaRepository<Assignment, UUID>,
 
     long countBySiteIdAndStatusAndDeletedAtIsNull(UUID siteId, String status);
 
+    /** Used by EmployeeService.getEmployee to show the employee's full assignment history on
+     *  the detail screen — every assignment regardless of status/date range, most recent
+     *  first (unlike the date-scoped "is this active right now" queries above). */
+    List<Assignment> findByTenantIdAndEmployeeIdAndDeletedAtIsNullOrderByStartDateDesc(
+            UUID tenantId, UUID employeeId);
+
     /** Used by EmployeeService to filter the employee list/detail down to a site-scoped
      *  caller's allowed sites — any (not just currently active) assignment linking the
      *  employee to one of those sites is enough for them to remain visible. */

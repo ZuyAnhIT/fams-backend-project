@@ -1,9 +1,11 @@
 package com.fams.modules.employee.service;
 
+import com.fams.modules.assignment.repository.AssignmentRepository;
 import com.fams.modules.employee.entity.Employee;
 import com.fams.modules.employee.repository.EmployeeRepository;
 import com.fams.modules.employee.specification.EmployeeSpecification;
 import com.fams.modules.rbac.repository.UserRoleRepository;
+import com.fams.modules.rbac.service.SiteScopeService;
 import com.fams.modules.tenant.repository.TenantRepository;
 import com.fams.shared.exception.ResourceNotFoundException;
 import lombok.extern.slf4j.Slf4j;
@@ -17,6 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
@@ -32,13 +35,19 @@ public class EmployeeExportService {
     private final EmployeeRepository employeeRepository;
     private final UserRoleRepository userRoleRepository;
     private final TenantRepository tenantRepository;
+    private final SiteScopeService siteScopeService;
+    private final AssignmentRepository assignmentRepository;
 
     public EmployeeExportService(EmployeeRepository employeeRepository,
                                  UserRoleRepository userRoleRepository,
-                                 TenantRepository tenantRepository) {
+                                 TenantRepository tenantRepository,
+                                 SiteScopeService siteScopeService,
+                                 AssignmentRepository assignmentRepository) {
         this.employeeRepository = employeeRepository;
         this.userRoleRepository = userRoleRepository;
         this.tenantRepository = tenantRepository;
+        this.siteScopeService = siteScopeService;
+        this.assignmentRepository = assignmentRepository;
     }
 
     @Transactional(readOnly = true)
@@ -55,7 +64,25 @@ public class EmployeeExportService {
             }
         }
 
-        Specification<Employee> spec = EmployeeSpecification.build(tenantId, search, status, department);
+        // Site-scoped callers (e.g. a SITE_SUPERVISOR restricted to specific sites) must not be
+        // able to export employees outside their allowed sites — mirrors the same restriction
+        // EmployeeService.listEmployees already applies, so export can't be used as a
+        // site-scope bypass just because it skips pagination.
+        Optional<Set<UUID>> allowedSiteIds =
+                siteScopeService.resolveAllowedSiteIds(callerUserId, tenantId, callerIsPlatformAdmin);
+        Set<UUID> restrictToEmployeeIds = null;
+        if (allowedSiteIds.isPresent()) {
+            if (allowedSiteIds.get().isEmpty()) {
+                return emptyWorkbookBytes();
+            }
+            restrictToEmployeeIds = assignmentRepository
+                    .findDistinctEmployeeIdsByTenantIdAndSiteIdIn(tenantId, allowedSiteIds.get());
+            if (restrictToEmployeeIds.isEmpty()) {
+                return emptyWorkbookBytes();
+            }
+        }
+
+        Specification<Employee> spec = EmployeeSpecification.build(tenantId, search, status, department, restrictToEmployeeIds);
         List<Employee> employees = employeeRepository.findAll(spec);
 
         try (Workbook workbook = new XSSFWorkbook()) {
@@ -103,5 +130,22 @@ public class EmployeeExportService {
 
     private String nullSafe(String value) {
         return value != null ? value : "";
+    }
+
+    /** A site-scoped caller with zero allowed employees still gets a valid (header-only) file
+     *  back, not an error — an empty export is a normal outcome, not a failure. */
+    private byte[] emptyWorkbookBytes() {
+        try (Workbook workbook = new XSSFWorkbook()) {
+            Sheet sheet = workbook.createSheet("Employees");
+            Row headerRow = sheet.createRow(0);
+            for (int i = 0; i < HEADERS.length; i++) {
+                headerRow.createCell(i).setCellValue(HEADERS[i]);
+            }
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            workbook.write(out);
+            return out.toByteArray();
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to generate Excel file", e);
+        }
     }
 }
