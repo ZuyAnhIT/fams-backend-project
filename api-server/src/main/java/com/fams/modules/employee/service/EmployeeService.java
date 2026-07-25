@@ -15,10 +15,12 @@ import com.fams.modules.employee.repository.DepartmentRepository;
 import com.fams.modules.employee.repository.EmployeeRepository;
 import com.fams.modules.employee.repository.FaceProfileRepository;
 import com.fams.modules.employee.service.FaceIdService;
+import com.fams.modules.assignment.repository.AssignmentRepository;
 import com.fams.modules.employee.specification.EmployeeSpecification;
 import com.fams.modules.rbac.dto.response.UserRoleResponse;
 import com.fams.modules.rbac.entity.UserRole;
 import com.fams.modules.rbac.repository.UserRoleRepository;
+import com.fams.modules.rbac.service.SiteScopeService;
 import com.fams.modules.subscription.service.PlanLimitEnforcementService;
 import com.fams.modules.tenant.repository.TenantRepository;
 import com.fams.modules.tenant.service.TenantSettingsService;
@@ -60,6 +62,8 @@ public class EmployeeService {
     private final FaceProfileRepository faceProfileRepository;
     private final TenantSettingsService tenantSettingsService;
     private final DepartmentRepository departmentRepository;
+    private final AssignmentRepository assignmentRepository;
+    private final SiteScopeService siteScopeService;
 
     public EmployeeService(EmployeeRepository employeeRepository,
                            UserRoleRepository userRoleRepository,
@@ -67,7 +71,9 @@ public class EmployeeService {
                            PlanLimitEnforcementService planLimitEnforcementService,
                            FaceProfileRepository faceProfileRepository,
                            TenantSettingsService tenantSettingsService,
-                           DepartmentRepository departmentRepository) {
+                           DepartmentRepository departmentRepository,
+                           AssignmentRepository assignmentRepository,
+                           SiteScopeService siteScopeService) {
         this.employeeRepository = employeeRepository;
         this.userRoleRepository = userRoleRepository;
         this.tenantRepository = tenantRepository;
@@ -75,6 +81,8 @@ public class EmployeeService {
         this.faceProfileRepository = faceProfileRepository;
         this.tenantSettingsService = tenantSettingsService;
         this.departmentRepository = departmentRepository;
+        this.assignmentRepository = assignmentRepository;
+        this.siteScopeService = siteScopeService;
     }
 
     @Transactional
@@ -154,7 +162,23 @@ public class EmployeeService {
         Sort.Direction direction = "asc".equalsIgnoreCase(sortDir) ? Sort.Direction.ASC : Sort.Direction.DESC;
         Pageable pageable = PageRequest.of(page, size, Sort.by(direction, resolvedSortBy));
 
-        Specification<Employee> spec = EmployeeSpecification.build(tenantId, search, status, department);
+        // Employee has no direct siteId — a site-scoped caller's visibility is resolved via
+        // Assignment (employee <-> site link) rather than a simple column predicate.
+        java.util.Optional<Set<UUID>> allowedSiteIds =
+                siteScopeService.resolveAllowedSiteIds(callerUserId, tenantId, callerIsPlatformAdmin);
+        Set<UUID> restrictToEmployeeIds = null;
+        if (allowedSiteIds.isPresent()) {
+            if (allowedSiteIds.get().isEmpty()) {
+                return PageResponse.from(Page.empty(pageable));
+            }
+            restrictToEmployeeIds = assignmentRepository
+                    .findDistinctEmployeeIdsByTenantIdAndSiteIdIn(tenantId, allowedSiteIds.get());
+            if (restrictToEmployeeIds.isEmpty()) {
+                return PageResponse.from(Page.empty(pageable));
+            }
+        }
+
+        Specification<Employee> spec = EmployeeSpecification.build(tenantId, search, status, department, restrictToEmployeeIds);
         Page<Employee> employeePage = employeeRepository.findAll(spec, pageable);
 
         List<UUID> employeeIds = employeePage.getContent().stream().map(Employee::getId).toList();
@@ -270,6 +294,8 @@ public class EmployeeService {
             }
         }
 
+        assertEmployeeInScope(callerUserId, tenantId, employeeId, callerIsPlatformAdmin);
+
         Employee employee = employeeRepository.findByIdAndTenantIdAndDeletedAtIsNull(employeeId, tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Employee not found: " + employeeId));
 
@@ -320,6 +346,21 @@ public class EmployeeService {
                 .createdAt(employee.getCreatedAt())
                 .updatedAt(employee.getUpdatedAt())
                 .build();
+    }
+
+    /** Site-scoped callers may only view an employee who has (or had) an assignment at one
+     *  of their allowed sites — see SiteScopeService and the Assignment entity. */
+    private void assertEmployeeInScope(UUID callerUserId, UUID tenantId, UUID employeeId, boolean callerIsPlatformAdmin) {
+        java.util.Optional<Set<UUID>> allowedSiteIds =
+                siteScopeService.resolveAllowedSiteIds(callerUserId, tenantId, callerIsPlatformAdmin);
+        if (allowedSiteIds.isEmpty()) {
+            return;
+        }
+        Set<UUID> sites = allowedSiteIds.get();
+        if (sites.isEmpty() || !assignmentRepository.existsByTenantIdAndEmployeeIdAndSiteIdInAndDeletedAtIsNull(
+                tenantId, employeeId, sites)) {
+            throw new AccessDeniedException("You do not have permission to view this employee");
+        }
     }
 
     private static final Pattern EMAIL_PATTERN = Pattern.compile("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$");

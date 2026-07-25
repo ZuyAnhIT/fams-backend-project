@@ -19,7 +19,7 @@ echo ""
 login_resp=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d '{"email":"admin@fams.com","password":"Admin@1234"}')
+    -d '{"identifier":"admin@fams.com","password":"Admin@1234"}')
 login_body=$(echo "$login_resp" | head -n -1)
 login_status=$(echo "$login_resp" | tail -n 1)
 
@@ -120,16 +120,46 @@ fi
 
 # ─── 4. Validation: missing tenantId → 400 ───────────────────────────────────
 echo ""
-echo "--- Test 4: Missing tenantId → 400 ---"
-status=$(curl -s -o /dev/null -w "%{http_code}" \
+# Omitting tenantId no longer means "invalid request" — as of 25/07/2026 it means "create a
+# PLATFORM-scoped custom role" (Platform Admin only), used to build an internal staff
+# hierarchy above/below PLATFORM_STAFF. See RoleService.createRole.
+echo "--- Test 4: Missing tenantId (as Platform Admin) → 201, creates a platform-scoped role ---"
+plat_resp=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/roles" \
     -H "Authorization: Bearer $ADMIN_TOKEN" \
     -H "Content-Type: application/json" \
-    -d "{\"name\":\"Some Role\"}")
-if [ "$status" -eq 400 ]; then
-    pass "Missing tenantId rejected — HTTP 400"
+    -d "{\"name\":\"Test Platform Role $UNIQUE_SUFFIX\"}")
+plat_body=$(echo "$plat_resp" | head -n -1)
+plat_status=$(echo "$plat_resp" | tail -n 1)
+if [ "$plat_status" -eq 201 ]; then
+    plat_tenant_id=$(echo "$plat_body" | grep -o '"tenantId":[^,}]*' | cut -d':' -f2)
+    if [ "$plat_tenant_id" = "null" ]; then
+        pass "Platform-scoped role created with tenantId=null — HTTP 201"
+    else
+        fail "Platform-scoped role tenantId" "expected null, got $plat_tenant_id"
+    fi
 else
-    fail "Missing tenantId validation" "expected HTTP 400, got HTTP $status"
+    fail "Platform-scoped role creation" "expected HTTP 201, got HTTP $plat_status"
+fi
+
+echo ""
+echo "--- Test 4b: Missing tenantId (as regular non-admin user) → 403 ---"
+reg_email="create_role_regular_${UNIQUE_SUFFIX}@fams.com"
+curl -s -o /dev/null -X POST "$BASE_URL/api/v1/auth/register" -H "Content-Type: application/json" \
+    -d "{\"email\":\"$reg_email\",\"password\":\"TestPass1\",\"displayName\":\"Regular\"}"
+docker exec fams-postgres psql -U fams_user -d fams_db -q -c \
+    "UPDATE users SET email_verified = true WHERE email = '$reg_email';" > /dev/null
+REGULAR_TOKEN=$(curl -s -X POST "$BASE_URL/api/v1/auth/login" -H "Content-Type: application/json" \
+    -d "{\"identifier\":\"$reg_email\",\"password\":\"TestPass1\"}" | grep -o '"accessToken":"[^"]*"' | sed 's/"accessToken":"//;s/"//')
+status=$(curl -s -o /dev/null -w "%{http_code}" \
+    -X POST "$BASE_URL/api/v1/roles" \
+    -H "Authorization: Bearer $REGULAR_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d "{\"name\":\"Some Role $UNIQUE_SUFFIX\"}")
+if [ "$status" -eq 403 ]; then
+    pass "Non-admin platform-scoped role creation rejected — HTTP 403"
+else
+    fail "Non-admin platform-scoped role creation" "expected HTTP 403, got HTTP $status"
 fi
 
 # ─── 5. Validation: name too long → 400 ──────────────────────────────────────

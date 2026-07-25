@@ -6,6 +6,7 @@ import org.springframework.data.jpa.domain.Specification;
 import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
 
@@ -14,11 +15,27 @@ public class EmployeeSpecification {
     private EmployeeSpecification() {}
 
     public static Specification<Employee> build(UUID tenantId, String search, String status, String department) {
+        return build(tenantId, search, status, department, null);
+    }
+
+    /**
+     * @param restrictToEmployeeIds null = no site-scope restriction; a non-null collection
+     *                              restricts results to those employee IDs (resolved from the
+     *                              caller's allowed sites via Assignment — see
+     *                              EmployeeService). Callers must short-circuit an EMPTY
+     *                              collection themselves — Criteria's {@code id IN ()} is invalid.
+     */
+    public static Specification<Employee> build(UUID tenantId, String search, String status, String department,
+                                                 Collection<UUID> restrictToEmployeeIds) {
         return (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
 
             predicates.add(cb.equal(root.get("tenantId"), tenantId));
             predicates.add(cb.isNull(root.get("deletedAt")));
+
+            if (restrictToEmployeeIds != null) {
+                predicates.add(root.get("id").in(restrictToEmployeeIds));
+            }
 
             if (StringUtils.hasText(search)) {
                 String like = "%" + search.toLowerCase() + "%";

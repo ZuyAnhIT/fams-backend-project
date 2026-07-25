@@ -3,6 +3,7 @@ package com.fams.modules.site.service;
 import com.fams.modules.assignment.service.AssignmentService;
 import com.fams.modules.geofence.service.GeofenceService;
 import com.fams.modules.rbac.repository.UserRoleRepository;
+import com.fams.modules.rbac.service.SiteScopeService;
 import com.fams.modules.shift.service.ShiftService;
 import com.fams.modules.site.dto.request.CreateSiteRequest;
 import com.fams.modules.site.dto.request.UpdateSiteRequest;
@@ -40,6 +41,7 @@ public class SiteService {
     private final SiteRepository siteRepository;
     private final TenantRepository tenantRepository;
     private final UserRoleRepository userRoleRepository;
+    private final SiteScopeService siteScopeService;
     private final GeofenceService geofenceService;
     private final ShiftService shiftService;
     private final AssignmentService assignmentService;
@@ -48,6 +50,7 @@ public class SiteService {
     public SiteService(SiteRepository siteRepository,
                        TenantRepository tenantRepository,
                        UserRoleRepository userRoleRepository,
+                       SiteScopeService siteScopeService,
                        GeofenceService geofenceService,
                        ShiftService shiftService,
                        AssignmentService assignmentService,
@@ -55,6 +58,7 @@ public class SiteService {
         this.siteRepository = siteRepository;
         this.tenantRepository = tenantRepository;
         this.userRoleRepository = userRoleRepository;
+        this.siteScopeService = siteScopeService;
         this.geofenceService = geofenceService;
         this.shiftService = shiftService;
         this.assignmentService = assignmentService;
@@ -132,7 +136,15 @@ public class SiteService {
         Sort.Direction direction = "desc".equalsIgnoreCase(sortDir) ? Sort.Direction.DESC : Sort.Direction.ASC;
         Pageable pageable = PageRequest.of(page, size, Sort.by(direction, resolvedSortBy));
 
-        Specification<Site> spec = SiteSpecification.build(tenantId, search, status);
+        java.util.Optional<Set<UUID>> allowedSiteIds =
+                siteScopeService.resolveAllowedSiteIds(callerUserId, tenantId, callerIsPlatformAdmin);
+        if (allowedSiteIds.isPresent() && allowedSiteIds.get().isEmpty()) {
+            // Restricted to zero sites (e.g. site-scoped role holder assigned no sites at
+            // all) — skip the query entirely, "id IN ()" isn't valid Criteria.
+            return PageResponse.from(Page.empty(pageable));
+        }
+
+        Specification<Site> spec = SiteSpecification.build(tenantId, search, status, allowedSiteIds.orElse(null));
         Page<SiteResponse> resultPage = siteRepository.findAll(spec, pageable).map(this::toResponse);
 
         return PageResponse.from(resultPage);
@@ -209,6 +221,10 @@ public class SiteService {
                 throw new AccessDeniedException(
                         "You do not have permission to view sites in this tenant");
             }
+        }
+
+        if (!siteScopeService.isSiteAllowed(callerUserId, tenantId, siteId, callerIsPlatformAdmin)) {
+            throw new AccessDeniedException("You do not have permission to view this site");
         }
 
         Site site = siteRepository.findByIdAndTenantIdAndDeletedAtIsNull(siteId, tenantId)

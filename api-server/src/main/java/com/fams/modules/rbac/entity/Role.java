@@ -34,6 +34,10 @@ public class Role {
     @Column(name = "is_system", nullable = false)
     private boolean isSystem;
 
+    @Builder.Default
+    @Column(name = "is_active", nullable = false)
+    private boolean isActive = true;
+
     @BatchSize(size = 30)
     @ManyToMany(fetch = FetchType.LAZY)
     @JoinTable(

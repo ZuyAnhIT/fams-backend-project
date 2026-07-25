@@ -4,6 +4,8 @@ import jakarta.persistence.*;
 import lombok.*;
 
 import java.time.OffsetDateTime;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.UUID;
 
 @Getter
@@ -40,6 +42,16 @@ public class UserRole {
 
     @Column(name = "deleted_at")
     private OffsetDateTime deletedAt;
+
+    /** Empty = unrestricted across the whole tenant (default, unchanged behavior). One or
+     *  more entries = this specific assignment only grants access within those sites — e.g.
+     *  a SITE_SUPERVISOR scoped to just their own site instead of every site in the company.
+     *  See SiteScopeService for how this is resolved into an effective allowed-site set. */
+    @ElementCollection(fetch = FetchType.LAZY)
+    @CollectionTable(name = "user_role_sites", joinColumns = @JoinColumn(name = "user_role_id"))
+    @Column(name = "site_id")
+    @Builder.Default
+    private Set<UUID> siteIds = new HashSet<>();
 
     @PrePersist
     protected void onCreate() {

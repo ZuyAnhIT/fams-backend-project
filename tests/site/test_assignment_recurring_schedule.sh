@@ -25,7 +25,7 @@ echo ""
 # ── Setup: login as platform admin ───────────────────────────────────────────
 echo "--- Setup: Login as platform admin ---"
 ADMIN_TOKEN=$(curl -s -X POST "$BASE_URL/api/v1/auth/login" -H "Content-Type: application/json" \
-    -d '{"email":"admin@fams.com","password":"Admin@1234"}' | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['accessToken'])")
+    -d '{"identifier":"admin@fams.com","password":"Admin@1234"}' | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['accessToken'])")
 [ -z "$ADMIN_TOKEN" ] && echo "SETUP FAILED: no admin token" && exit 1
 
 TS=$(date +%s)

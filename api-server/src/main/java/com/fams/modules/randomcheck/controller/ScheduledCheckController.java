@@ -20,6 +20,7 @@ import com.fams.modules.randomcheck.service.ScheduledCheckCancelService;
 import com.fams.modules.randomcheck.service.ScheduledCheckGeneratorService;
 import com.fams.modules.employee.repository.EmployeeRepository;
 import com.fams.modules.rbac.repository.UserRoleRepository;
+import com.fams.modules.rbac.service.SiteScopeService;
 import com.fams.shared.pagination.PageResponse;
 import com.fams.shared.response.ApiResponse;
 import com.fams.shared.security.FamsUserDetails;
@@ -70,6 +71,7 @@ public class ScheduledCheckController {
     private final EmployeeRepository employeeRepository;
     private final NoResponseViolationService noResponseViolationService;
     private final ManualCheckService manualCheckService;
+    private final SiteScopeService siteScopeService;
 
     public ScheduledCheckController(ScheduledCheckGeneratorService generatorService,
                                     ScheduledCheckRepository scheduledCheckRepository,
@@ -81,7 +83,8 @@ public class ScheduledCheckController {
                                     CheckResponseService checkResponseService,
                                     EmployeeRepository employeeRepository,
                                     NoResponseViolationService noResponseViolationService,
-                                    ManualCheckService manualCheckService) {
+                                    ManualCheckService manualCheckService,
+                                    SiteScopeService siteScopeService) {
         this.generatorService = generatorService;
         this.scheduledCheckRepository = scheduledCheckRepository;
         this.checkResponseRepository = checkResponseRepository;
@@ -93,6 +96,7 @@ public class ScheduledCheckController {
         this.employeeRepository = employeeRepository;
         this.noResponseViolationService = noResponseViolationService;
         this.manualCheckService = manualCheckService;
+        this.siteScopeService = siteScopeService;
     }
 
     @Operation(
@@ -176,6 +180,14 @@ public class ScheduledCheckController {
                 throw new AccessDeniedException("Missing permission: randomchecks:list");
             }
         }
+
+        java.util.Optional<UUID> effectiveSiteFilter;
+        try {
+            effectiveSiteFilter = resolveSiteFilter(userDetails, tenantId, siteId);
+        } catch (NoSitesAllowed e) {
+            return ResponseEntity.ok(ApiResponse.success(PageResponse.from(Page.empty(PageRequest.of(page, size)))));
+        }
+        siteId = effectiveSiteFilter.orElse(null);
 
         PageRequest pageable = PageRequest.of(page, size);
         LocalDate from = dateFrom != null ? dateFrom : LocalDate.of(1970, 1, 1);
@@ -283,6 +295,14 @@ public class ScheduledCheckController {
             }
         }
 
+        try {
+            siteId = resolveSiteFilter(userDetails, tenantId, siteId).orElse(null);
+        } catch (NoSitesAllowed e) {
+            Map<String, Object> empty = new LinkedHashMap<>();
+            empty.put("counts", Map.of("total", 0L));
+            return ResponseEntity.ok(ApiResponse.success(empty));
+        }
+
         LocalDate from = dateFrom != null ? dateFrom : LocalDate.of(1970, 1, 1);
         LocalDate to = dateTo != null ? dateTo : LocalDate.of(2099, 12, 31);
         List<Object[]> rows = scheduledCheckRepository.countByStatusGrouped(tenantId, from, to, siteId);
@@ -340,6 +360,7 @@ public class ScheduledCheckController {
                 .findByIdAndTenant(checkId, tenantId)
                 .orElseThrow(() -> new com.fams.shared.exception.ResourceNotFoundException(
                         "Scheduled check not found: " + checkId));
+        assertCheckInScope(userDetails, tenantId, check);
 
         CheckResponseDto responseDto = null;
         if ("responded".equals(check.getStatus())) {
@@ -418,6 +439,10 @@ public class ScheduledCheckController {
             @AuthenticationPrincipal FamsUserDetails userDetails) {
 
         checkPermission(userDetails.getUserId(), tenantId, userDetails.isPlatformAdmin());
+        ScheduledCheck checkToCancel = scheduledCheckRepository.findByIdAndTenant(checkId, tenantId)
+                .orElseThrow(() -> new com.fams.shared.exception.ResourceNotFoundException(
+                        "Scheduled check not found: " + checkId));
+        assertCheckInScope(userDetails, tenantId, checkToCancel);
         cancelService.cancelCheck(tenantId, checkId);
 
         Map<String, Object> result = new LinkedHashMap<>();
@@ -449,6 +474,10 @@ public class ScheduledCheckController {
             @AuthenticationPrincipal FamsUserDetails userDetails) {
 
         checkPermission(userDetails.getUserId(), tenantId, userDetails.isPlatformAdmin());
+        ScheduledCheck checkToDispatch = scheduledCheckRepository.findByIdAndTenant(checkId, tenantId)
+                .orElseThrow(() -> new com.fams.shared.exception.ResourceNotFoundException(
+                        "Scheduled check not found: " + checkId));
+        assertCheckInScope(userDetails, tenantId, checkToDispatch);
         dispatchService.dispatch(checkId);
 
         Map<String, Object> result = new LinkedHashMap<>();
@@ -581,6 +610,46 @@ public class ScheduledCheckController {
         Set<String> perms = userRoleRepository.findPermissionNamesByUserIdAndTenantId(callerId, tenantId);
         if (!perms.contains(PERM_CONFIGURE)) {
             throw new AccessDeniedException("Missing permission: " + PERM_CONFIGURE);
+        }
+    }
+
+    /** Thrown internally by resolveSiteFilter to signal "caller is restricted to zero sites" —
+     *  callers catch this and return an empty result instead of querying. */
+    private static final class NoSitesAllowed extends RuntimeException {
+    }
+
+    /** Resolves the caller's site scope against an explicitly requested siteId filter (if
+     *  any), mirroring the same pattern used in CheckinService/AttendanceSummaryService.
+     *  Returns the siteId to actually query with (empty Optional = caller unrestricted, no
+     *  specific-site filter to apply). */
+    private java.util.Optional<UUID> resolveSiteFilter(FamsUserDetails userDetails, UUID tenantId, UUID requestedSiteId) {
+        java.util.Optional<Set<UUID>> allowed = siteScopeService.resolveAllowedSiteIds(
+                userDetails.getUserId(), tenantId, userDetails.isPlatformAdmin());
+        if (allowed.isEmpty()) {
+            return java.util.Optional.ofNullable(requestedSiteId);
+        }
+        Set<UUID> allowedSites = allowed.get();
+        if (allowedSites.isEmpty()) {
+            throw new NoSitesAllowed();
+        }
+        if (requestedSiteId != null) {
+            if (!allowedSites.contains(requestedSiteId)) {
+                throw new AccessDeniedException("You do not have permission to view random checks for this site");
+            }
+            return java.util.Optional.of(requestedSiteId);
+        }
+        if (allowedSites.size() == 1) {
+            return java.util.Optional.of(allowedSites.iterator().next());
+        }
+        throw new AccessDeniedException(
+                "You are scoped to multiple sites — pass a specific siteId to list its random checks");
+    }
+
+    /** Single-check-scoped variant for getDetail/cancelCheck/dispatchCheck, which act on a
+     *  specific check already loaded from the DB rather than a list filter. */
+    private void assertCheckInScope(FamsUserDetails userDetails, UUID tenantId, ScheduledCheck check) {
+        if (!siteScopeService.isSiteAllowed(userDetails.getUserId(), tenantId, check.getSiteId(), userDetails.isPlatformAdmin())) {
+            throw new AccessDeniedException("You do not have permission to act on this check's site");
         }
     }
 

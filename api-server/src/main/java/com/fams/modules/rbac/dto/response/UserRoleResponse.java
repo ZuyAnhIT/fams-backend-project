@@ -5,6 +5,7 @@ import lombok.Builder;
 import lombok.Data;
 
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.UUID;
 
 @Data
@@ -26,6 +27,12 @@ public class UserRoleResponse {
 
     @Schema(description = "Tenant within which the role is effective", example = "550e8400-e29b-41d4-a716-446655440003")
     private UUID tenantId;
+
+    @Schema(description = "Sites this assignment is restricted to. Empty means unrestricted — the full tenant.")
+    private List<UUID> siteIds;
+
+    @Schema(description = "Same sites as siteIds, with display names resolved — avoids a follow-up GET /sites call just to show scope. Empty means unrestricted.")
+    private List<SiteRefResponse> sites;
 
     @Schema(description = "UUID of the admin who created this assignment", example = "550e8400-e29b-41d4-a716-446655440004")
     private UUID assignedBy;

@@ -52,6 +52,12 @@ public class UserProfileResponse {
     @Schema(description = "Whether the account is active")
     private boolean isActive;
 
+    @Schema(description = "True if this account holds platform-wide admin access (visible to the account owner about themselves, and to Platform Admins browsing the user directory)")
+    private boolean isPlatformAdmin;
+
+    @Schema(description = "Last successful login timestamp (UTC), null if never logged in")
+    private OffsetDateTime lastLoginAt;
+
     @Schema(description = "Account creation timestamp (UTC)")
     private OffsetDateTime createdAt;
 

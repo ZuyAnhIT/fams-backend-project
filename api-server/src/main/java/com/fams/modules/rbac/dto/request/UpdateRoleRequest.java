@@ -25,4 +25,7 @@ public class UpdateRoleRequest {
     @Schema(description = "Complete replacement list of permission UUIDs. Pass an empty list to remove all permissions.", example = "[\"uuid1\", \"uuid2\"]")
     @NotNull(message = "permissionIds is required (use an empty list to remove all permissions)")
     private List<UUID> permissionIds;
+
+    @Schema(description = "Set to false to deactivate this role — existing holders keep it, but it can no longer be assigned to new users. Omit to leave unchanged.", example = "true")
+    private Boolean isActive;
 }

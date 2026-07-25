@@ -11,6 +11,7 @@ import com.fams.modules.checkin.repository.CheckinRepository;
 import com.fams.modules.employee.entity.Employee;
 import com.fams.modules.employee.repository.EmployeeRepository;
 import com.fams.modules.rbac.repository.UserRoleRepository;
+import com.fams.modules.rbac.service.SiteScopeService;
 import com.fams.modules.shift.entity.Shift;
 import com.fams.modules.shift.repository.ShiftRepository;
 import com.fams.modules.site.entity.Site;
@@ -52,19 +53,54 @@ public class AttendanceSummaryService {
     private final ShiftRepository shiftRepository;
     private final EmployeeRepository employeeRepository;
     private final UserRoleRepository userRoleRepository;
+    private final SiteScopeService siteScopeService;
 
     public AttendanceSummaryService(AttendanceSummaryRepository summaryRepository,
                                     CheckinRepository checkinRepository,
                                     SiteRepository siteRepository,
                                     ShiftRepository shiftRepository,
                                     EmployeeRepository employeeRepository,
-                                    UserRoleRepository userRoleRepository) {
+                                    UserRoleRepository userRoleRepository,
+                                    SiteScopeService siteScopeService) {
         this.summaryRepository = summaryRepository;
         this.checkinRepository = checkinRepository;
         this.siteRepository = siteRepository;
         this.shiftRepository = shiftRepository;
         this.employeeRepository = employeeRepository;
         this.userRoleRepository = userRoleRepository;
+        this.siteScopeService = siteScopeService;
+    }
+
+    /** Marker thrown internally by resolveSiteFilter to signal "no sites allowed at all" —
+     *  caught by each caller to short-circuit into an empty result instead of querying. */
+    private static final class NoSitesAllowed extends RuntimeException {
+    }
+
+    /** Shared by listSummaries/listMonthlyAttendance: resolves the caller's allowed sites and
+     *  reconciles them against an explicitly requested siteId filter (if any). Returns the
+     *  siteId to actually query with (null = caller unrestricted, no specific-site filter). */
+    private UUID resolveSiteFilter(UUID callerUserId, UUID tenantId, UUID requestedSiteId,
+                                   boolean callerIsPlatformAdmin) {
+        java.util.Optional<Set<UUID>> allowed =
+                siteScopeService.resolveAllowedSiteIds(callerUserId, tenantId, callerIsPlatformAdmin);
+        if (allowed.isEmpty()) {
+            return requestedSiteId;
+        }
+        Set<UUID> allowedSites = allowed.get();
+        if (allowedSites.isEmpty()) {
+            throw new NoSitesAllowed();
+        }
+        if (requestedSiteId != null) {
+            if (!allowedSites.contains(requestedSiteId)) {
+                throw new AccessDeniedException("You do not have permission to view attendance for this site");
+            }
+            return requestedSiteId;
+        }
+        if (allowedSites.size() == 1) {
+            return allowedSites.iterator().next();
+        }
+        throw new AccessDeniedException(
+                "You are scoped to multiple sites — pass a specific siteId to view its attendance");
     }
 
     // ── Recompute triggers ──────────────────────────────────────────────────────
@@ -280,8 +316,15 @@ public class AttendanceSummaryService {
             }
         }
 
+        UUID effectiveSiteFilter;
+        try {
+            effectiveSiteFilter = resolveSiteFilter(callerUserId, tenantId, siteId, callerIsPlatformAdmin);
+        } catch (NoSitesAllowed e) {
+            return PageResponse.from(Page.empty(PageRequest.of(page, size)));
+        }
+
         Specification<AttendanceSummary> spec =
-                AttendanceSummarySpecification.build(tenantId, employeeId, siteId, status, from, to);
+                AttendanceSummarySpecification.build(tenantId, employeeId, effectiveSiteFilter, status, from, to);
         PageRequest pageable = PageRequest.of(page, size,
                 Sort.by(Sort.Direction.DESC, "attendanceDate"));
 
@@ -315,6 +358,10 @@ public class AttendanceSummaryService {
         AttendanceSummary summary = summaryRepository
                 .findByIdAndTenantIdAndDeletedAtIsNull(summaryId, tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Attendance summary not found: " + summaryId));
+
+        if (!siteScopeService.isSiteAllowed(callerUserId, tenantId, summary.getSiteId(), callerIsPlatformAdmin)) {
+            throw new AccessDeniedException("You do not have permission to view this attendance summary");
+        }
 
         String empName  = resolveEmployeeName(tenantId, summary.getEmployeeId());
         String siteName = resolveSiteName(tenantId, summary.getSiteId());
@@ -414,11 +461,18 @@ public class AttendanceSummaryService {
             }
         }
 
+        UUID effectiveSiteFilter;
+        try {
+            effectiveSiteFilter = resolveSiteFilter(callerUserId, tenantId, siteId, callerIsPlatformAdmin);
+        } catch (NoSitesAllowed e) {
+            return PageResponse.from(new PageImpl<>(List.of(), PageRequest.of(page, size), 0));
+        }
+
         LocalDate from = LocalDate.of(year, month, 1);
         LocalDate to   = from.plusMonths(1);
 
         Specification<AttendanceSummary> spec =
-                AttendanceSummarySpecification.build(tenantId, employeeId, siteId, null, from, to);
+                AttendanceSummarySpecification.build(tenantId, employeeId, effectiveSiteFilter, null, from, to);
 
         List<AttendanceSummary> rows = summaryRepository.findAll(spec);
 
@@ -489,6 +543,10 @@ public class AttendanceSummaryService {
         AttendanceSummary summary = summaryRepository
                 .findByIdAndTenantIdAndDeletedAtIsNull(summaryId, tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Attendance summary not found: " + summaryId));
+
+        if (!siteScopeService.isSiteAllowed(callerUserId, tenantId, summary.getSiteId(), callerIsPlatformAdmin)) {
+            throw new AccessDeniedException("You do not have permission to adjust attendance for this site");
+        }
 
         if (request.getTotalWorkMinutes() != null) summary.setTotalWorkMinutes(request.getTotalWorkMinutes());
         if (request.getStatus() != null)           summary.setStatus(request.getStatus());

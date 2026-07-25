@@ -13,20 +13,26 @@ public class RoleSpecification {
 
     private RoleSpecification() {}
 
-    public static Specification<Role> build(UUID tenantId, String search, Boolean isSystem) {
+    public static Specification<Role> build(UUID tenantId, String search, Boolean isSystem, Boolean isActive,
+                                            boolean includePlatformCustomRoles) {
         return (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
 
             predicates.add(cb.isNull(root.get("deletedAt")));
 
-            // Scope: system roles always included; tenant roles only if tenantId provided
+            // Scope: system roles always included; tenant roles only if tenantId provided.
+            // Platform-scoped custom roles (tenantId NULL, isSystem false) are FAMS's own
+            // internal staff hierarchy — only surfaced to Platform Admins, never to regular
+            // tenant users even though they share the tenantId-IS-NULL bucket with system roles
+            // (applies whether or not a tenantId filter is also given).
+            Predicate globalRoles = includePlatformCustomRoles
+                    ? cb.isNull(root.get("tenantId"))
+                    : cb.and(cb.isNull(root.get("tenantId")), cb.isTrue(root.get("isSystem")));
+
             if (tenantId != null) {
-                predicates.add(cb.or(
-                        cb.isNull(root.get("tenantId")),
-                        cb.equal(root.get("tenantId"), tenantId)
-                ));
+                predicates.add(cb.or(globalRoles, cb.equal(root.get("tenantId"), tenantId)));
             } else {
-                predicates.add(cb.isNull(root.get("tenantId")));
+                predicates.add(globalRoles);
             }
 
             if (StringUtils.hasText(search)) {
@@ -38,6 +44,10 @@ public class RoleSpecification {
 
             if (isSystem != null) {
                 predicates.add(cb.equal(root.get("isSystem"), isSystem));
+            }
+
+            if (isActive != null) {
+                predicates.add(cb.equal(root.get("isActive"), isActive));
             }
 
             return cb.and(predicates.toArray(new Predicate[0]));

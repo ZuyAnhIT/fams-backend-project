@@ -23,7 +23,7 @@ echo ""
 
 echo "--- Setup: Login as platform admin ---"
 ADMIN_TOKEN=$(curl -s -X POST "$BASE_URL/api/v1/auth/login" -H "Content-Type: application/json" \
-    -d '{"email":"admin@fams.com","password":"Admin@1234"}' | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['accessToken'])")
+    -d '{"identifier":"admin@fams.com","password":"Admin@1234"}' | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['accessToken'])")
 [ -z "$ADMIN_TOKEN" ] && echo "SETUP FAILED: no admin token" && exit 1
 
 ROLE_ID=$(curl -s "$BASE_URL/api/v1/roles?search=PLATFORM_STAFF" -H "Authorization: Bearer $ADMIN_TOKEN" \
@@ -77,7 +77,7 @@ if [ "$status" -eq 409 ]; then pass "Duplicate platform role assignment rejected
 echo ""
 echo "--- Test 5: After assignment, the new token can access read-only platform endpoints ---"
 STAFF_TOKEN2=$(curl -s -X POST "$BASE_URL/api/v1/auth/login" -H "Content-Type: application/json" \
-    -d "{\"email\":\"$STAFF_EMAIL\",\"password\":\"TestPass1\"}" | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['accessToken'])")
+    -d "{\"identifier\":\"$STAFF_EMAIL\",\"password\":\"TestPass1\"}" | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['accessToken'])")
 s1=$(curl -s -o /dev/null -w "%{http_code}" "$BASE_URL/api/v1/tenants" -H "Authorization: Bearer $STAFF_TOKEN2")
 s2=$(curl -s -o /dev/null -w "%{http_code}" "$BASE_URL/api/v1/platform/system-status" -H "Authorization: Bearer $STAFF_TOKEN2")
 s3=$(curl -s -o /dev/null -w "%{http_code}" "$BASE_URL/api/v1/audit-logs" -H "Authorization: Bearer $STAFF_TOKEN2")
@@ -94,12 +94,15 @@ s4=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE_URL/api/v1/tenants/$T
 s5=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE_URL/api/v1/tenants" -H "Authorization: Bearer $STAFF_TOKEN2" -H "Content-Type: application/json" \
     -d "{\"name\":\"Should Not Create\",\"slug\":\"should-not-create-$TS\",\"industry\":\"tech\",\"countryCode\":\"VN\"}")
 if [ "$s4" -eq 403 ]; then pass "Suspend tenant still denied for PLATFORM_STAFF (403)"; else fail "Expected 403, got $s4"; fi
-# Note: creating a tenant is allowed for ANY authenticated user by design (self-serve, backlog #3) —
-# this isn't a platform-admin-only action, so PLATFORM_STAFF creating one is not a privilege leak.
-if [ "$s5" -eq 201 ]; then
-    pass "Tenant creation is self-serve for any authenticated user (unaffected by this feature, 201)"
+# V66 grants PLATFORM_STAFF the tenants:create permission so they can provision tenants for
+# customers — but that puts them on the SAME "provisioning" path as a Platform Admin, which
+# requires an explicit owner (see TenantService.createTenant / tests/tenant/test_create_tenant.sh
+# Test 1). So unlike a plain regular user's self-serve path, PLATFORM_STAFF creating a tenant
+# WITHOUT specifying an owner is now correctly rejected — this is intentional, not a leak.
+if [ "$s5" -eq 400 ]; then
+    pass "PLATFORM_STAFF tenant creation without an owner is rejected (400), same as Platform Admin"
 else
-    fail "Expected 201 (self-serve tenant creation unaffected), got $s5"
+    fail "Expected 400 (owner required via the provisioning path), got $s5"
 fi
 
 echo ""
@@ -110,7 +113,7 @@ if [ "$status" -eq 200 ]; then pass "Platform Admin revokes the platform role (2
 echo ""
 echo "--- Test 8: After revoke, access is denied again immediately (cache correctly evicted) ---"
 STAFF_TOKEN3=$(curl -s -X POST "$BASE_URL/api/v1/auth/login" -H "Content-Type: application/json" \
-    -d "{\"email\":\"$STAFF_EMAIL\",\"password\":\"TestPass1\"}" | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['accessToken'])")
+    -d "{\"identifier\":\"$STAFF_EMAIL\",\"password\":\"TestPass1\"}" | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['accessToken'])")
 status=$(curl -s -o /dev/null -w "%{http_code}" "$BASE_URL/api/v1/tenants" -H "Authorization: Bearer $STAFF_TOKEN3")
 if [ "$status" -eq 403 ]; then
     pass "Access denied again immediately after revoke (403, no stale-cache window)"

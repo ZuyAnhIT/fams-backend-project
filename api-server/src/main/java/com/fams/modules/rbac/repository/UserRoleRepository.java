@@ -5,6 +5,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -62,7 +63,26 @@ public interface UserRoleRepository extends JpaRepository<UserRole, UUID> {
 
     boolean existsByRoleIdAndDeletedAtIsNull(UUID roleId);
 
+    long countByRoleIdAndDeletedAtIsNull(UUID roleId);
+
     boolean existsByUserIdAndTenantIdAndDeletedAtIsNull(UUID userId, UUID tenantId);
+
+    /** Used to evict every affected user's cached permission set after a role's permission
+     *  list changes (see RoleService.updateRole) — without this, holders of an edited role
+     *  keep acting on their stale cached permissions for up to the cache TTL. */
+    List<UserRole> findByRoleIdAndDeletedAtIsNull(UUID roleId);
+
+    /** Batch-counts active assignments per role for a page of roles (RoleService.listRoles) —
+     *  lets the frontend show "N users hold this role" before attempting a delete, instead of
+     *  discovering it only after a 400 from DELETE /roles/{id}. */
+    @Query("SELECT ur.role.id AS roleId, COUNT(ur) AS cnt FROM UserRole ur "
+            + "WHERE ur.role.id IN :roleIds AND ur.deletedAt IS NULL GROUP BY ur.role.id")
+    List<RoleAssignmentCount> countActiveByRoleIdIn(@Param("roleIds") Collection<UUID> roleIds);
+
+    interface RoleAssignmentCount {
+        UUID getRoleId();
+        long getCnt();
+    }
 
     @Query("SELECT ur FROM UserRole ur JOIN FETCH ur.role WHERE ur.id = :id AND ur.deletedAt IS NULL")
     java.util.Optional<UserRole> findActiveById(@Param("id") UUID id);

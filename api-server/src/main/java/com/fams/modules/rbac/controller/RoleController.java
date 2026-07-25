@@ -62,7 +62,10 @@ public class RoleController {
     }
 
     @Operation(summary = "List roles",
-        description = "Returns a paginated list of roles. Platform Admins see all roles; tenant users see only their tenant's roles. Supports search, isSystem filter, and sorting.")
+        description = "Returns a paginated list of roles: system roles are always included; pass tenantId to also "
+            + "include that tenant's custom roles. Platform Admins may pass any tenantId; other callers may only "
+            + "pass a tenantId they actually belong to (403 otherwise). Supports search, isSystem filter, isActive "
+            + "filter (deactivated custom roles), and sorting.")
     @ApiResponses({
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Roles returned",
             content = @Content(schema = @Schema(implementation = RoleResponse.class))),
@@ -74,18 +77,19 @@ public class RoleController {
             @Parameter(description = "Filter by tenant ID (Platform Admin only)") @RequestParam(required = false) UUID tenantId,
             @Parameter(description = "Search by role name") @RequestParam(required = false) String search,
             @Parameter(description = "Filter system roles (true/false)") @RequestParam(required = false) Boolean isSystem,
+            @Parameter(description = "Filter active/deactivated custom roles (true/false)") @RequestParam(required = false) Boolean isActive,
             @Parameter(description = "Sort field") @RequestParam(defaultValue = "isSystem") String sortBy,
             @Parameter(description = "Sort direction: asc or desc") @RequestParam(defaultValue = "desc") String sortDir,
             @Parameter(description = "Zero-based page index") @RequestParam(defaultValue = "0") @Min(0) int page,
             @Parameter(description = "Page size (1–100)") @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size,
             @AuthenticationPrincipal FamsUserDetails userDetails) {
 
-        log.info("List roles: tenantId={} search={} isSystem={} page={} size={} by userId={}",
-                tenantId, search, isSystem, page, size, userDetails.getUserId());
+        log.info("List roles: tenantId={} search={} isSystem={} isActive={} page={} size={} by userId={}",
+                tenantId, search, isSystem, isActive, page, size, userDetails.getUserId());
 
         PageResponse<RoleResponse> result = roleService.listRoles(
-                tenantId, search, isSystem, sortBy, sortDir, page, size,
-                userDetails.isPlatformAdmin());
+                tenantId, search, isSystem, isActive, sortBy, sortDir, page, size,
+                userDetails.getUserId(), userDetails.isPlatformAdmin());
 
         return ResponseEntity.ok(ApiResponse.success(result));
     }
@@ -138,7 +142,10 @@ public class RoleController {
     }
 
     @Operation(summary = "Update a role",
-        description = "Updates the name, description and/or permission list of a custom (non-system) role. Only the owning tenant's admin or a Platform Admin may update a role.")
+        description = "Updates the name, description, permission list, and/or active status of a custom (non-system) "
+            + "role. Only the owning tenant's admin or a Platform Admin may update a role. Set isActive=false to "
+            + "deactivate a role: existing holders keep it, but it can no longer be assigned to new users — a "
+            + "softer alternative to DELETE, which is blocked while any user still holds the role.")
     @ApiResponses({
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Role updated",
             content = @Content(schema = @Schema(implementation = RoleDetailResponse.class))),
