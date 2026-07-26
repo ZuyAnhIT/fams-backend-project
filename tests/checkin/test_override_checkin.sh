@@ -50,7 +50,7 @@ TS=$(date +%s)
 
 t_resp=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/tenants" \
     -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"name\":\"Override Corp ${TS}\",\"slug\":\"override-${TS}\"}")
+    -d "{\"name\":\"Override Corp ${TS}\",\"slug\":\"override-${TS}\",\"ownerEmail\":\"admin@fams.com\"}")
 if [ "$(echo "$t_resp" | tail -n 1)" -ne 201 ]; then echo "SETUP FAILED: tenant"; exit 1; fi
 TENANT_ID=$(echo "$t_resp" | head -n -1 | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 
@@ -234,7 +234,7 @@ echo ""
 echo "--- Test 12: Cross-tenant check-in returns 404 ---"
 t2_resp=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/tenants" \
     -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"name\":\"Other Corp ${TS}\",\"slug\":\"otherover-${TS}\"}")
+    -d "{\"name\":\"Other Corp ${TS}\",\"slug\":\"otherover-${TS}\",\"ownerEmail\":\"admin@fams.com\"}")
 T2_ID=$(echo "$t2_resp" | head -n -1 | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 run_test "Cross-tenant check-in returns 404" 404 \
     -X PATCH "$BASE_URL/api/v1/tenants/$T2_ID/checkin/$CHECKIN_ID/override" \

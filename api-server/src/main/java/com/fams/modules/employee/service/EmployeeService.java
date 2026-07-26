@@ -8,10 +8,8 @@ import com.fams.modules.employee.dto.response.EmployeeImportError;
 import com.fams.modules.employee.dto.response.EmployeeImportResponse;
 import com.fams.modules.employee.dto.response.EmployeeResponse;
 import com.fams.modules.employee.dto.response.FaceIdStatusDto;
-import com.fams.modules.employee.entity.Department;
 import com.fams.modules.employee.entity.Employee;
 import com.fams.modules.employee.entity.FaceProfile;
-import com.fams.modules.employee.repository.DepartmentRepository;
 import com.fams.modules.employee.repository.EmployeeRepository;
 import com.fams.modules.employee.repository.FaceProfileRepository;
 import com.fams.modules.employee.service.FaceIdService;
@@ -61,7 +59,6 @@ public class EmployeeService {
     private final PlanLimitEnforcementService planLimitEnforcementService;
     private final FaceProfileRepository faceProfileRepository;
     private final TenantSettingsService tenantSettingsService;
-    private final DepartmentRepository departmentRepository;
     private final AssignmentRepository assignmentRepository;
     private final SiteScopeService siteScopeService;
     private final com.fams.modules.workspace.repository.WorkspaceMemberRepository workspaceMemberRepository;
@@ -74,7 +71,6 @@ public class EmployeeService {
                            PlanLimitEnforcementService planLimitEnforcementService,
                            FaceProfileRepository faceProfileRepository,
                            TenantSettingsService tenantSettingsService,
-                           DepartmentRepository departmentRepository,
                            AssignmentRepository assignmentRepository,
                            SiteScopeService siteScopeService,
                            com.fams.modules.workspace.repository.WorkspaceMemberRepository workspaceMemberRepository,
@@ -86,7 +82,6 @@ public class EmployeeService {
         this.planLimitEnforcementService = planLimitEnforcementService;
         this.faceProfileRepository = faceProfileRepository;
         this.tenantSettingsService = tenantSettingsService;
-        this.departmentRepository = departmentRepository;
         this.assignmentRepository = assignmentRepository;
         this.siteScopeService = siteScopeService;
         this.workspaceMemberRepository = workspaceMemberRepository;
@@ -121,11 +116,13 @@ public class EmployeeService {
             throw new DuplicateResourceException("Employee code '" + resolvedCode + "' already exists in this tenant");
         }
 
-        // Validate departmentId if provided
+        // Validate departmentId if provided — now a Workspace id (org-chart consolidation,
+        // see docs/api/workspace-management-api.md section 4)
         UUID deptId = request.getDepartmentId();
         String deptName = request.getDepartment();
         if (deptId != null) {
-            Department dept = departmentRepository.findByIdAndTenantIdAndDeletedAtIsNull(deptId, tenantId)
+            com.fams.modules.workspace.entity.Workspace dept = workspaceRepository
+                    .findByIdAndTenantIdAndDeletedAtIsNull(deptId, tenantId)
                     .orElseThrow(() -> new ResourceNotFoundException("Department not found: " + deptId));
             deptName = dept.getName();  // sync text field
         }
@@ -254,7 +251,8 @@ public class EmployeeService {
         if (request.getAvatarUrl() != null)
             employee.setAvatarUrl(request.getAvatarUrl().isBlank() ? null : request.getAvatarUrl());
         if (request.getDepartmentId() != null) {
-            Department dept = departmentRepository.findByIdAndTenantIdAndDeletedAtIsNull(request.getDepartmentId(), tenantId)
+            com.fams.modules.workspace.entity.Workspace dept = workspaceRepository
+                    .findByIdAndTenantIdAndDeletedAtIsNull(request.getDepartmentId(), tenantId)
                     .orElseThrow(() -> new ResourceNotFoundException("Department not found: " + request.getDepartmentId()));
             employee.setDepartmentId(dept.getId());
             employee.setDepartment(dept.getName());

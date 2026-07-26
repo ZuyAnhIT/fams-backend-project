@@ -33,6 +33,12 @@ public class WorkspaceTreeResponse {
     @Schema(description = "Status: active or inactive", example = "active")
     private String status;
 
+    @Schema(description = "Number of active employees currently in this workspace.", example = "12")
+    private long activeMemberCount;
+
+    @Schema(description = "Number of active direct child workspaces (equals children.size(), provided for convenience so callers don't have to count the list themselves).", example = "2")
+    private long childWorkspaceCount;
+
     @Schema(description = "UUID of the user who created this workspace")
     private UUID createdBy;
 

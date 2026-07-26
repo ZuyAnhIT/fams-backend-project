@@ -6,6 +6,7 @@ import com.fams.modules.tenant.repository.TenantRepository;
 import com.fams.modules.workspace.dto.request.AssignWorkspaceMemberRequest;
 import com.fams.modules.workspace.dto.request.TransferWorkspaceMemberRequest;
 import com.fams.modules.workspace.dto.response.WorkspaceMemberResponse;
+import com.fams.modules.workspace.entity.Workspace;
 import com.fams.modules.workspace.entity.WorkspaceMember;
 import com.fams.modules.workspace.repository.WorkspaceMemberRepository;
 import com.fams.modules.workspace.repository.WorkspaceRepository;
@@ -62,8 +63,15 @@ public class WorkspaceMemberService {
             }
         }
 
-        workspaceRepository.findByIdAndTenantIdAndDeletedAtIsNull(workspaceId, tenantId)
+        Workspace workspace = workspaceRepository.findByIdAndTenantIdAndDeletedAtIsNull(workspaceId, tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Workspace not found: " + workspaceId));
+
+        // A deactivated workspace is being retired — mirrors the same "deactivation blocks new
+        // assignment, existing members unaffected" rule already used for roles (see rbac-api.md).
+        if (!"active".equals(workspace.getStatus())) {
+            throw new IllegalArgumentException(
+                    "Workspace '" + workspace.getName() + "' is inactive and can no longer accept new members");
+        }
 
         employeeRepository.findByIdAndTenantIdAndDeletedAtIsNull(request.getEmployeeId(), tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException(
@@ -172,9 +180,16 @@ public class WorkspaceMemberService {
                     "Target workspace must be different from the source workspace");
         }
 
-        workspaceRepository.findByIdAndTenantIdAndDeletedAtIsNull(request.getTargetWorkspaceId(), tenantId)
+        Workspace targetWorkspace = workspaceRepository
+                .findByIdAndTenantIdAndDeletedAtIsNull(request.getTargetWorkspaceId(), tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException(
                         "Target workspace not found: " + request.getTargetWorkspaceId()));
+
+        if (!"active".equals(targetWorkspace.getStatus())) {
+            throw new IllegalArgumentException(
+                    "Target workspace '" + targetWorkspace.getName()
+                            + "' is inactive and can no longer accept new members");
+        }
 
         WorkspaceMember existing = memberRepository
                 .findByIdAndWorkspaceIdAndTenantIdAndDeletedAtIsNull(memberId, sourceWorkspaceId, tenantId)
