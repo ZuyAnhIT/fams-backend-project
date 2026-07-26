@@ -4,7 +4,10 @@ import com.fams.modules.workspace.entity.WorkspaceMember;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -22,4 +25,17 @@ public interface WorkspaceMemberRepository extends JpaRepository<WorkspaceMember
     /** Used by EmployeeService.getEmployee to show every workspace this employee belongs to
      *  on the employee detail screen. */
     List<WorkspaceMember> findByEmployeeIdAndTenantIdAndDeletedAtIsNull(UUID employeeId, UUID tenantId);
+
+    long countByWorkspaceIdAndDeletedAtIsNull(UUID workspaceId);
+
+    /** Batch-counts active members per workspace for a page of workspaces
+     *  (WorkspaceService.listWorkspaces) — avoids one query per row. */
+    @Query("SELECT m.workspaceId AS workspaceId, COUNT(m) AS cnt FROM WorkspaceMember m "
+            + "WHERE m.workspaceId IN :workspaceIds AND m.deletedAt IS NULL GROUP BY m.workspaceId")
+    List<WorkspaceMemberCount> countActiveByWorkspaceIdIn(@Param("workspaceIds") Collection<UUID> workspaceIds);
+
+    interface WorkspaceMemberCount {
+        UUID getWorkspaceId();
+        long getCnt();
+    }
 }

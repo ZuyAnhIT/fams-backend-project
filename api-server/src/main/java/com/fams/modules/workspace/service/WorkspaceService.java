@@ -7,6 +7,7 @@ import com.fams.modules.workspace.dto.request.UpdateWorkspaceRequest;
 import com.fams.modules.workspace.dto.response.WorkspaceResponse;
 import com.fams.modules.workspace.dto.response.WorkspaceTreeResponse;
 import com.fams.modules.workspace.entity.Workspace;
+import com.fams.modules.workspace.repository.WorkspaceMemberRepository;
 import com.fams.modules.workspace.repository.WorkspaceRepository;
 import com.fams.modules.workspace.specification.WorkspaceSpecification;
 import com.fams.shared.exception.DuplicateResourceException;
@@ -35,13 +36,16 @@ public class WorkspaceService {
     private final WorkspaceRepository workspaceRepository;
     private final TenantRepository tenantRepository;
     private final UserRoleRepository userRoleRepository;
+    private final WorkspaceMemberRepository workspaceMemberRepository;
 
     public WorkspaceService(WorkspaceRepository workspaceRepository,
                             TenantRepository tenantRepository,
-                            UserRoleRepository userRoleRepository) {
+                            UserRoleRepository userRoleRepository,
+                            WorkspaceMemberRepository workspaceMemberRepository) {
         this.workspaceRepository = workspaceRepository;
         this.tenantRepository = tenantRepository;
         this.userRoleRepository = userRoleRepository;
+        this.workspaceMemberRepository = workspaceMemberRepository;
     }
 
     @Transactional
@@ -84,7 +88,7 @@ public class WorkspaceService {
 
         workspaceRepository.save(workspace);
         log.info("Workspace created: id={} tenantId={} by={}", workspace.getId(), tenantId, callerUserId);
-        return toResponse(workspace);
+        return toResponse(workspace, 0L, 0L);
     }
 
     @Transactional(readOnly = true)
@@ -108,9 +112,34 @@ public class WorkspaceService {
         Pageable pageable = PageRequest.of(page, size, Sort.by(direction, resolvedSortBy));
 
         Specification<Workspace> spec = WorkspaceSpecification.build(tenantId, search, status, type);
-        Page<WorkspaceResponse> resultPage = workspaceRepository.findAll(spec, pageable).map(this::toResponse);
+        Page<Workspace> workspacePage = workspaceRepository.findAll(spec, pageable);
+
+        List<UUID> ids = workspacePage.getContent().stream().map(Workspace::getId).toList();
+        Map<UUID, Long> memberCounts = batchLoadMemberCounts(ids);
+        Map<UUID, Long> childCounts = batchLoadChildCounts(ids);
+
+        Page<WorkspaceResponse> resultPage = workspacePage.map(w ->
+                toResponse(w, memberCounts.getOrDefault(w.getId(), 0L), childCounts.getOrDefault(w.getId(), 0L)));
 
         return PageResponse.from(resultPage);
+    }
+
+    private Map<UUID, Long> batchLoadMemberCounts(List<UUID> workspaceIds) {
+        if (workspaceIds.isEmpty()) return Map.of();
+        Map<UUID, Long> counts = new HashMap<>();
+        for (WorkspaceMemberRepository.WorkspaceMemberCount row : workspaceMemberRepository.countActiveByWorkspaceIdIn(workspaceIds)) {
+            counts.put(row.getWorkspaceId(), row.getCnt());
+        }
+        return counts;
+    }
+
+    private Map<UUID, Long> batchLoadChildCounts(List<UUID> workspaceIds) {
+        if (workspaceIds.isEmpty()) return Map.of();
+        Map<UUID, Long> counts = new HashMap<>();
+        for (WorkspaceRepository.WorkspaceChildCount row : workspaceRepository.countActiveChildrenByParentIdIn(workspaceIds)) {
+            counts.put(row.getParentId(), row.getCnt());
+        }
+        return counts;
     }
 
     @Transactional(readOnly = true)
@@ -161,7 +190,13 @@ public class WorkspaceService {
             all = all.stream().filter(w -> includedIds.contains(w.getId())).collect(Collectors.toList());
         }
 
-        return buildTree(all, null);
+        // Counts always reflect the true active member/child counts (unaffected by the search/status
+        // filter above) — same definition as WorkspaceResponse.activeMemberCount/childWorkspaceCount.
+        List<UUID> ids = all.stream().map(Workspace::getId).toList();
+        Map<UUID, Long> memberCounts = batchLoadMemberCounts(ids);
+        Map<UUID, Long> childCounts = batchLoadChildCounts(ids);
+
+        return buildTree(all, null, memberCounts, childCounts);
     }
 
     @Transactional
@@ -226,7 +261,7 @@ public class WorkspaceService {
 
         workspaceRepository.save(workspace);
         log.info("Workspace updated: id={} tenantId={} by={}", workspaceId, tenantId, callerUserId);
-        return toResponse(workspace);
+        return toResponseWithCounts(workspace);
     }
 
     /** Returns true if candidateId is a descendant of ancestorId within the tenant. */
@@ -261,17 +296,58 @@ public class WorkspaceService {
         Workspace workspace = workspaceRepository.findByIdAndTenantIdAndDeletedAtIsNull(workspaceId, tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Workspace not found: " + workspaceId));
 
-        return toResponse(workspace);
+        return toResponseWithCounts(workspace);
     }
 
-    private List<WorkspaceTreeResponse> buildTree(List<Workspace> all, UUID parentId) {
+    @Transactional
+    public void deleteWorkspace(UUID tenantId, UUID workspaceId, UUID callerUserId, boolean callerIsPlatformAdmin) {
+        tenantRepository.findByIdAndDeletedAtIsNull(tenantId)
+                .orElseThrow(() -> new ResourceNotFoundException("Tenant not found: " + tenantId));
+
+        if (!callerIsPlatformAdmin) {
+            Set<String> permissions = userRoleRepository
+                    .findPermissionNamesByUserIdAndTenantId(callerUserId, tenantId);
+            if (!permissions.contains("workspaces:delete")) {
+                throw new AccessDeniedException("You do not have permission to delete workspaces in this tenant");
+            }
+        }
+
+        Workspace workspace = workspaceRepository.findByIdAndTenantIdAndDeletedAtIsNull(workspaceId, tenantId)
+                .orElseThrow(() -> new ResourceNotFoundException("Workspace not found: " + workspaceId));
+
+        if (workspaceMemberRepository.countByWorkspaceIdAndDeletedAtIsNull(workspaceId) > 0) {
+            throw new IllegalArgumentException(
+                    "Workspace still has active members. Remove or transfer them all before deleting.");
+        }
+        if (workspaceRepository.countByParentIdAndDeletedAtIsNull(workspaceId) > 0) {
+            throw new IllegalArgumentException(
+                    "Workspace still has active child workspaces. Reparent or delete them first.");
+        }
+
+        workspace.setDeletedAt(java.time.OffsetDateTime.now());
+        workspaceRepository.save(workspace);
+        log.info("Workspace deleted: id={} tenantId={} by={}", workspaceId, tenantId, callerUserId);
+    }
+
+    /** Single-workspace variant of the batch counts used by listWorkspaces — for
+     *  create/update/get, where computing a whole batch map for one row would be overkill. */
+    private WorkspaceResponse toResponseWithCounts(Workspace w) {
+        long memberCount = workspaceMemberRepository.countByWorkspaceIdAndDeletedAtIsNull(w.getId());
+        long childCount = workspaceRepository.countByParentIdAndDeletedAtIsNull(w.getId());
+        return toResponse(w, memberCount, childCount);
+    }
+
+    private List<WorkspaceTreeResponse> buildTree(List<Workspace> all, UUID parentId,
+                                                   Map<UUID, Long> memberCounts, Map<UUID, Long> childCounts) {
         return all.stream()
                 .filter(w -> Objects.equals(w.getParentId(), parentId))
-                .map(w -> toTreeResponse(w, buildTree(all, w.getId())))
+                .map(w -> toTreeResponse(w, buildTree(all, w.getId(), memberCounts, childCounts),
+                        memberCounts.getOrDefault(w.getId(), 0L), childCounts.getOrDefault(w.getId(), 0L)))
                 .collect(Collectors.toList());
     }
 
-    private WorkspaceTreeResponse toTreeResponse(Workspace w, List<WorkspaceTreeResponse> children) {
+    private WorkspaceTreeResponse toTreeResponse(Workspace w, List<WorkspaceTreeResponse> children,
+                                                  long activeMemberCount, long childWorkspaceCount) {
         return WorkspaceTreeResponse.builder()
                 .id(w.getId())
                 .tenantId(w.getTenantId())
@@ -280,6 +356,8 @@ public class WorkspaceService {
                 .type(w.getType())
                 .parentId(w.getParentId())
                 .status(w.getStatus())
+                .activeMemberCount(activeMemberCount)
+                .childWorkspaceCount(childWorkspaceCount)
                 .createdBy(w.getCreatedBy())
                 .createdAt(w.getCreatedAt())
                 .updatedAt(w.getUpdatedAt())
@@ -287,7 +365,7 @@ public class WorkspaceService {
                 .build();
     }
 
-    public WorkspaceResponse toResponse(Workspace w) {
+    public WorkspaceResponse toResponse(Workspace w, long activeMemberCount, long childWorkspaceCount) {
         return WorkspaceResponse.builder()
                 .id(w.getId())
                 .tenantId(w.getTenantId())
@@ -296,6 +374,8 @@ public class WorkspaceService {
                 .type(w.getType())
                 .parentId(w.getParentId())
                 .status(w.getStatus())
+                .activeMemberCount(activeMemberCount)
+                .childWorkspaceCount(childWorkspaceCount)
                 .createdBy(w.getCreatedBy())
                 .createdAt(w.getCreatedAt())
                 .updatedAt(w.getUpdatedAt())

@@ -46,7 +46,7 @@ public class EmployeeDetailResponse {
     @Schema(description = "Department or team", example = "Construction")
     private String department;
 
-    @Schema(description = "Managed department UUID (null if not linked to a predefined department)")
+    @Schema(description = "Workspace UUID of type=department (null if not linked to one). See /tenants/{tenantId}/workspaces.")
     private UUID departmentId;
 
     @Schema(description = "Employment status: active, inactive, terminated")

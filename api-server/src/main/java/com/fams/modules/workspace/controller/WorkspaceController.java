@@ -194,4 +194,32 @@ public class WorkspaceController {
                 tenantId, workspaceId, userDetails.getUserId(), userDetails.isPlatformAdmin());
         return ResponseEntity.ok(ApiResponse.success(response));
     }
+
+    @Operation(
+        summary = "Delete workspace",
+        description = "Soft-deletes a workspace. Blocked if it still has active members or active child "
+            + "workspaces — remove/transfer all members and reparent/delete children first. "
+            + "Requires workspaces:delete permission. Callable by TENANT_ADMIN."
+    )
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200",
+            description = "Workspace deleted"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400",
+            description = "Workspace still has active members or child workspaces"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401",
+            description = "Unauthorized"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403",
+            description = "Insufficient permissions"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404",
+            description = "Tenant or workspace not found")
+    })
+    @DeleteMapping("/{workspaceId}")
+    public ResponseEntity<ApiResponse<Void>> deleteWorkspace(
+            @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
+            @Parameter(description = "Workspace UUID") @PathVariable UUID workspaceId,
+            @AuthenticationPrincipal FamsUserDetails userDetails) {
+        log.info("Delete workspace workspaceId={} tenantId={} by={}", workspaceId, tenantId, userDetails.getUserId());
+        workspaceService.deleteWorkspace(tenantId, workspaceId, userDetails.getUserId(), userDetails.isPlatformAdmin());
+        return ResponseEntity.ok(ApiResponse.success(null));
+    }
 }

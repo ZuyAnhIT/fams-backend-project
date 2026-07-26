@@ -32,6 +32,12 @@ public class WorkspaceResponse {
     @Schema(description = "Status: active or inactive", example = "active")
     private String status;
 
+    @Schema(description = "Number of active employees currently in this workspace. Useful before deactivating/deleting.", example = "12")
+    private long activeMemberCount;
+
+    @Schema(description = "Number of active child workspaces under this one (direct children only). Useful before deleting.", example = "2")
+    private long childWorkspaceCount;
+
     @Schema(description = "UUID of the user who created this workspace")
     private UUID createdBy;
 
