@@ -175,4 +175,35 @@ public class ShiftController {
                 tenantId, siteId, shiftId, request, userDetails.getUserId(), userDetails.isPlatformAdmin());
         return ResponseEntity.ok(ApiResponse.success(response));
     }
+
+    @Operation(
+        summary = "Delete shift template",
+        description = "Hard-deletes a shift template. Only allowed if the shift has NEVER been referenced " +
+                      "by any assignment (active or historical) — otherwise use update with status='inactive' " +
+                      "to deactivate it without losing assignment history. " +
+                      "Requires shifts:delete permission. Callable by TENANT_ADMIN or HR_MANAGER."
+    )
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200",
+            description = "Shift deleted"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400",
+            description = "Shift has been used by at least one assignment — deactivate instead"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401",
+            description = "Unauthorized"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403",
+            description = "Insufficient permissions"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404",
+            description = "Tenant, site, or shift not found")
+    })
+    @PreAuthorize("hasAuthority('shifts:delete')")
+    @DeleteMapping("/{shiftId}")
+    public ResponseEntity<ApiResponse<Void>> deleteShift(
+            @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
+            @Parameter(description = "Site UUID")   @PathVariable UUID siteId,
+            @Parameter(description = "Shift UUID")  @PathVariable UUID shiftId,
+            @AuthenticationPrincipal FamsUserDetails userDetails) {
+        log.info("Delete shift shiftId={} siteId={} tenantId={} by={}", shiftId, siteId, tenantId, userDetails.getUserId());
+        shiftService.deleteShift(tenantId, siteId, shiftId, userDetails.getUserId(), userDetails.isPlatformAdmin());
+        return ResponseEntity.ok(ApiResponse.success(null));
+    }
 }

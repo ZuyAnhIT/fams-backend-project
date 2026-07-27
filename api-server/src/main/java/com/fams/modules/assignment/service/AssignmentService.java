@@ -28,7 +28,13 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.time.DayOfWeek;
+import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -72,6 +78,102 @@ public class AssignmentService {
         }
     }
 
+    /** An employee cannot physically be at two sites during overlapping hours. Blocks
+     *  creating/updating an assignment only when its actual SHIFT TIME WINDOW (in each site's
+     *  own timezone, overnight shifts spanning into the next day) overlaps another active
+     *  assignment for the same employee at a DIFFERENT site, on a calendar day both assignments'
+     *  date range + daysOfWeek can actually reach. Same day, non-overlapping hours (e.g. Site A
+     *  morning, Site B evening) is explicitly ALLOWED — this is real, common multi-site staffing.
+     *  A shift-less assignment (no shiftId) is treated as occupying the whole day locally, since
+     *  no narrower time window was specified. Same-site overlap is a separate, pre-existing check
+     *  (the active-assignment-per-site uniqueness constraint).
+     *
+     *  Note: does not account for daylight-saving transitions (immaterial for this system's
+     *  current tenant timezones, all DST-free) — a representative calendar date is used to
+     *  resolve each side's local time window into a comparable UTC instant. */
+    private void assertNoCrossSiteConflict(UUID tenantId, UUID employeeId, UUID siteId, UUID shiftId,
+                                           LocalDate startDate, LocalDate endDate, Short daysOfWeekBitmask) {
+        List<Assignment> coarseConflicts = assignmentRepository.findActiveConflictsAtOtherSites(
+                tenantId, employeeId, siteId, startDate, endDate, daysOfWeekBitmask);
+        if (coarseConflicts.isEmpty()) {
+            return;
+        }
+
+        LocalDate farFuture = LocalDate.of(9999, 12, 31);
+        LocalDate myEnd = endDate != null ? endDate : farFuture;
+        Set<DayOfWeek> mine = DayOfWeekBitmask.fromBitmask(daysOfWeekBitmask);
+
+        for (Assignment other : coarseConflicts) {
+            LocalDate overlapStart = startDate.isAfter(other.getStartDate()) ? startDate : other.getStartDate();
+            LocalDate otherEnd = other.getEndDate() != null ? other.getEndDate() : farFuture;
+            LocalDate overlapEnd = myEnd.isBefore(otherEnd) ? myEnd : otherEnd;
+            if (overlapStart.isAfter(overlapEnd)) {
+                continue;
+            }
+
+            Set<DayOfWeek> theirs = DayOfWeekBitmask.fromBitmask(other.getDaysOfWeek());
+            for (DayOfWeek dow : DayOfWeek.values()) {
+                if (mine != null && !mine.contains(dow)) continue;
+                if (theirs != null && !theirs.contains(dow)) continue;
+
+                LocalDate onDate = firstDateOnOrAfterWithWeekday(overlapStart, dow);
+                if (onDate == null || onDate.isAfter(overlapEnd)) {
+                    continue;
+                }
+
+                if (timeWindowsOverlap(siteId, shiftId, other.getSiteId(), other.getShiftId(), onDate)) {
+                    String otherSiteName = siteRepository
+                            .findByIdAndTenantIdAndDeletedAtIsNull(other.getSiteId(), tenantId)
+                            .map(com.fams.modules.site.entity.Site::getName)
+                            .orElse(other.getSiteId().toString());
+                    throw new DuplicateResourceException(
+                            "Employee already has an overlapping active assignment at site '" + otherSiteName
+                                    + "' during this period — the shift hours overlap");
+                }
+            }
+        }
+    }
+
+    private LocalDate firstDateOnOrAfterWithWeekday(LocalDate from, DayOfWeek weekday) {
+        int diff = (weekday.getValue() - from.getDayOfWeek().getValue() + 7) % 7;
+        return from.plusDays(diff);
+    }
+
+    /** True if the [startTime,endTime) window of (siteId1, shiftId1) on {@code onDate} overlaps
+     *  the window of (siteId2, shiftId2) on the same calendar date, comparing actual UTC
+     *  instants (each site's own timezone applied) rather than raw local times. A null shiftId
+     *  is treated as occupying the full local calendar day. */
+    private boolean timeWindowsOverlap(UUID siteId1, UUID shiftId1, UUID siteId2, UUID shiftId2, LocalDate onDate) {
+        Instant[] w1 = resolveTimeWindow(siteId1, shiftId1, onDate);
+        Instant[] w2 = resolveTimeWindow(siteId2, shiftId2, onDate);
+        return w1[0].isBefore(w2[1]) && w2[0].isBefore(w1[1]);
+    }
+
+    private Instant[] resolveTimeWindow(UUID siteId, UUID shiftId, LocalDate onDate) {
+        String timezone = siteRepository.findById(siteId)
+                .map(com.fams.modules.site.entity.Site::getTimezone)
+                .orElse("UTC");
+        ZoneId zone = ZoneId.of(timezone);
+
+        if (shiftId == null) {
+            Instant start = onDate.atStartOfDay(zone).toInstant();
+            Instant end = onDate.plusDays(1).atStartOfDay(zone).toInstant();
+            return new Instant[]{start, end};
+        }
+
+        return shiftRepository.findById(shiftId)
+                .map(shift -> {
+                    LocalDate endDate = shift.isAllowOvernight() ? onDate.plusDays(1) : onDate;
+                    Instant start = ZonedDateTime.of(onDate, shift.getStartTime(), zone).toInstant();
+                    Instant end = ZonedDateTime.of(endDate, shift.getEndTime(), zone).toInstant();
+                    return new Instant[]{start, end};
+                })
+                .orElseGet(() -> new Instant[]{
+                        onDate.atStartOfDay(zone).toInstant(),
+                        onDate.plusDays(1).atStartOfDay(zone).toInstant()
+                });
+    }
+
     @Transactional
     public AssignmentResponse createAssignment(UUID tenantId, UUID siteId,
                                                CreateAssignmentRequest request,
@@ -92,15 +194,25 @@ public class AssignmentService {
         siteRepository.findByIdAndTenantIdAndDeletedAtIsNull(siteId, tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Site not found: " + siteId));
 
-        employeeRepository.findByIdAndTenantIdAndDeletedAtIsNull(request.getEmployeeId(), tenantId)
+        com.fams.modules.employee.entity.Employee employee = employeeRepository
+                .findByIdAndTenantIdAndDeletedAtIsNull(request.getEmployeeId(), tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException(
                         "Employee not found: " + request.getEmployeeId()));
 
+        if ("terminated".equals(employee.getStatus())) {
+            throw new IllegalArgumentException(
+                    "Cannot assign a terminated employee to a site");
+        }
+
         if (request.getShiftId() != null) {
-            shiftRepository.findByIdAndSiteIdAndTenantIdAndDeletedAtIsNull(
-                    request.getShiftId(), siteId, tenantId)
+            com.fams.modules.shift.entity.Shift shift = shiftRepository
+                    .findByIdAndSiteIdAndTenantIdAndDeletedAtIsNull(request.getShiftId(), siteId, tenantId)
                     .orElseThrow(() -> new ResourceNotFoundException(
                             "Shift not found for this site: " + request.getShiftId()));
+            if (!"active".equals(shift.getStatus())) {
+                throw new IllegalArgumentException(
+                        "Shift '" + shift.getName() + "' is inactive and can no longer be assigned");
+            }
         }
 
         if (request.getEndDate() != null && request.getEndDate().isBefore(request.getStartDate())) {
@@ -117,6 +229,10 @@ public class AssignmentService {
                     "Employee already has an active assignment at this site");
         }
 
+        Short daysOfWeekBitmask = DayOfWeekBitmask.toBitmask(request.getDaysOfWeek());
+        assertNoCrossSiteConflict(tenantId, request.getEmployeeId(), siteId, request.getShiftId(),
+                request.getStartDate(), request.getEndDate(), daysOfWeekBitmask);
+
         Assignment assignment = Assignment.builder()
                 .tenantId(tenantId)
                 .siteId(siteId)
@@ -124,7 +240,7 @@ public class AssignmentService {
                 .shiftId(request.getShiftId())
                 .startDate(request.getStartDate())
                 .endDate(request.getEndDate())
-                .daysOfWeek(DayOfWeekBitmask.toBitmask(request.getDaysOfWeek()))
+                .daysOfWeek(daysOfWeekBitmask)
                 .role(request.getRole() != null ? request.getRole() : "worker")
                 .status("active")
                 .notes(request.getNotes())
@@ -169,7 +285,23 @@ public class AssignmentService {
                 StringUtils.hasText(role) ? role : null, employeeId, shiftId);
         Page<Assignment> resultPage = assignmentRepository.findAll(spec, pageable);
 
-        return PageResponse.from(resultPage.map(this::toResponse));
+        List<UUID> employeeIds = resultPage.getContent().stream()
+                .map(Assignment::getEmployeeId).distinct().toList();
+        List<UUID> shiftIds = resultPage.getContent().stream()
+                .map(Assignment::getShiftId).filter(java.util.Objects::nonNull).distinct().toList();
+
+        Map<UUID, com.fams.modules.employee.entity.Employee> employeesById = employeeIds.isEmpty()
+                ? Map.of()
+                : employeeRepository.findAllById(employeeIds).stream()
+                        .collect(java.util.stream.Collectors.toMap(
+                                com.fams.modules.employee.entity.Employee::getId, e -> e));
+        Map<UUID, com.fams.modules.shift.entity.Shift> shiftsById = shiftIds.isEmpty()
+                ? Map.of()
+                : shiftRepository.findAllById(shiftIds).stream()
+                        .collect(java.util.stream.Collectors.toMap(
+                                com.fams.modules.shift.entity.Shift::getId, s -> s));
+
+        return PageResponse.from(resultPage.map(a -> toResponse(a, employeesById, shiftsById)));
     }
 
     @Transactional
@@ -199,10 +331,14 @@ public class AssignmentService {
         if (request.isClearShift()) {
             assignment.setShiftId(null);
         } else if (request.getShiftId() != null) {
-            shiftRepository.findByIdAndSiteIdAndTenantIdAndDeletedAtIsNull(
-                    request.getShiftId(), siteId, tenantId)
+            com.fams.modules.shift.entity.Shift shift = shiftRepository
+                    .findByIdAndSiteIdAndTenantIdAndDeletedAtIsNull(request.getShiftId(), siteId, tenantId)
                     .orElseThrow(() -> new ResourceNotFoundException(
                             "Shift not found for this site: " + request.getShiftId()));
+            if (!"active".equals(shift.getStatus())) {
+                throw new IllegalArgumentException(
+                        "Shift '" + shift.getName() + "' is inactive and can no longer be assigned");
+            }
             assignment.setShiftId(request.getShiftId());
         }
 
@@ -231,6 +367,11 @@ public class AssignmentService {
 
         if (StringUtils.hasText(request.getRole())) assignment.setRole(request.getRole());
         if (request.getNotes() != null) assignment.setNotes(request.getNotes().isBlank() ? null : request.getNotes());
+
+        if ("active".equals(assignment.getStatus())) {
+            assertNoCrossSiteConflict(tenantId, assignment.getEmployeeId(), siteId, assignment.getShiftId(),
+                    assignment.getStartDate(), assignment.getEndDate(), assignment.getDaysOfWeek());
+        }
 
         assignmentRepository.save(assignment);
         log.info("Assignment updated: id={} siteId={} tenantId={} by={}",
@@ -282,13 +423,51 @@ public class AssignmentService {
         return assignmentRepository.countBySiteIdAndStatusAndDeletedAtIsNull(siteId, "active");
     }
 
+    /** Single-item variant — looks up employee/shift individually. For lists, use the
+     *  batch-loaded overload below to avoid N+1 queries. */
     public AssignmentResponse toResponse(Assignment a) {
+        com.fams.modules.employee.entity.Employee employee = employeeRepository.findById(a.getEmployeeId())
+                .orElse(null);
+        com.fams.modules.shift.entity.Shift shift = a.getShiftId() != null
+                ? shiftRepository.findById(a.getShiftId()).orElse(null) : null;
+        return toResponse(a, employee, shift);
+    }
+
+    private AssignmentResponse toResponse(Assignment a,
+                                          Map<UUID, com.fams.modules.employee.entity.Employee> employeesById,
+                                          Map<UUID, com.fams.modules.shift.entity.Shift> shiftsById) {
+        return toResponse(a, employeesById.get(a.getEmployeeId()),
+                a.getShiftId() != null ? shiftsById.get(a.getShiftId()) : null);
+    }
+
+    private AssignmentResponse toResponse(Assignment a,
+                                          com.fams.modules.employee.entity.Employee employee,
+                                          com.fams.modules.shift.entity.Shift shift) {
+        AssignmentResponse.EmployeeSummary employeeSummary = employee == null ? null :
+                AssignmentResponse.EmployeeSummary.builder()
+                        .id(employee.getId())
+                        .employeeCode(employee.getEmployeeCode())
+                        .fullName(employee.getFirstName() + " " + employee.getLastName())
+                        .status(employee.getStatus())
+                        .build();
+
+        AssignmentResponse.ShiftSummary shiftSummary = shift == null ? null :
+                AssignmentResponse.ShiftSummary.builder()
+                        .id(shift.getId())
+                        .name(shift.getName())
+                        .startTime(shift.getStartTime())
+                        .endTime(shift.getEndTime())
+                        .status(shift.getStatus())
+                        .build();
+
         return AssignmentResponse.builder()
                 .id(a.getId())
                 .tenantId(a.getTenantId())
                 .siteId(a.getSiteId())
                 .employeeId(a.getEmployeeId())
                 .shiftId(a.getShiftId())
+                .employeeSummary(employeeSummary)
+                .shiftSummary(shiftSummary)
                 .startDate(a.getStartDate())
                 .endDate(a.getEndDate())
                 .daysOfWeek(DayOfWeekBitmask.fromBitmask(a.getDaysOfWeek()))

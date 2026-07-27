@@ -12,8 +12,6 @@ import com.fams.modules.employee.entity.Employee;
 import com.fams.modules.employee.repository.EmployeeRepository;
 import com.fams.modules.rbac.repository.UserRoleRepository;
 import com.fams.modules.rbac.service.SiteScopeService;
-import com.fams.modules.shift.entity.Shift;
-import com.fams.modules.shift.repository.ShiftRepository;
 import com.fams.modules.site.entity.Site;
 import com.fams.modules.site.repository.SiteRepository;
 import com.fams.shared.exception.ResourceNotFoundException;
@@ -29,6 +27,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
 import java.time.LocalDate;
+import java.time.LocalTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
@@ -50,7 +49,6 @@ public class AttendanceSummaryService {
     private final AttendanceSummaryRepository summaryRepository;
     private final CheckinRepository checkinRepository;
     private final SiteRepository siteRepository;
-    private final ShiftRepository shiftRepository;
     private final EmployeeRepository employeeRepository;
     private final UserRoleRepository userRoleRepository;
     private final SiteScopeService siteScopeService;
@@ -58,14 +56,12 @@ public class AttendanceSummaryService {
     public AttendanceSummaryService(AttendanceSummaryRepository summaryRepository,
                                     CheckinRepository checkinRepository,
                                     SiteRepository siteRepository,
-                                    ShiftRepository shiftRepository,
                                     EmployeeRepository employeeRepository,
                                     UserRoleRepository userRoleRepository,
                                     SiteScopeService siteScopeService) {
         this.summaryRepository = summaryRepository;
         this.checkinRepository = checkinRepository;
         this.siteRepository = siteRepository;
-        this.shiftRepository = shiftRepository;
         this.employeeRepository = employeeRepository;
         this.userRoleRepository = userRoleRepository;
         this.siteScopeService = siteScopeService;
@@ -211,52 +207,61 @@ public class AttendanceSummaryService {
         boolean hasOpenSession = sessions.stream().anyMatch(c -> c.getCheckOutAt() == null);
         String status = hasOpenSession ? "incomplete" : "present";
 
-        // Tasks 81-83: late, early-leave, and OT detection all require the shift
+        // Tasks 81-83: late, early-leave, and OT detection all require the shift's time-affecting
+        // fields — sourced from each session's OWN snapshot (captured at check-in time), never a
+        // live Shift re-fetch, so a Shift edited after these sessions occurred can never change
+        // an already-computed day's late/early/OT figures (payroll/audit correctness).
         boolean isLate = false;
         int lateMinutes = 0;
         boolean isEarlyLeave = false;
         int earlyLeaveMinutes = 0;
         int otMinutes = 0;
 
-        if (shiftId != null) {
-            Shift shift = shiftRepository
-                    .findByIdAndSiteIdAndTenantIdAndDeletedAtIsNull(shiftId, siteId, tenantId)
-                    .orElse(null);
-            if (shift != null) {
-                // For overnight shifts the shift end is on the next calendar day.
-                LocalDate endDate = shift.isAllowOvernight() ? date.plusDays(1) : date;
-                ZonedDateTime shiftStart = ZonedDateTime.of(date, shift.getStartTime(), zone);
-                ZonedDateTime shiftEnd   = ZonedDateTime.of(endDate, shift.getEndTime(), zone);
+        CheckinRecord shiftSnapshotSource = sessions.stream()
+                .filter(s -> s.getShiftStartTime() != null && s.getShiftEndTime() != null)
+                .findFirst().orElse(null);
 
-                // Task 81: late detection — first check-in vs shift start
-                if (firstCheckinAt != null) {
-                    ZonedDateTime actualStart = firstCheckinAt.atZoneSameInstant(zone);
-                    if (actualStart.isAfter(shiftStart)) {
-                        lateMinutes = (int) Duration.between(shiftStart, actualStart).toMinutes();
-                        isLate = lateMinutes > 0;
-                    }
+        if (shiftSnapshotSource != null) {
+            LocalTime startTime = shiftSnapshotSource.getShiftStartTime();
+            LocalTime endTime = shiftSnapshotSource.getShiftEndTime();
+            boolean allowOvernight = Boolean.TRUE.equals(shiftSnapshotSource.getShiftAllowOvernight());
+            boolean allowOvertime = Boolean.TRUE.equals(shiftSnapshotSource.getShiftAllowOvertime());
+            int lateCheckoutMinutes = shiftSnapshotSource.getShiftLateCheckoutMinutes() != null
+                    ? shiftSnapshotSource.getShiftLateCheckoutMinutes() : 0;
+
+            // For overnight shifts the shift end is on the next calendar day.
+            LocalDate endDate = allowOvernight ? date.plusDays(1) : date;
+            ZonedDateTime shiftStart = ZonedDateTime.of(date, startTime, zone);
+            ZonedDateTime shiftEnd   = ZonedDateTime.of(endDate, endTime, zone);
+
+            // Task 81: late detection — first check-in vs shift start
+            if (firstCheckinAt != null) {
+                ZonedDateTime actualStart = firstCheckinAt.atZoneSameInstant(zone);
+                if (actualStart.isAfter(shiftStart)) {
+                    lateMinutes = (int) Duration.between(shiftStart, actualStart).toMinutes();
+                    isLate = lateMinutes > 0;
                 }
+            }
 
-                // Task 82: early-leave detection — last check-out vs shift end (only when all sessions complete)
-                if (lastCheckoutAt != null && !hasOpenSession) {
-                    ZonedDateTime actualEnd = lastCheckoutAt.atZoneSameInstant(zone);
-                    if (actualEnd.isBefore(shiftEnd)) {
-                        earlyLeaveMinutes = (int) Duration.between(actualEnd, shiftEnd).toMinutes();
-                        isEarlyLeave = earlyLeaveMinutes > 0;
-                    }
+            // Task 82: early-leave detection — last check-out vs shift end (only when all sessions complete)
+            if (lastCheckoutAt != null && !hasOpenSession) {
+                ZonedDateTime actualEnd = lastCheckoutAt.atZoneSameInstant(zone);
+                if (actualEnd.isBefore(shiftEnd)) {
+                    earlyLeaveMinutes = (int) Duration.between(actualEnd, shiftEnd).toMinutes();
+                    isEarlyLeave = earlyLeaveMinutes > 0;
                 }
+            }
 
-                // Task 83: OT — minutes worked beyond shift end, capped per session by lateCheckoutMinutes.
-                // Only counted when the shift explicitly allows overtime.
-                if (shift.isAllowOvertime()) {
-                    ZonedDateTime otCap = shiftEnd.plusMinutes(shift.getLateCheckoutMinutes());
-                    for (CheckinRecord session : sessions) {
-                        if (session.getCheckOutAt() == null) continue;
-                        ZonedDateTime checkOut = session.getCheckOutAt().atZoneSameInstant(zone);
-                        if (checkOut.isAfter(shiftEnd)) {
-                            ZonedDateTime effectiveEnd = checkOut.isAfter(otCap) ? otCap : checkOut;
-                            otMinutes += (int) Duration.between(shiftEnd, effectiveEnd).toMinutes();
-                        }
+            // Task 83: OT — minutes worked beyond shift end, capped per session by lateCheckoutMinutes.
+            // Only counted when the shift explicitly allows overtime.
+            if (allowOvertime) {
+                ZonedDateTime otCap = shiftEnd.plusMinutes(lateCheckoutMinutes);
+                for (CheckinRecord session : sessions) {
+                    if (session.getCheckOutAt() == null) continue;
+                    ZonedDateTime checkOut = session.getCheckOutAt().atZoneSameInstant(zone);
+                    if (checkOut.isAfter(shiftEnd)) {
+                        ZonedDateTime effectiveEnd = checkOut.isAfter(otCap) ? otCap : checkOut;
+                        otMinutes += (int) Duration.between(shiftEnd, effectiveEnd).toMinutes();
                     }
                 }
             }

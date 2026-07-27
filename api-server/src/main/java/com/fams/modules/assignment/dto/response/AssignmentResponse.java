@@ -31,6 +31,12 @@ public class AssignmentResponse {
     @Schema(description = "Shift template UUID, or null if not linked to a specific shift")
     private UUID shiftId;
 
+    @Schema(description = "Brief employee details, avoids a follow-up lookup when rendering a list of assignments")
+    private EmployeeSummary employeeSummary;
+
+    @Schema(description = "Brief shift details (name/hours), null if not linked to a shift")
+    private ShiftSummary shiftSummary;
+
     @Schema(description = "Assignment start date", example = "2026-07-01")
     @JsonFormat(pattern = "yyyy-MM-dd")
     private LocalDate startDate;
@@ -60,4 +66,44 @@ public class AssignmentResponse {
 
     @Schema(description = "Last update timestamp")
     private OffsetDateTime updatedAt;
+
+    @Data
+    @Builder
+    @Schema(description = "Brief employee details embedded in the assignment response")
+    public static class EmployeeSummary {
+        @Schema(description = "Employee UUID")
+        private UUID id;
+
+        @Schema(description = "Internal employee code", example = "EMP-001")
+        private String employeeCode;
+
+        @Schema(description = "Full name", example = "John Doe")
+        private String fullName;
+
+        @Schema(description = "Employment status", example = "active",
+                allowableValues = {"active", "inactive", "terminated"})
+        private String status;
+    }
+
+    @Data
+    @Builder
+    @Schema(description = "Brief shift details embedded in the assignment response")
+    public static class ShiftSummary {
+        @Schema(description = "Shift UUID")
+        private UUID id;
+
+        @Schema(description = "Shift name", example = "Morning Shift")
+        private String name;
+
+        @Schema(description = "Shift start time (HH:mm)", example = "08:00")
+        @JsonFormat(pattern = "HH:mm")
+        private java.time.LocalTime startTime;
+
+        @Schema(description = "Shift end time (HH:mm)", example = "17:00")
+        @JsonFormat(pattern = "HH:mm")
+        private java.time.LocalTime endTime;
+
+        @Schema(description = "Shift status: active or inactive", example = "active")
+        private String status;
+    }
 }

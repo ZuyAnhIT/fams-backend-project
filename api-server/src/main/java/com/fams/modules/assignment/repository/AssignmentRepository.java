@@ -114,4 +114,42 @@ public interface AssignmentRepository extends JpaRepository<Assignment, UUID>,
             @Param("siteId") UUID siteId,
             @Param("today") LocalDate today,
             @Param("dayBit") int dayBit);
+
+    /** An employee physically cannot be at two sites at once. Finds any OTHER active
+     *  assignment for this employee (at a site other than the one being created/updated)
+     *  whose date range and daysOfWeek bitmask overlap the given window — used to block
+     *  double-booking across sites. Date-range overlap treats a null end as open-ended;
+     *  daysOfWeek overlap treats a null bitmask (either side) as "every day". */
+    @Query(value = "SELECT * FROM assignments a WHERE a.tenant_id = :tenantId AND a.employee_id = :employeeId " +
+           "AND a.site_id <> :excludeSiteId AND a.status = 'active' AND a.deleted_at IS NULL " +
+           "AND a.start_date <= COALESCE(CAST(:endDate AS date), 'infinity'::date) " +
+           "AND (a.end_date IS NULL OR a.end_date >= CAST(:startDate AS date)) " +
+           "AND (a.days_of_week IS NULL OR :dayBits IS NULL OR (a.days_of_week & CAST(:dayBits AS smallint)) <> 0)",
+           nativeQuery = true)
+    List<Assignment> findActiveConflictsAtOtherSites(
+            @Param("tenantId") UUID tenantId,
+            @Param("employeeId") UUID employeeId,
+            @Param("excludeSiteId") UUID excludeSiteId,
+            @Param("startDate") LocalDate startDate,
+            @Param("endDate") LocalDate endDate,
+            @Param("dayBits") Short dayBits);
+
+    /** Used by ShiftService.deleteShift — a shift can only be hard-deleted if it has never
+     *  been referenced by any assignment (active or historical); otherwise deactivate instead
+     *  to preserve history. */
+    boolean existsByShiftId(UUID shiftId);
+
+    /** Used by ShiftService to populate ShiftResponse.assignmentHistoryCount/canDelete for a
+     *  single shift, without a separate exists-check query. */
+    long countByShiftId(UUID shiftId);
+
+    /** Batch variant for listShifts — avoids one count query per row in the page. */
+    @Query("SELECT a.shiftId AS shiftId, COUNT(a) AS cnt FROM Assignment a "
+            + "WHERE a.shiftId IN :shiftIds GROUP BY a.shiftId")
+    List<ShiftAssignmentCount> countByShiftIdIn(@Param("shiftIds") Collection<UUID> shiftIds);
+
+    interface ShiftAssignmentCount {
+        UUID getShiftId();
+        long getCnt();
+    }
 }
