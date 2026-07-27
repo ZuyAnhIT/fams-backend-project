@@ -3,6 +3,7 @@ package com.fams.modules.checkin.entity;
 import jakarta.persistence.*;
 import lombok.*;
 
+import java.time.LocalTime;
 import java.time.OffsetDateTime;
 import java.util.UUID;
 
@@ -33,6 +34,24 @@ public class CheckinRecord {
 
     @Column(name = "shift_id")
     private UUID shiftId;
+
+    // Snapshot of the shift's time-affecting fields AS OF check-in time — never re-derived from
+    // a live Shift lookup afterward, so editing the Shift later (payroll/audit correctness) can
+    // never retroactively change how this record's work-minutes/late/OT were computed.
+    @Column(name = "shift_start_time")
+    private LocalTime shiftStartTime;
+
+    @Column(name = "shift_end_time")
+    private LocalTime shiftEndTime;
+
+    @Column(name = "shift_allow_overnight")
+    private Boolean shiftAllowOvernight;
+
+    @Column(name = "shift_allow_overtime")
+    private Boolean shiftAllowOvertime;
+
+    @Column(name = "shift_late_checkout_minutes")
+    private Integer shiftLateCheckoutMinutes;
 
     @Column(nullable = false, length = 20)
     private String status;

@@ -7,6 +7,7 @@ import com.fams.modules.shift.dto.request.UpdateShiftRequest;
 import com.fams.modules.shift.dto.response.ShiftResponse;
 import com.fams.modules.shift.entity.Shift;
 import com.fams.modules.shift.repository.ShiftRepository;
+import com.fams.modules.assignment.repository.AssignmentRepository;
 import com.fams.modules.site.repository.SiteRepository;
 import com.fams.modules.tenant.repository.TenantRepository;
 import com.fams.shared.exception.DuplicateResourceException;
@@ -22,7 +23,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -34,15 +37,18 @@ public class ShiftService {
     private final SiteRepository siteRepository;
     private final TenantRepository tenantRepository;
     private final UserRoleRepository userRoleRepository;
+    private final AssignmentRepository assignmentRepository;
 
     public ShiftService(ShiftRepository shiftRepository,
                         SiteRepository siteRepository,
                         TenantRepository tenantRepository,
-                        UserRoleRepository userRoleRepository) {
+                        UserRoleRepository userRoleRepository,
+                        AssignmentRepository assignmentRepository) {
         this.shiftRepository = shiftRepository;
         this.siteRepository = siteRepository;
         this.tenantRepository = tenantRepository;
         this.userRoleRepository = userRoleRepository;
+        this.assignmentRepository = assignmentRepository;
     }
 
     @Transactional
@@ -190,7 +196,51 @@ public class ShiftService {
                 ? shiftRepository.findBySiteIdAndTenantIdAndStatusAndDeletedAtIsNull(siteId, tenantId, status, pageable)
                 : shiftRepository.findBySiteIdAndTenantIdAndDeletedAtIsNull(siteId, tenantId, pageable);
 
-        return PageResponse.from(resultPage.map(this::toResponse));
+        List<UUID> shiftIds = resultPage.getContent().stream().map(Shift::getId).toList();
+        Map<UUID, Long> historyCounts = new HashMap<>();
+        if (!shiftIds.isEmpty()) {
+            for (AssignmentRepository.ShiftAssignmentCount row : assignmentRepository.countByShiftIdIn(shiftIds)) {
+                historyCounts.put(row.getShiftId(), row.getCnt());
+            }
+        }
+
+        return PageResponse.from(resultPage.map(s ->
+                toResponse(s, historyCounts.getOrDefault(s.getId(), 0L))));
+    }
+
+    @Transactional
+    public void deleteShift(UUID tenantId, UUID siteId, UUID shiftId,
+                            UUID callerUserId, boolean callerIsPlatformAdmin) {
+        tenantRepository.findByIdAndDeletedAtIsNull(tenantId)
+                .orElseThrow(() -> new ResourceNotFoundException("Tenant not found: " + tenantId));
+
+        if (!callerIsPlatformAdmin) {
+            Set<String> permissions = userRoleRepository
+                    .findPermissionNamesByUserIdAndTenantId(callerUserId, tenantId);
+            if (!permissions.contains("shifts:delete")) {
+                throw new AccessDeniedException(
+                        "You do not have permission to delete shifts in this tenant");
+            }
+        }
+
+        siteRepository.findByIdAndTenantIdAndDeletedAtIsNull(siteId, tenantId)
+                .orElseThrow(() -> new ResourceNotFoundException("Site not found: " + siteId));
+
+        Shift shift = shiftRepository.findByIdAndSiteIdAndTenantIdAndDeletedAtIsNull(shiftId, siteId, tenantId)
+                .orElseThrow(() -> new ResourceNotFoundException("Shift not found: " + shiftId));
+
+        // Unlike Workspace/Site delete, this blocks on ANY assignment ever having referenced
+        // the shift (not just currently-active ones) — deleting must never lose history.
+        // Use "deactivate" (status=inactive) instead if the shift has ever been used.
+        if (assignmentRepository.existsByShiftId(shiftId)) {
+            throw new IllegalArgumentException(
+                    "Shift '" + shift.getName() + "' has been used by at least one assignment and cannot be "
+                            + "deleted — use deactivate instead to preserve history");
+        }
+
+        shift.setDeletedAt(java.time.OffsetDateTime.now());
+        shiftRepository.save(shift);
+        log.info("Shift deleted: id={} siteId={} tenantId={} by={}", shiftId, siteId, tenantId, callerUserId);
     }
 
     @Transactional(readOnly = true)
@@ -203,6 +253,10 @@ public class ShiftService {
     }
 
     public ShiftResponse toResponse(Shift s) {
+        return toResponse(s, assignmentRepository.countByShiftId(s.getId()));
+    }
+
+    private ShiftResponse toResponse(Shift s, long assignmentHistoryCount) {
         return ShiftResponse.builder()
                 .id(s.getId())
                 .siteId(s.getSiteId())
@@ -215,6 +269,8 @@ public class ShiftService {
                 .earlyCheckinMinutes(s.getEarlyCheckinMinutes())
                 .lateCheckoutMinutes(s.getLateCheckoutMinutes())
                 .status(s.getStatus())
+                .assignmentHistoryCount(assignmentHistoryCount)
+                .canDelete(assignmentHistoryCount == 0)
                 .createdBy(s.getCreatedBy())
                 .createdAt(s.getCreatedAt())
                 .updatedAt(s.getUpdatedAt())

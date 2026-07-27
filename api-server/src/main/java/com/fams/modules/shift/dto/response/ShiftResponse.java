@@ -49,6 +49,12 @@ public class ShiftResponse {
     @Schema(description = "Status: active or inactive", example = "active")
     private String status;
 
+    @Schema(description = "Number of assignments (active or historical) that have ever referenced this shift.", example = "0")
+    private long assignmentHistoryCount;
+
+    @Schema(description = "Whether DELETE would succeed right now — true only when assignmentHistoryCount is 0. Use this to enable/disable the delete button without a trial call.", example = "true")
+    private boolean canDelete;
+
     @Schema(description = "UUID of the user who created this shift")
     private UUID createdBy;
 

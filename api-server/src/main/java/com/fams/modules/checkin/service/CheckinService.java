@@ -138,11 +138,17 @@ public class CheckinService {
                                     + existing.getCheckInAt() + "). Please check out first.");
                 });
 
-        // Task 71: Early check-in validation
+        // Task 71: Early check-in validation. Also resolved here (once) to snapshot its
+        // time-affecting fields onto the CheckinRecord being created — see the field-level
+        // comment on CheckinRecord for why this must never be re-fetched live afterward.
+        Shift resolvedShift = null;
         if (assignment.getShiftId() != null) {
-            shiftRepository.findByIdAndSiteIdAndTenantIdAndDeletedAtIsNull(
+            resolvedShift = shiftRepository.findByIdAndSiteIdAndTenantIdAndDeletedAtIsNull(
                             assignment.getShiftId(), site.getId(), tenantId)
-                    .ifPresent(shift -> validateNotTooEarly(shift, site.getTimezone()));
+                    .orElse(null);
+            if (resolvedShift != null) {
+                validateNotTooEarly(resolvedShift, site.getTimezone());
+            }
         }
 
         // Geofence validation via PostGIS
@@ -167,6 +173,11 @@ public class CheckinService {
                 .employeeId(employee.getId())
                 .assignmentId(assignment.getId())
                 .shiftId(assignment.getShiftId())
+                .shiftStartTime(resolvedShift != null ? resolvedShift.getStartTime() : null)
+                .shiftEndTime(resolvedShift != null ? resolvedShift.getEndTime() : null)
+                .shiftAllowOvernight(resolvedShift != null ? resolvedShift.isAllowOvernight() : null)
+                .shiftAllowOvertime(resolvedShift != null ? resolvedShift.isAllowOvertime() : null)
+                .shiftLateCheckoutMinutes(resolvedShift != null ? resolvedShift.getLateCheckoutMinutes() : null)
                 .status(status)
                 .checkInAt(OffsetDateTime.now())
                 .checkInLat(request.getLatitude())
@@ -237,22 +248,17 @@ public class CheckinService {
 
         OffsetDateTime checkOutAt = OffsetDateTime.now();
 
-        // Task 73: apply late-checkout cap if record is linked to a shift
-        Shift shift = null;
-        String siteTimezone = "UTC";
-        if (record.getShiftId() != null) {
-            Site site = siteRepository
-                    .findByIdAndTenantIdAndDeletedAtIsNull(record.getSiteId(), tenantId)
-                    .orElse(null);
-            if (site != null) {
-                siteTimezone = site.getTimezone();
-                shift = shiftRepository
-                        .findByIdAndSiteIdAndTenantIdAndDeletedAtIsNull(
-                                record.getShiftId(), record.getSiteId(), tenantId)
-                        .orElse(null);
-            }
-        }
-        int workMinutes = computeWorkMinutes(record.getCheckInAt(), checkOutAt, shift, siteTimezone);
+        // Task 73: apply late-checkout cap using the shift snapshot captured at check-in time
+        // (never a live re-fetch — see CheckinRecord field comment) so a Shift edit made after
+        // this employee already checked in can never change how this session's hours are counted.
+        String siteTimezone = siteRepository
+                .findByIdAndTenantIdAndDeletedAtIsNull(record.getSiteId(), tenantId)
+                .map(Site::getTimezone)
+                .orElse("UTC");
+        int workMinutes = computeWorkMinutes(record.getCheckInAt(), checkOutAt,
+                record.getShiftStartTime(), record.getShiftEndTime(),
+                record.getShiftAllowOvernight(), record.getShiftAllowOvertime(),
+                record.getShiftLateCheckoutMinutes(), siteTimezone);
 
         // Escalate to pending_review if checkout is outside geofence
         if (!insideGeofence && "valid".equals(record.getStatus())) {
@@ -302,26 +308,36 @@ public class CheckinService {
      *
      * When no shift is linked, raw duration (checkInAt → checkOutAt) is returned.
      * Handles overnight shifts (endTime on checkInDate + 1 day).
+     *
+     * Takes the shift's time-affecting fields directly (snapshotted onto the CheckinRecord at
+     * check-in — see the field comment there) rather than a live {@code Shift} lookup, so a
+     * Shift edited after this employee already checked in cannot change this computation.
      */
     private int computeWorkMinutes(OffsetDateTime checkInAt, OffsetDateTime checkOutAt,
-                                    Shift shift, String siteTimezone) {
-        if (shift == null) {
+                                    LocalTime shiftStartTime, LocalTime shiftEndTime,
+                                    Boolean shiftAllowOvernight, Boolean shiftAllowOvertime,
+                                    Integer shiftLateCheckoutMinutes, String siteTimezone) {
+        if (shiftStartTime == null || shiftEndTime == null) {
             return Math.max(0, (int) Duration.between(checkInAt, checkOutAt).toMinutes());
         }
 
+        boolean allowOvernight = Boolean.TRUE.equals(shiftAllowOvernight);
+        boolean allowOvertime = Boolean.TRUE.equals(shiftAllowOvertime);
+        int lateCheckoutMinutes = shiftLateCheckoutMinutes != null ? shiftLateCheckoutMinutes : 0;
+
         ZoneId zone = ZoneId.of(siteTimezone);
         LocalDate checkInDate = checkInAt.atZoneSameInstant(zone).toLocalDate();
-        LocalDate endDate = shift.isAllowOvernight() ? checkInDate.plusDays(1) : checkInDate;
+        LocalDate endDate = allowOvernight ? checkInDate.plusDays(1) : checkInDate;
 
         // Effective start: earliest payable moment is when the shift actually begins.
-        ZonedDateTime shiftStart = ZonedDateTime.of(checkInDate, shift.getStartTime(), zone);
+        ZonedDateTime shiftStart = ZonedDateTime.of(checkInDate, shiftStartTime, zone);
         ZonedDateTime effectiveStart = checkInAt.atZoneSameInstant(zone).isBefore(shiftStart)
                 ? shiftStart : checkInAt.atZoneSameInstant(zone);
 
         // Effective end: cap depends on whether overtime is counted.
-        ZonedDateTime shiftEnd = ZonedDateTime.of(endDate, shift.getEndTime(), zone);
-        ZonedDateTime effectiveEnd = shift.isAllowOvertime()
-                ? shiftEnd.plusMinutes(shift.getLateCheckoutMinutes())
+        ZonedDateTime shiftEnd = ZonedDateTime.of(endDate, shiftEndTime, zone);
+        ZonedDateTime effectiveEnd = allowOvertime
+                ? shiftEnd.plusMinutes(lateCheckoutMinutes)
                 : shiftEnd;
         ZonedDateTime checkOutZdt = checkOutAt.atZoneSameInstant(zone);
         if (checkOutZdt.isBefore(effectiveEnd)) {
