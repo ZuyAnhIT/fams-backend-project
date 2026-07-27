@@ -18,6 +18,7 @@ import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
@@ -56,6 +57,7 @@ public class GeofenceController {
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404",
             description = "Tenant or site not found")
     })
+    @PreAuthorize("hasAuthority('geofences:create')")
     @PostMapping
     public ResponseEntity<ApiResponse<GeofenceResponse>> createGeofence(
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
@@ -84,6 +86,7 @@ public class GeofenceController {
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404",
             description = "Tenant or site not found")
     })
+    @PreAuthorize("hasAuthority('geofences:read')")
     @GetMapping
     public ResponseEntity<ApiResponse<PageResponse<GeofenceResponse>>> listGeofenceHistory(
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
@@ -119,6 +122,7 @@ public class GeofenceController {
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404",
             description = "Tenant, site, or active geofence not found")
     })
+    @PreAuthorize("hasAuthority('geofences:update')")
     @PutMapping("/active")
     public ResponseEntity<ApiResponse<GeofenceResponse>> updateGeofence(
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
@@ -148,6 +152,7 @@ public class GeofenceController {
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404",
             description = "Tenant, site, or active geofence not found")
     })
+    @PreAuthorize("hasAuthority('geofences:read')")
     @GetMapping("/active")
     public ResponseEntity<ApiResponse<GeofenceResponse>> getActiveGeofence(
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,

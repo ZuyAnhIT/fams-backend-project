@@ -54,7 +54,7 @@ public class SiteDetailResponse {
     @Schema(description = "Active shift templates configured for this site, ordered by start time")
     private List<ShiftResponse> shifts;
 
-    @Schema(description = "Number of currently active employee assignments — populated when assignment module is implemented (task 63)")
+    @Schema(description = "Number of currently active employee assignments at this site")
     private int activeAssignmentCount;
 
     @Schema(description = "Creation timestamp")

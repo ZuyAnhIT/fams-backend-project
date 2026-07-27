@@ -6,6 +6,7 @@ import com.fams.modules.geofence.dto.response.GeofenceResponse;
 import com.fams.modules.geofence.entity.Geofence;
 import com.fams.modules.geofence.repository.GeofenceRepository;
 import com.fams.modules.rbac.repository.UserRoleRepository;
+import com.fams.modules.rbac.service.SiteScopeService;
 import com.fams.modules.site.repository.SiteRepository;
 import com.fams.modules.tenant.repository.TenantRepository;
 import com.fams.shared.exception.ResourceNotFoundException;
@@ -31,15 +32,29 @@ public class GeofenceService {
     private final SiteRepository siteRepository;
     private final TenantRepository tenantRepository;
     private final UserRoleRepository userRoleRepository;
+    private final SiteScopeService siteScopeService;
 
     public GeofenceService(GeofenceRepository geofenceRepository,
                            SiteRepository siteRepository,
                            TenantRepository tenantRepository,
-                           UserRoleRepository userRoleRepository) {
+                           UserRoleRepository userRoleRepository,
+                           SiteScopeService siteScopeService) {
         this.geofenceRepository = geofenceRepository;
         this.siteRepository = siteRepository;
         this.tenantRepository = tenantRepository;
         this.userRoleRepository = userRoleRepository;
+        this.siteScopeService = siteScopeService;
+    }
+
+    /** Shared GeoJSON-ring validation: enforced here rather than at the DTO layer since it needs
+     *  to compare the first and last elements of the list, not just its size. */
+    private void assertClosedRing(List<List<Double>> coordinates) {
+        List<Double> first = coordinates.get(0);
+        List<Double> last = coordinates.get(coordinates.size() - 1);
+        if (!first.get(0).equals(last.get(0)) || !first.get(1).equals(last.get(1))) {
+            throw new IllegalArgumentException(
+                    "Polygon ring must be closed — the last coordinate pair must equal the first");
+        }
     }
 
     @Transactional
@@ -60,6 +75,12 @@ public class GeofenceService {
 
         siteRepository.findByIdAndTenantIdAndDeletedAtIsNull(siteId, tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Site not found: " + siteId));
+
+        if (!siteScopeService.isSiteAllowed(callerUserId, tenantId, siteId, callerIsPlatformAdmin)) {
+            throw new AccessDeniedException("You do not have permission to manage geofences for this site");
+        }
+
+        assertClosedRing(request.getCoordinates());
 
         // Supersede the current active geofence (if any)
         geofenceRepository.supersedeBySiteId(siteId);
@@ -96,6 +117,10 @@ public class GeofenceService {
         siteRepository.findByIdAndTenantIdAndDeletedAtIsNull(siteId, tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Site not found: " + siteId));
 
+        if (!siteScopeService.isSiteAllowed(callerUserId, tenantId, siteId, callerIsPlatformAdmin)) {
+            throw new AccessDeniedException("You do not have permission to view geofences for this site");
+        }
+
         return geofenceRepository
                 .findBySiteIdAndStatusAndDeletedAtIsNull(siteId, "active")
                 .map(this::toResponse)
@@ -121,6 +146,10 @@ public class GeofenceService {
         siteRepository.findByIdAndTenantIdAndDeletedAtIsNull(siteId, tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Site not found: " + siteId));
 
+        if (!siteScopeService.isSiteAllowed(callerUserId, tenantId, siteId, callerIsPlatformAdmin)) {
+            throw new AccessDeniedException("You do not have permission to manage geofences for this site");
+        }
+
         Geofence current = geofenceRepository
                 .findBySiteIdAndStatusAndDeletedAtIsNull(siteId, "active")
                 .orElseThrow(() -> new ResourceNotFoundException(
@@ -128,6 +157,10 @@ public class GeofenceService {
 
         if (request.getCoordinates() == null && request.getBufferMeters() == null) {
             throw new IllegalArgumentException("At least one of coordinates or bufferMeters must be provided");
+        }
+
+        if (request.getCoordinates() != null) {
+            assertClosedRing(request.getCoordinates());
         }
 
         List<List<Double>> newCoordinates = request.getCoordinates() != null
@@ -172,6 +205,10 @@ public class GeofenceService {
 
         siteRepository.findByIdAndTenantIdAndDeletedAtIsNull(siteId, tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Site not found: " + siteId));
+
+        if (!siteScopeService.isSiteAllowed(callerUserId, tenantId, siteId, callerIsPlatformAdmin)) {
+            throw new AccessDeniedException("You do not have permission to view geofences for this site");
+        }
 
         Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
         return PageResponse.from(

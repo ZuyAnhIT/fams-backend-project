@@ -250,6 +250,35 @@ public class SiteService {
                 .build();
     }
 
+    @Transactional
+    public void deleteSite(UUID tenantId, UUID siteId, UUID callerUserId, boolean callerIsPlatformAdmin) {
+        tenantRepository.findByIdAndDeletedAtIsNull(tenantId)
+                .orElseThrow(() -> new ResourceNotFoundException("Tenant not found: " + tenantId));
+
+        if (!callerIsPlatformAdmin) {
+            Set<String> permissions = userRoleRepository
+                    .findPermissionNamesByUserIdAndTenantId(callerUserId, tenantId);
+            if (!permissions.contains("sites:delete")) {
+                throw new AccessDeniedException(
+                        "You do not have permission to delete sites in this tenant");
+            }
+        }
+
+        Site site = siteRepository.findByIdAndTenantIdAndDeletedAtIsNull(siteId, tenantId)
+                .orElseThrow(() -> new ResourceNotFoundException("Site not found: " + siteId));
+
+        long activeAssignments = assignmentService.countActiveAssignmentsForSite(siteId);
+        if (activeAssignments > 0) {
+            throw new IllegalArgumentException(
+                    "Site still has " + activeAssignments
+                            + " active assignment(s). Reassign or end them before deleting.");
+        }
+
+        site.setDeletedAt(java.time.OffsetDateTime.now());
+        siteRepository.save(site);
+        log.info("Site deleted: id={} tenantId={} by={}", siteId, tenantId, callerUserId);
+    }
+
     public SiteResponse toResponse(Site s) {
         return SiteResponse.builder()
                 .id(s.getId())
