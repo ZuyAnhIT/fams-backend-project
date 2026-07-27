@@ -48,13 +48,14 @@ t_resp=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/tenants" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"name\":\"List Shift Corp ${TS}\",\"slug\":\"list-shift-${TS}\"}")
+    -d "{\"name\":\"List Shift Corp ${TS}\",\"slug\":\"list-shift-${TS}\",\"ownerEmail\":\"admin@fams.com\"}")
 t_body=$(echo "$t_resp" | head -n -1)
 if [ "$(echo "$t_resp" | tail -n 1)" -ne 201 ]; then
     echo "SETUP FAILED: Could not create tenant"
     exit 1
 fi
 TENANT_ID=$(echo "$t_body" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+curl -s -o /dev/null -X PATCH "$BASE_URL/api/v1/tenants/$TENANT_ID/subscription" -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" -d '{"planId":"fc259250-bf91-4341-907e-00fa84587c38"}'  # bump trial->enterprise so site-limit (1) does not block multi-site tests
 
 s_resp=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/tenants/$TENANT_ID/sites" \

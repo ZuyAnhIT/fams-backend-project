@@ -144,8 +144,8 @@ public class SiteController {
     @Operation(
         summary = "Get site detail",
         description = "Returns the full detail of a site including its active geofence, shift templates, " +
-                      "and active assignment count. Geofence and shifts are null/empty until those modules " +
-                      "are implemented (tasks 56 and 59). " +
+                      "and active assignment count. `geofence` is null if none has been defined yet; " +
+                      "`shifts` is an empty list if no shift templates exist yet for this site. " +
                       "Requires sites:read permission. Callable by TENANT_ADMIN, HR_MANAGER, or SITE_SUPERVISOR."
     )
     @ApiResponses({
@@ -169,5 +169,35 @@ public class SiteController {
         SiteDetailResponse response = siteService.getSiteDetail(
                 tenantId, siteId, userDetails.getUserId(), userDetails.isPlatformAdmin());
         return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    @Operation(
+        summary = "Delete site",
+        description = "Soft-deletes a site. Blocked if it still has active assignments — reassign or end " +
+                      "them first. Geofence history and shift templates are retained (orphaned but still " +
+                      "queryable for audit) since the site record itself is only soft-deleted. " +
+                      "Requires sites:delete permission. Callable by TENANT_ADMIN or HR_MANAGER."
+    )
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200",
+            description = "Site deleted"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400",
+            description = "Site still has active assignments"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401",
+            description = "Unauthorized"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403",
+            description = "Insufficient permissions"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404",
+            description = "Tenant or site not found")
+    })
+    @PreAuthorize("hasAuthority('sites:delete')")
+    @DeleteMapping("/{siteId}")
+    public ResponseEntity<ApiResponse<Void>> deleteSite(
+            @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
+            @Parameter(description = "Site UUID") @PathVariable UUID siteId,
+            @AuthenticationPrincipal FamsUserDetails userDetails) {
+        log.info("Delete site siteId={} tenantId={} by={}", siteId, tenantId, userDetails.getUserId());
+        siteService.deleteSite(tenantId, siteId, userDetails.getUserId(), userDetails.isPlatformAdmin());
+        return ResponseEntity.ok(ApiResponse.success(null));
     }
 }
