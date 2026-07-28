@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 import numpy as np
 from fastapi import FastAPI
 
-from app.routers import enroll, health, status
+from app.routers import embeddings, enroll, health, liveness_challenge, status
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -49,3 +49,5 @@ app = FastAPI(title="FAMS AI Service", version="1.0.0", lifespan=lifespan)
 app.include_router(health.router)
 app.include_router(enroll.router)
 app.include_router(status.router)
+app.include_router(embeddings.router)
+app.include_router(liveness_challenge.router)

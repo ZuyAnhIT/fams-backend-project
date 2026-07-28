@@ -44,4 +44,13 @@ public class FaceIdReportRow {
 
     @Schema(description = "When Face ID was revoked (null if not revoked)", example = "null")
     private OffsetDateTime revokedAt;
+
+    @Schema(description = "Review state of the most recent submission: none | pending | rejected", example = "none")
+    private String reviewStatus;
+
+    @Schema(description = "When the pending/last batch was submitted for review (null if none)", example = "null")
+    private OffsetDateTime submittedAt;
+
+    @Schema(description = "Why the last submission was rejected, null unless reviewStatus=rejected", example = "null")
+    private String rejectionReason;
 }

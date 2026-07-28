@@ -37,4 +37,9 @@ public class CreateSiteRequest {
     @Schema(description = "Timezone for the site (IANA tz name, default: UTC)", example = "Asia/Ho_Chi_Minh")
     @Size(max = 50, message = "Timezone must be 50 characters or fewer")
     private String timezone;
+
+    @Schema(description = "If true, check-in at this site requires a Face ID photo that passes "
+            + "verification — a missing photo is rejected outright, and a failed match/liveness "
+            + "check flags the check-in for HR review. Default false.", defaultValue = "false")
+    private boolean requireFaceIdCheckin;
 }

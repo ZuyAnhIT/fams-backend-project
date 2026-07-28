@@ -14,7 +14,11 @@ import com.fams.modules.checkin.dto.response.CheckinResponse;
 import com.fams.modules.checkin.entity.CheckinRecord;
 import com.fams.modules.checkin.repository.CheckinRepository;
 import com.fams.modules.employee.entity.Employee;
+import com.fams.modules.employee.entity.FaceProfile;
+import com.fams.modules.employee.entity.LivenessChallenge;
 import com.fams.modules.employee.repository.EmployeeRepository;
+import com.fams.modules.employee.repository.FaceProfileRepository;
+import com.fams.modules.employee.repository.LivenessChallengeRepository;
 import com.fams.modules.geofence.entity.Geofence;
 import com.fams.modules.geofence.repository.GeofenceRepository;
 import com.fams.modules.shift.entity.Shift;
@@ -57,6 +61,7 @@ public class CheckinService {
 
     private static final Set<String> SORTABLE_FIELDS =
             Set.of("checkInAt", "checkOutAt", "status", "siteId", "employeeId", "createdAt");
+    private static final int CHECKIN_CHALLENGE_FRESHNESS_MINUTES = 2;
 
     private final EmployeeRepository employeeRepository;
     private final AssignmentService assignmentService;
@@ -68,6 +73,8 @@ public class CheckinService {
     private final SiteScopeService siteScopeService;
     private final AttendanceSummaryService attendanceSummaryService;
     private final FaceVerifyJobPublisher faceVerifyJobPublisher;
+    private final FaceProfileRepository faceProfileRepository;
+    private final LivenessChallengeRepository livenessChallengeRepository;
 
     public CheckinService(EmployeeRepository employeeRepository,
                           AssignmentService assignmentService,
@@ -78,7 +85,9 @@ public class CheckinService {
                           UserRoleRepository userRoleRepository,
                           SiteScopeService siteScopeService,
                           AttendanceSummaryService attendanceSummaryService,
-                          FaceVerifyJobPublisher faceVerifyJobPublisher) {
+                          FaceVerifyJobPublisher faceVerifyJobPublisher,
+                          FaceProfileRepository faceProfileRepository,
+                          LivenessChallengeRepository livenessChallengeRepository) {
         this.employeeRepository = employeeRepository;
         this.assignmentService = assignmentService;
         this.siteRepository = siteRepository;
@@ -89,6 +98,8 @@ public class CheckinService {
         this.siteScopeService = siteScopeService;
         this.attendanceSummaryService = attendanceSummaryService;
         this.faceVerifyJobPublisher = faceVerifyJobPublisher;
+        this.faceProfileRepository = faceProfileRepository;
+        this.livenessChallengeRepository = livenessChallengeRepository;
     }
 
     // ── Task 67: Available sites ──────────────────────────────────────────────
@@ -137,6 +148,65 @@ public class CheckinService {
                     "Địa điểm này hiện không hoạt động, không thể chấm công.",
                     HttpStatus.UNPROCESSABLE_ENTITY,
                     "Site status is '" + site.getStatus() + "', not active");
+        }
+
+        // Sites can require Face ID for check-in (Site.requireFaceIdCheckin). Enforced here, not
+        // trusted from the client. A required site needs a PASSED active-liveness challenge
+        // (livenessChallengeId) — a raw employeePhotoBase64 is not accepted here, since that
+        // would let the App silently downgrade a policy-mandated check to a single static photo.
+        // An enrolled face is also required up front, so the employee gets a clear "go enroll
+        // first" message instead of a check-in that silently sails through unverified. A
+        // challenge that then FAILS the async embedding match is not blocked synchronously (the
+        // AI call is async) — instead FaceResultCallbackController escalates this check-in to
+        // pending_review + creates a violation once the result comes back, mirroring how the
+        // random-check module already treats face_fail/liveness_fail.
+        LivenessChallenge checkinChallenge = null;
+        if (site.isRequireFaceIdCheckin()) {
+            if (request.getLivenessChallengeId() == null) {
+                throw new BusinessException(
+                        "FACE_ID_REQUIRED",
+                        "Công trình này yêu cầu xác thực khuôn mặt chủ động (quay đầu/nháy mắt theo yêu cầu) khi chấm công.",
+                        HttpStatus.UNPROCESSABLE_ENTITY,
+                        "Site '" + site.getName() + "' requires a passed active-liveness challenge to check in");
+            }
+            boolean hasEnrolledFace = faceProfileRepository.findByEmployeeIdAndTenantId(employee.getId(), tenantId)
+                    .map(p -> "enrolled".equals(p.getStatus()))
+                    .orElse(false);
+            if (!hasEnrolledFace) {
+                throw new BusinessException(
+                        "FACE_ID_NOT_ENROLLED",
+                        "Công trình này yêu cầu Face ID nhưng bạn chưa đăng ký (hoặc chưa được duyệt). "
+                                + "Vui lòng hoàn tất đăng ký Face ID trước.",
+                        HttpStatus.UNPROCESSABLE_ENTITY,
+                        "Employee has no approved Face ID enrollment, required by site '" + site.getName() + "'");
+            }
+            checkinChallenge = livenessChallengeRepository
+                    .findByIdAndTenantIdAndEmployeeId(request.getLivenessChallengeId(), tenantId, employee.getId())
+                    .filter(c -> "checkin".equals(c.getPurpose()) && "passed".equals(c.getStatus()))
+                    // Must have been started FOR this exact site — otherwise a challenge
+                    // completed at Site A could be carried over and spent at Site B.
+                    .filter(c -> request.getSiteId().equals(c.getSiteId()))
+                    // Must be fresh — a 'passed' challenge sitting unused for a long time is a
+                    // window for reuse far from where/when it was actually performed.
+                    .filter(c -> c.getCompletedAt() != null
+                            && c.getCompletedAt().isAfter(OffsetDateTime.now().minusMinutes(CHECKIN_CHALLENGE_FRESHNESS_MINUTES)))
+                    .orElseThrow(() -> new BusinessException(
+                            "FACE_ID_REQUIRED",
+                            "Xác thực khuôn mặt chủ động không hợp lệ, không đúng công trình này, hoặc đã hết hạn. "
+                                    + "Vui lòng thực hiện lại ngay tại đây.",
+                            HttpStatus.UNPROCESSABLE_ENTITY,
+                            "livenessChallengeId is not a passed, unconsumed, fresh 'checkin' challenge "
+                                    + "for this employee at this exact site"));
+
+            // Atomic claim, inside this same transaction as the checkin insert below: only
+            // succeeds if the challenge is STILL 'passed' at this exact instant, so two
+            // concurrent submitCheckin calls replaying the same challengeId can't both get
+            // through — the loser gets rowcount=0 here and the whole transaction (including any
+            // checkin row this method builds afterward) rolls back on the exception.
+            if (livenessChallengeRepository.consumeIfPassed(checkinChallenge.getId()) == 0) {
+                throw new DuplicateResourceException(
+                        "This active-liveness challenge was already used by another request. Please perform a new one.");
+            }
         }
 
         // Same site-timezone-aware resolution used by getAvailableSites, so the App can never
@@ -218,8 +288,27 @@ public class CheckinService {
         log.info("Check-in recorded: id={} employeeId={} siteId={} status={} insideGeofence={} riskScore={}",
                 record.getId(), employee.getId(), request.getSiteId(), status, insideGeofence, riskScore);
 
-        // Task 69/70: async face verification if photo provided
-        if (request.getEmployeePhotoBase64() != null && !request.getEmployeePhotoBase64().isBlank()) {
+        // Task 69/70 + active liveness: async face verification. A Face-ID-required site uses
+        // the already-verified challenge's stored frame (liveness already proven via the
+        // head-pose/blink sequence, so requiresLiveness is redundant there) — the challenge
+        // itself was already atomically consumed above, before this record was even built; a
+        // non-required site falls back to the original optional single-photo path unchanged.
+        if (checkinChallenge != null) {
+            try {
+                faceVerifyJobPublisher.publishFromChallenge(tenantId, employee.getId(), record.getId(),
+                        "checkin", checkinChallenge.getId());
+            } catch (Exception e) {
+                // At a Face-ID-required site, "couldn't even ask the AI worker to check" must
+                // not silently leave the checkin looking fully valid — escalate to pending_review
+                // (not a violation: this is an infra failure, not a proven face mismatch).
+                log.warn("Failed to publish face verify job from challenge for checkin {}: {}",
+                        record.getId(), e.getMessage());
+                if ("valid".equals(record.getStatus())) {
+                    record.setStatus("pending_review");
+                    checkinRepository.save(record);
+                }
+            }
+        } else if (request.getEmployeePhotoBase64() != null && !request.getEmployeePhotoBase64().isBlank()) {
             try {
                 faceVerifyJobPublisher.publish(tenantId, employee.getId(), record.getId(),
                         "checkin", request.getEmployeePhotoBase64(), request.isRequiresLiveness());
@@ -816,6 +905,7 @@ public class CheckinService {
                 .latitude(site.getLatitude())
                 .longitude(site.getLongitude())
                 .timezone(site.getTimezone())
+                .requireFaceIdCheckin(site.isRequireFaceIdCheckin())
                 .build();
     }
 

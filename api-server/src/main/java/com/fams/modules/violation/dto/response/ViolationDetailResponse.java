@@ -32,6 +32,10 @@ public class ViolationDetailResponse {
     @Schema(description = "Check response UUID (null if employee never responded)")
     private UUID checkResponseId;
 
+    @Schema(description = "Check-in UUID — set when this violation came from a regular check-in "
+            + "at a Face-ID-required site failing verification (null for random-check violations)")
+    private UUID checkinId;
+
     @Schema(description = "Violation type",
             allowableValues = {"no_response", "location_fail", "face_fail", "liveness_fail"})
     private String violationType;

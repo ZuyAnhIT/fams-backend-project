@@ -45,6 +45,9 @@ public class SiteDetailResponse {
     @Schema(description = "Status: active or inactive", example = "active")
     private String status;
 
+    @Schema(description = "Whether check-in at this site requires a passing Face ID verification", example = "false")
+    private boolean requireFaceIdCheckin;
+
     @Schema(description = "UUID of the user who created the site")
     private UUID createdBy;
 

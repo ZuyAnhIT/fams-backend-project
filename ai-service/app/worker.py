@@ -17,19 +17,47 @@ logger = logging.getLogger(__name__)
 QUEUE_KEY = "fams:ai:face_verify_jobs"
 
 
+def _load_challenge_frame(challenge_id: str, tenant_id: str, employee_id: str) -> bytes | None:
+    """Active-liveness path: load the already-verified center frame from disk instead of
+    receiving fresh base64 bytes in the job payload."""
+    from app.services.storage_service import read_photo
+
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT center_frame_path, status FROM liveness_challenges "
+                "WHERE id = %s::uuid AND tenant_id = %s::uuid AND employee_id = %s::uuid",
+                (challenge_id, tenant_id, employee_id),
+            )
+            row = cur.fetchone()
+    finally:
+        put_conn(conn)
+
+    if row is None or row[1] != "passed" or not row[0]:
+        return None
+    return read_photo(row[0])
+
+
 def _process_job(job_data: dict) -> None:
     source_id: str = job_data["source_id"]
     source_type: str = job_data["source_type"]
     tenant_id: str = job_data["tenant_id"]
     employee_id: str = job_data["employee_id"]
-    face_image_base64: str = job_data["face_image_base64"]
     requires_liveness: bool = job_data.get("requires_liveness", False)
 
-    try:
-        image_bytes = base64.b64decode(face_image_base64)
-    except Exception:
-        send_face_result(source_id, tenant_id, source_type, False, None, None, "invalid_image")
-        return
+    challenge_id = job_data.get("challenge_id")
+    if challenge_id:
+        image_bytes = _load_challenge_frame(challenge_id, tenant_id, employee_id)
+        if image_bytes is None:
+            send_face_result(source_id, tenant_id, source_type, False, None, None, "challenge_not_found")
+            return
+    else:
+        try:
+            image_bytes = base64.b64decode(job_data["face_image_base64"])
+        except Exception:
+            send_face_result(source_id, tenant_id, source_type, False, None, None, "invalid_image")
+            return
 
     save_checkin_photo(tenant_id, source_id, image_bytes)
 

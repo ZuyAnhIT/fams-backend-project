@@ -44,4 +44,8 @@ public class UpdateSiteRequest {
             allowableValues = {"active", "inactive"})
     @Pattern(regexp = "^(active|inactive)$", message = "Status must be 'active' or 'inactive'")
     private String status;
+
+    @Schema(description = "If true, check-in at this site requires a Face ID photo that passes "
+            + "verification. Omit to leave unchanged.", nullable = true)
+    private Boolean requireFaceIdCheckin;
 }
