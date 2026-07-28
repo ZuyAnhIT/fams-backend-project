@@ -60,8 +60,26 @@ Ký hiệu: **Full** = thao tác đầy đủ · **View** = chỉ xem · **Ẩn*
 ### 3.3 Màn "Site được phép check-in hôm nay" (App)
 
 - Đã có sẵn, không cần dựng thêm logic — chỉ cần gọi đúng 1 API, hiển thị danh sách card: tên site, địa chỉ, ca (nếu có, kèm giờ bắt đầu/kết thúc), khoảng cách tới geofence nếu muốn (tính từ tọa độ site — không cần vẽ polygon, xem `site-geofence-ui-permissions-guide.md` mục 1.1).
-- Nếu danh sách rỗng (nhân viên chưa được phân công gì hôm nay), hiện thông báo rõ ràng "Bạn chưa được phân công công trình nào hôm nay — liên hệ HR/quản lý" thay vì màn trắng.
+- Nếu danh sách rỗng (nhân viên chưa được phân công gì hôm nay **hoặc** nhân viên không còn `active` — xem 3.4), hiện thông báo rõ ràng "Bạn chưa được phân công công trình nào hôm nay — liên hệ HR/quản lý" thay vì màn trắng.
 - **Sau đợt sửa lần này**: danh sách này về mặt lý thuyết không còn khả năng hiện 2 site trùng giờ cho cùng 1 người nữa (đã chặn từ gốc ở bước tạo/sửa phân công) — nhưng FE vẫn nên xử lý an toàn nếu app hiện ra >1 kết quả cùng lúc (ví dụ 2 site không trùng giờ nhưng cùng ngày), không giả định luôn chỉ có đúng 1 kết quả.
+
+### 3.4 [MỚI] Cập nhật theo báo cáo App team (27/07/2026) — 4 field mới + mã lỗi mới trên màn chấm công
+
+Chi tiết kỹ thuật đầy đủ ở `docs/api/shift-assignment-management-api.md` mục 0.2. Việc App cần làm trên UI:
+
+- **Dùng `availabilityStatus` để tô trạng thái từng card** thay vì tự tính giờ ở client (tránh lệch múi giờ/logic ca-qua-đêm với backend):
+  - `unrestricted` — không ràng buộc giờ, nút "Chấm công" luôn bật.
+  - `upcoming` — chưa tới giờ, nút disable + hiện đếm ngược tới `checkinAllowedFrom`.
+  - `open` — trong cửa sổ cho phép, nút bật.
+  - `closed` — ca đã kết thúc (`checkinAllowedUntil` đã qua), nút disable + label "Ca đã kết thúc" thay vì để người dùng bấm rồi nhận lỗi.
+  - Dùng `serverNow` (không phải giờ máy điện thoại) làm mốc "bây giờ" nếu tự tính đếm ngược ở client, để tránh lệch khi giờ máy sai.
+- **Bắt thêm 3 mã lỗi mới khi submit chấm công** (trước đây App chỉ cần xử lý `CHECKIN_TOO_EARLY`):
+  | errorCode | HTTP | Hiển thị gợi ý |
+  |---|---|---|
+  | `EMPLOYEE_NOT_ACTIVE` | 403 | Không nên xảy ra nếu FE đã lọc theo 3.3 (danh sách rỗng khi không active) — nhưng vẫn nên có màn chặn rõ ràng phòng trường hợp trạng thái đổi giữa lúc tải danh sách và lúc bấm chấm công |
+  | `SITE_INACTIVE` | 422 | "Công trình này hiện không hoạt động, vui lòng liên hệ quản lý" |
+  | `CHECKIN_TOO_LATE` | 422 | "Ca làm việc đã kết thúc, không thể chấm công" — nên hiếm gặp nếu FE đã disable nút khi `availabilityStatus=closed`, nhưng vẫn cần xử lý (race condition giữa lúc mở màn và lúc bấm) |
+  | `DUPLICATE_RESOURCE` (đổi hành vi) | 409 | Trước đây chỉ nghĩa "đã chấm công ca này rồi"; giờ nghĩa rộng hơn: "đang có phiên chấm công MỞ ở site khác chưa checkout" — nên đổi message hiển thị thành "Bạn đang có phiên chấm công chưa hoàn tất ở {site trong message lỗi} — vui lòng checkout trước" thay vì giả định luôn là cùng site |
 
 ## 4. Sơ đồ nav đề xuất
 
@@ -94,3 +112,6 @@ MOBILE APP (fams-front-app-project)
 - [ ] **Mới**: dùng `canDelete`/`assignmentHistoryCount` có sẵn trong `ShiftResponse` để bật/tắt nút Xóa ca — không cần tự đếm hay bắt lỗi `400` để suy ra trạng thái.
 - [ ] **Mới**: dùng `employeeSummary`/`shiftSummary` có sẵn trong `AssignmentResponse` khi render bảng/chi tiết phân công — không cần tự gọi thêm API Employee/Shift theo từng dòng.
 - [ ] **Mới**: "sáng Site A, tối Site B cùng ngày" giờ được phép (trước đây có thể bị `409` nhầm) — nếu FE từng tự chặn trường hợp này ở client trước khi submit, gỡ bỏ chặn đó, chỉ dựa vào phản hồi backend.
+- [ ] **Mới (0.2)**: dùng `availabilityStatus`/`checkinAllowedFrom`/`checkinAllowedUntil`/`serverNow` mới trong `available-sites` để disable nút "Chấm công" đúng lúc (`upcoming`/`closed`) thay vì để người dùng bấm rồi nhận lỗi — xem mục 3.4.
+- [ ] **Mới (0.2)**: bắt thêm 3 mã lỗi mới khi submit chấm công: `EMPLOYEE_NOT_ACTIVE` (403), `SITE_INACTIVE` (422), `CHECKIN_TOO_LATE` (422) — xem bảng mục 3.4.
+- [ ] **Mới (0.2)**: đổi message hiển thị cho lỗi `409 DUPLICATE_RESOURCE` khi chấm công — không còn nghĩa "đã chấm công ca này", giờ nghĩa "đang có phiên mở ở site khác chưa checkout", dùng site/giờ trong message lỗi trả về thay vì hardcode.

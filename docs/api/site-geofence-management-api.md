@@ -2,6 +2,12 @@
 
 > Cập nhật theo code đang chạy ngày 26/07/2026. Base path: `/api/v1/tenants/{tenantId}/sites` và `/api/v1/tenants/{tenantId}/sites/{siteId}/geofences`.
 
+## 0.1 [MỚI] Bản vá theo báo cáo App team (27/07/2026) — timezone site không được validate
+
+Phát hiện qua báo cáo App team (chi tiết đầy đủ ở `docs/api/shift-assignment-management-api.md` mục 0.2, vì gốc rễ vấn đề nằm ở luồng chấm công): `timezone` của Site chỉ bị giới hạn độ dài (`@Size(max=50)`), không kiểm tra là một IANA zone ID hợp lệ (ví dụ `"Not/AZone"` vẫn được lưu). Hậu quả: lỗi chỉ lộ ra thành `500 Internal Server Error` **về sau**, tại thời điểm chấm công/tính công (`ZoneId.of()` ném exception), thay vì bị chặn ngay lúc tạo/sửa site.
+
+**Đã sửa**: `SiteService.validateTimezone()` — validate bằng `ZoneId.of()` ngay trong `createSite`/`updateSite`, trả `400 Bad Request` với message rõ ràng (`"'X' is not a valid IANA timezone name (e.g. 'Asia/Ho_Chi_Minh', 'UTC')"`) thay vì cho lưu giá trị rác. Test sống: tạo site với `timezone: "Not/AZone"` → `400` ngay (trước đây `201`, lỗi chỉ lộ khi chấm công).
+
 ## 0. Tóm tắt kết quả
 
 **7 tính năng bạn liệt kê đã được xây dựng đầy đủ, đúng nghiệp vụ từ trước** — tạo/danh sách/chi tiết/cập nhật công trình, tạo/sửa geofence, và **lịch sử geofence đã hoạt động thật** (không phải tính năng thiếu như tên gọi "muốn xem" gợi ý — cơ chế audit timeline đã có sẵn dưới dạng versioning ngay trong bảng `geofences`). Qua review đối chiếu với các hệ thống workforce/GPS-attendance thực tế (Deputy, Connecteam, Busy Bee — đều có khái niệm "Location" với geofence buffer/polygon tách biệt khỏi cơ cấu tổ chức), tôi tìm thấy **1 khoảng trống nghiêm trọng hơn mức tôi ước tính ban đầu** (Geofence hoàn toàn không kiểm tra site-scope — một SITE_SUPERVISOR bị giới hạn 1 site vẫn xem/sửa được geofence của site khác), **1 lỗ hổng phòng thủ 2 lớp bị thiếu** (GeofenceController không có `@PreAuthorize` như mọi controller khác), **1 tính năng bị bỏ dở** (`sites:delete` đã seed nhưng chưa có endpoint), **1 lỗi validate chưa khớp tài liệu** (API doc/Schema tuyên bố "polygon phải khép kín" nhưng code chưa từng kiểm tra điều này), và **2 dòng Javadoc lỗi thời** (nói geofence/shift/assignment "chưa được xây" dù cả 3 module đã hoạt động đầy đủ).

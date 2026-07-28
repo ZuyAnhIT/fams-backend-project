@@ -1,8 +1,7 @@
 package com.fams.modules.checkin.service;
 
 import com.fams.modules.assignment.entity.Assignment;
-import com.fams.modules.assignment.repository.AssignmentRepository;
-import com.fams.modules.assignment.util.DayOfWeekBitmask;
+import com.fams.modules.assignment.service.AssignmentService;
 import com.fams.modules.attendance.service.AttendanceSummaryService;
 import com.fams.modules.checkin.dto.request.OverrideCheckinRequest;
 import com.fams.modules.checkin.dto.request.SubmitCheckinRequest;
@@ -40,6 +39,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.OffsetDateTime;
@@ -59,7 +59,7 @@ public class CheckinService {
             Set.of("checkInAt", "checkOutAt", "status", "siteId", "employeeId", "createdAt");
 
     private final EmployeeRepository employeeRepository;
-    private final AssignmentRepository assignmentRepository;
+    private final AssignmentService assignmentService;
     private final SiteRepository siteRepository;
     private final ShiftRepository shiftRepository;
     private final GeofenceRepository geofenceRepository;
@@ -70,7 +70,7 @@ public class CheckinService {
     private final FaceVerifyJobPublisher faceVerifyJobPublisher;
 
     public CheckinService(EmployeeRepository employeeRepository,
-                          AssignmentRepository assignmentRepository,
+                          AssignmentService assignmentService,
                           SiteRepository siteRepository,
                           ShiftRepository shiftRepository,
                           GeofenceRepository geofenceRepository,
@@ -80,7 +80,7 @@ public class CheckinService {
                           AttendanceSummaryService attendanceSummaryService,
                           FaceVerifyJobPublisher faceVerifyJobPublisher) {
         this.employeeRepository = employeeRepository;
-        this.assignmentRepository = assignmentRepository;
+        this.assignmentService = assignmentService;
         this.siteRepository = siteRepository;
         this.shiftRepository = shiftRepository;
         this.geofenceRepository = geofenceRepository;
@@ -96,17 +96,23 @@ public class CheckinService {
     @Transactional(readOnly = true)
     public List<AvailableSiteResponse> getAvailableSites(UUID tenantId, UUID callerUserId) {
         Employee employee = resolveEmployee(tenantId, callerUserId);
+        if (!"active".equals(employee.getStatus())) {
+            // Inactive/terminated employees have nothing to check into — an empty list (not an
+            // error) since this is a passive query, not an attempted action.
+            return List.of();
+        }
 
-        LocalDate today = LocalDate.now();
-        List<Assignment> assignments = assignmentRepository
-                .findActiveAssignmentsForEmployeeOnDate(tenantId, employee.getId(), today,
-                        DayOfWeekBitmask.bitForDate(today));
+        // Resolved per-assignment in the SITE's own timezone (not the server's default zone),
+        // including overnight shifts that started site-local "yesterday" and are still open —
+        // see AssignmentService.resolveAvailableAssignmentsNow.
+        List<AssignmentService.AssignmentAvailability> availabilities =
+                assignmentService.resolveAvailableAssignmentsNow(tenantId, employee.getId());
 
-        log.info("Available sites query: tenantId={} employeeId={} date={} found={}",
-                tenantId, employee.getId(), today, assignments.size());
+        log.info("Available sites query: tenantId={} employeeId={} found={}",
+                tenantId, employee.getId(), availabilities.size());
 
-        return assignments.stream()
-                .map(a -> buildAvailableSiteResponse(a, tenantId))
+        return availabilities.stream()
+                .map(av -> buildAvailableSiteResponse(av, tenantId))
                 .toList();
     }
 
@@ -115,41 +121,53 @@ public class CheckinService {
     @Transactional
     public CheckinResponse submitCheckin(UUID tenantId, SubmitCheckinRequest request, UUID callerUserId) {
         Employee employee = resolveEmployee(tenantId, callerUserId);
+        if (!"active".equals(employee.getStatus())) {
+            throw new BusinessException(
+                    "EMPLOYEE_NOT_ACTIVE",
+                    "Tài khoản nhân viên hiện không hoạt động, không thể chấm công.",
+                    HttpStatus.FORBIDDEN,
+                    "Employee status is '" + employee.getStatus() + "', not active");
+        }
 
         Site site = siteRepository.findByIdAndTenantIdAndDeletedAtIsNull(request.getSiteId(), tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Site not found: " + request.getSiteId()));
+        if (!"active".equals(site.getStatus())) {
+            throw new BusinessException(
+                    "SITE_INACTIVE",
+                    "Địa điểm này hiện không hoạt động, không thể chấm công.",
+                    HttpStatus.UNPROCESSABLE_ENTITY,
+                    "Site status is '" + site.getStatus() + "', not active");
+        }
 
-        // Validate active assignment for this employee at this site today
-        LocalDate today = LocalDate.now();
-        Assignment assignment = assignmentRepository
-                .findActiveAssignmentsForEmployeeOnDate(tenantId, employee.getId(), today,
-                        DayOfWeekBitmask.bitForDate(today))
-                .stream()
-                .filter(a -> a.getSiteId().equals(request.getSiteId()))
-                .findFirst()
+        // Same site-timezone-aware resolution used by getAvailableSites, so the App can never
+        // see a site listed as available and then have submitCheckin disagree about it.
+        AssignmentService.AssignmentAvailability availability = assignmentService
+                .resolveAvailableAssignmentForSiteNow(tenantId, employee.getId(), request.getSiteId())
                 .orElseThrow(() -> new ResourceNotFoundException(
                         "No active assignment found for this employee at site " + request.getSiteId() + " today"));
+        Assignment assignment = availability.assignment();
 
-        // Prevent duplicate open check-in for this assignment
-        checkinRepository.findByAssignmentIdAndCheckOutAtIsNullAndDeletedAtIsNull(assignment.getId())
+        // Prevent a duplicate open check-in for this EMPLOYEE — across any assignment/site, not
+        // just the one being checked into now, since an employee cannot physically be checked in
+        // at two places at once (P0-3). A unique partial index (V73) backs this at the DB level
+        // too, for the race window between this check and the insert below.
+        checkinRepository.findByTenantIdAndEmployeeIdAndCheckOutAtIsNullAndDeletedAtIsNull(
+                        tenantId, employee.getId())
                 .ifPresent(existing -> {
                     throw new DuplicateResourceException(
-                            "Employee already has an open check-in for this assignment (checked in at "
-                                    + existing.getCheckInAt() + "). Please check out first.");
+                            "Employee already has an open check-in at site " + existing.getSiteId()
+                                    + " (checked in at " + existing.getCheckInAt() + "). Please check out first.");
                 });
 
-        // Task 71: Early check-in validation. Also resolved here (once) to snapshot its
-        // time-affecting fields onto the CheckinRecord being created — see the field-level
-        // comment on CheckinRecord for why this must never be re-fetched live afterward.
-        Shift resolvedShift = null;
-        if (assignment.getShiftId() != null) {
-            resolvedShift = shiftRepository.findByIdAndSiteIdAndTenantIdAndDeletedAtIsNull(
-                            assignment.getShiftId(), site.getId(), tenantId)
-                    .orElse(null);
-            if (resolvedShift != null) {
-                validateNotTooEarly(resolvedShift, site.getTimezone());
-            }
-        }
+        // Task 71: Early/late check-in window validation, using the same site-local instants
+        // already resolved above. Also fetched here (once) to snapshot its time-affecting fields
+        // onto the CheckinRecord being created — see the field-level comment on CheckinRecord for
+        // why this must never be re-fetched live afterward.
+        validateCheckinWindow(availability);
+        Shift resolvedShift = assignment.getShiftId() != null
+                ? shiftRepository.findByIdAndSiteIdAndTenantIdAndDeletedAtIsNull(
+                        assignment.getShiftId(), site.getId(), tenantId).orElse(null)
+                : null;
 
         // Geofence validation via PostGIS
         boolean insideGeofence = true;
@@ -188,7 +206,15 @@ public class CheckinService {
                 .deviceId(request.getDeviceId())
                 .build();
 
-        checkinRepository.save(record);
+        try {
+            checkinRepository.save(record);
+        } catch (org.springframework.dao.DataIntegrityViolationException e) {
+            // Belt-and-suspenders for the race window on the in-service duplicate check above:
+            // the V73 partial unique index rejects a second concurrent open session for this
+            // employee at the DB level even if two requests passed the check almost simultaneously.
+            throw new DuplicateResourceException(
+                    "Employee already has an open check-in. Please check out first.");
+        }
         log.info("Check-in recorded: id={} employeeId={} siteId={} status={} insideGeofence={} riskScore={}",
                 record.getId(), employee.getId(), request.getSiteId(), status, insideGeofence, riskScore);
 
@@ -354,35 +380,38 @@ public class CheckinService {
     }
 
     /**
-     * Task 71: Reject check-in if current time (in site timezone) is before
-     * the shift's allowed early check-in window (shiftStart - earlyCheckinMinutes).
-     * Handles overnight shifts where startTime > endTime.
+     * Task 71 + P1-2: reject check-in if "now" (a real Instant, compared against instants
+     * already resolved in the assignment's site timezone by
+     * AssignmentService.resolveAvailableAssignmentsNow) falls before the shift's allowed
+     * early check-in window (shiftStart - earlyCheckinMinutes) OR at/after shift end — a shift
+     * that has already ended is not something you can newly check into. A shift-less assignment
+     * (checkinAllowedFrom/shiftStartInstant null) has no time restriction.
      */
-    private void validateNotTooEarly(Shift shift, String siteTimezone) {
-        ZoneId zone = ZoneId.of(siteTimezone);
-        LocalTime now = ZonedDateTime.now(zone).toLocalTime();
-        LocalTime allowedFrom = shift.getStartTime().minusMinutes(shift.getEarlyCheckinMinutes());
-
-        boolean tooEarly;
-        if (!shift.isAllowOvernight()) {
-            tooEarly = now.isBefore(allowedFrom);
-        } else {
-            // Overnight shift: startTime > endTime (e.g. 22:00 – 06:00).
-            // Valid when now is in [startTime, midnight) or [midnight, endTime).
-            boolean inOvernightWindow = now.compareTo(shift.getStartTime()) >= 0
-                    || now.isBefore(shift.getEndTime());
-            // If already in the overnight window, not too early.
-            tooEarly = !inOvernightWindow && now.isBefore(allowedFrom);
+    private void validateCheckinWindow(AssignmentService.AssignmentAvailability availability) {
+        if (availability.shiftStartInstant() == null) {
+            return;
         }
+        Instant now = Instant.now();
+        ZoneId zone = availability.siteZone();
 
-        if (tooEarly) {
+        if (now.isBefore(availability.checkinAllowedFrom())) {
+            LocalTime shiftStartLocal = availability.shiftStartInstant().atZone(zone).toLocalTime();
+            LocalTime allowedFromLocal = availability.checkinAllowedFrom().atZone(zone).toLocalTime();
             throw new BusinessException(
                     "CHECKIN_TOO_EARLY",
-                    "Bạn đang chấm công quá sớm. Ca làm việc bắt đầu lúc " + shift.getStartTime()
-                            + ". Vui lòng đợi đến " + allowedFrom + " (" + siteTimezone + ") để chấm công.",
+                    "Bạn đang chấm công quá sớm. Ca làm việc bắt đầu lúc " + shiftStartLocal
+                            + ". Vui lòng đợi đến " + allowedFromLocal + " (" + zone + ") để chấm công.",
                     HttpStatus.UNPROCESSABLE_ENTITY,
-                    "Too early to check in. Shift starts at " + shift.getStartTime()
-                            + ". Check-in allowed from " + allowedFrom + " (site timezone: " + siteTimezone + ")");
+                    "Too early to check in. Shift starts at " + shiftStartLocal
+                            + ". Check-in allowed from " + allowedFromLocal + " (site timezone: " + zone + ")");
+        }
+        if (!now.isBefore(availability.checkinAllowedUntil())) {
+            LocalTime shiftEndLocal = availability.shiftEndInstant().atZone(zone).toLocalTime();
+            throw new BusinessException(
+                    "CHECKIN_TOO_LATE",
+                    "Ca làm việc đã kết thúc lúc " + shiftEndLocal + " (" + zone + "). Không thể chấm công cho ca đã qua.",
+                    HttpStatus.UNPROCESSABLE_ENTITY,
+                    "Too late to check in. Shift ended at " + shiftEndLocal + " (site timezone: " + zone + ")");
         }
     }
 
@@ -728,7 +757,9 @@ public class CheckinService {
 
     // ── Available sites helpers ───────────────────────────────────────────────
 
-    private AvailableSiteResponse buildAvailableSiteResponse(Assignment assignment, UUID tenantId) {
+    private AvailableSiteResponse buildAvailableSiteResponse(
+            AssignmentService.AssignmentAvailability availability, UUID tenantId) {
+        Assignment assignment = availability.assignment();
         Site site = siteRepository
                 .findByIdAndTenantIdAndDeletedAtIsNull(assignment.getSiteId(), tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException(
@@ -748,12 +779,31 @@ public class CheckinService {
                 .map(this::toGeofenceInfo)
                 .orElse(null);
 
+        ZoneId zone = availability.siteZone();
+        Instant now = Instant.now();
+        String availabilityStatus;
+        if (availability.shiftStartInstant() == null) {
+            availabilityStatus = "unrestricted";
+        } else if (now.isBefore(availability.checkinAllowedFrom())) {
+            availabilityStatus = "upcoming";
+        } else if (now.isBefore(availability.checkinAllowedUntil())) {
+            availabilityStatus = "open";
+        } else {
+            availabilityStatus = "closed";
+        }
+
         return AvailableSiteResponse.builder()
                 .assignmentId(assignment.getId())
                 .assignmentRole(assignment.getRole())
                 .site(toSiteInfo(site))
                 .shift(shiftInfo)
                 .geofence(geofenceInfo)
+                .serverNow(now.atZone(zone).toOffsetDateTime())
+                .checkinAllowedFrom(availability.checkinAllowedFrom() != null
+                        ? availability.checkinAllowedFrom().atZone(zone).toOffsetDateTime() : null)
+                .checkinAllowedUntil(availability.checkinAllowedUntil() != null
+                        ? availability.checkinAllowedUntil().atZone(zone).toOffsetDateTime() : null)
+                .availabilityStatus(availabilityStatus)
                 .build();
     }
 

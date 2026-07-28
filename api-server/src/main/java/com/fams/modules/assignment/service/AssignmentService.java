@@ -32,9 +32,12 @@ import java.time.DayOfWeek;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
@@ -174,6 +177,112 @@ public class AssignmentService {
                 });
     }
 
+    /** A single (assignment, calendar-day) occurrence resolved into concrete site-timezone
+     *  instants — the shared source of truth for "is this assignment relevant right now",
+     *  used by both HR-facing conflict checks here and the App's available-sites/checkin flow
+     *  (CheckinService), so the two surfaces can never disagree on what "today" or "on time"
+     *  means for a given site. */
+    public record AssignmentAvailability(
+            Assignment assignment,
+            LocalDate effectiveDate,
+            ZoneId siteZone,
+            Instant checkinAllowedFrom,
+            Instant checkinAllowedUntil,
+            Instant shiftStartInstant,
+            Instant shiftEndInstant) {
+    }
+
+    /** Resolves every assignment that is relevant to this employee "right now", using each
+     *  assignment's own SITE timezone (not the server's default zone) to decide what calendar
+     *  day it is and whether an overnight shift that started site-local "yesterday" is still
+     *  open. A shift-less assignment occupies its whole site-local calendar day. Used by
+     *  CheckinService for both the available-sites listing and submitCheckin, so date/timezone
+     *  resolution is identical in both places (see class-level javadoc on AssignmentAvailability). */
+    @Transactional(readOnly = true)
+    public List<AssignmentAvailability> resolveAvailableAssignmentsNow(UUID tenantId, UUID employeeId) {
+        Instant now = Instant.now();
+        LocalDate utcToday = LocalDate.now(ZoneOffset.UTC);
+
+        // Coarse net: site timezones range roughly UTC-12..UTC+14, so a site-local calendar day
+        // can differ from UTC's by up to a day in either direction. Cast wide here; the precise
+        // per-assignment site-local filtering happens below.
+        Map<UUID, Assignment> candidates = new LinkedHashMap<>();
+        for (LocalDate anchor : List.of(utcToday.minusDays(1), utcToday, utcToday.plusDays(1))) {
+            for (Assignment a : assignmentRepository.findActiveAssignmentsForEmployeeOnDate(
+                    tenantId, employeeId, anchor, DayOfWeekBitmask.bitForDate(anchor))) {
+                candidates.putIfAbsent(a.getId(), a);
+            }
+        }
+
+        List<AssignmentAvailability> result = new java.util.ArrayList<>();
+        for (Assignment a : candidates.values()) {
+            resolveIfRelevantNow(a, now).ifPresent(result::add);
+        }
+        return result;
+    }
+
+    /** Same resolution as {@link #resolveAvailableAssignmentsNow}, narrowed to one site — used
+     *  by submitCheckin, which already knows which site the employee is trying to check into. */
+    @Transactional(readOnly = true)
+    public Optional<AssignmentAvailability> resolveAvailableAssignmentForSiteNow(
+            UUID tenantId, UUID employeeId, UUID siteId) {
+        return resolveAvailableAssignmentsNow(tenantId, employeeId).stream()
+                .filter(av -> av.assignment().getSiteId().equals(siteId))
+                .findFirst();
+    }
+
+    private Optional<AssignmentAvailability> resolveIfRelevantNow(Assignment a, Instant now) {
+        String timezone = siteRepository.findById(a.getSiteId())
+                .map(com.fams.modules.site.entity.Site::getTimezone)
+                .orElse("UTC");
+        ZoneId zone = ZoneId.of(timezone);
+        LocalDate siteToday = now.atZone(zone).toLocalDate();
+
+        // Prefer site-local "today"; fall back to "yesterday" only for an overnight shift that
+        // is still genuinely open (now < shiftEnd) — never resurrect a shift-less assignment or
+        // a same-day shift from the previous day, that would just be stale clutter.
+        for (LocalDate candidateDate : List.of(siteToday, siteToday.minusDays(1))) {
+            if (!withinDateRange(a, candidateDate) || !matchesDayOfWeek(a, candidateDate)) {
+                continue;
+            }
+
+            if (a.getShiftId() == null) {
+                if (!candidateDate.equals(siteToday)) {
+                    continue; // no shift = whole calendar day only, no overnight carry-over
+                }
+                Instant from = candidateDate.atStartOfDay(zone).toInstant();
+                Instant until = candidateDate.plusDays(1).atStartOfDay(zone).toInstant();
+                return Optional.of(new AssignmentAvailability(a, candidateDate, zone, from, until, null, null));
+            }
+
+            com.fams.modules.shift.entity.Shift shift = shiftRepository.findById(a.getShiftId()).orElse(null);
+            if (shift == null) {
+                continue;
+            }
+            LocalDate shiftEndDate = shift.isAllowOvernight() ? candidateDate.plusDays(1) : candidateDate;
+            Instant shiftStart = ZonedDateTime.of(candidateDate, shift.getStartTime(), zone).toInstant();
+            Instant shiftEnd = ZonedDateTime.of(shiftEndDate, shift.getEndTime(), zone).toInstant();
+
+            if (!candidateDate.equals(siteToday) && !now.isBefore(shiftEnd)) {
+                continue; // yesterday's occurrence already ended — not relevant "now"
+            }
+
+            Instant checkinFrom = shiftStart.minusSeconds(shift.getEarlyCheckinMinutes() * 60L);
+            return Optional.of(new AssignmentAvailability(
+                    a, candidateDate, zone, checkinFrom, shiftEnd, shiftStart, shiftEnd));
+        }
+        return Optional.empty();
+    }
+
+    private boolean withinDateRange(Assignment a, LocalDate date) {
+        return !date.isBefore(a.getStartDate()) && (a.getEndDate() == null || !date.isAfter(a.getEndDate()));
+    }
+
+    private boolean matchesDayOfWeek(Assignment a, LocalDate date) {
+        Set<DayOfWeek> days = DayOfWeekBitmask.fromBitmask(a.getDaysOfWeek());
+        return days == null || days.contains(date.getDayOfWeek());
+    }
+
     @Transactional
     public AssignmentResponse createAssignment(UUID tenantId, UUID siteId,
                                                CreateAssignmentRequest request,
@@ -191,8 +300,13 @@ public class AssignmentService {
         }
         assertSiteInScope(callerUserId, tenantId, siteId, callerIsPlatformAdmin);
 
-        siteRepository.findByIdAndTenantIdAndDeletedAtIsNull(siteId, tenantId)
+        com.fams.modules.site.entity.Site site = siteRepository
+                .findByIdAndTenantIdAndDeletedAtIsNull(siteId, tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Site not found: " + siteId));
+        if (!"active".equals(site.getStatus())) {
+            throw new IllegalArgumentException(
+                    "Site '" + site.getName() + "' is inactive and can no longer receive new assignments");
+        }
 
         com.fams.modules.employee.entity.Employee employee = employeeRepository
                 .findByIdAndTenantIdAndDeletedAtIsNull(request.getEmployeeId(), tenantId)
@@ -321,8 +435,13 @@ public class AssignmentService {
         }
         assertSiteInScope(callerUserId, tenantId, siteId, callerIsPlatformAdmin);
 
-        siteRepository.findByIdAndTenantIdAndDeletedAtIsNull(siteId, tenantId)
+        com.fams.modules.site.entity.Site site = siteRepository
+                .findByIdAndTenantIdAndDeletedAtIsNull(siteId, tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Site not found: " + siteId));
+        if (!"active".equals(site.getStatus())) {
+            throw new IllegalArgumentException(
+                    "Site '" + site.getName() + "' is inactive — its assignments can no longer be modified");
+        }
 
         Assignment assignment = assignmentRepository
                 .findByIdAndSiteIdAndTenantIdAndDeletedAtIsNull(assignmentId, siteId, tenantId)

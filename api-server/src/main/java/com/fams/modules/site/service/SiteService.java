@@ -97,6 +97,7 @@ public class SiteService {
 
         String timezone = StringUtils.hasText(request.getTimezone())
                 ? request.getTimezone().trim() : "UTC";
+        validateTimezone(timezone);
 
         Site site = Site.builder()
                 .tenantId(tenantId)
@@ -200,12 +201,29 @@ public class SiteService {
         }
         if (request.getLatitude() != null)  site.setLatitude(request.getLatitude());
         if (request.getLongitude() != null) site.setLongitude(request.getLongitude());
-        if (StringUtils.hasText(request.getTimezone())) site.setTimezone(request.getTimezone().trim());
+        if (StringUtils.hasText(request.getTimezone())) {
+            String newTimezone = request.getTimezone().trim();
+            validateTimezone(newTimezone);
+            site.setTimezone(newTimezone);
+        }
         if (StringUtils.hasText(request.getStatus()))   site.setStatus(request.getStatus());
 
         siteRepository.save(site);
         log.info("Site updated: id={} tenantId={} by={}", siteId, tenantId, callerUserId);
         return toResponse(site);
+    }
+
+    /** {@code @Size} alone lets garbage like "Whatever" through — every downstream consumer
+     *  (check-in early/late windows, attendance summary, cross-site conflict math) does
+     *  {@code ZoneId.of(site.getTimezone())} and would blow up with a raw 500 at check-in time,
+     *  long after the typo was saved. Validate it's a real IANA zone ID up front instead. */
+    private void validateTimezone(String timezone) {
+        try {
+            java.time.ZoneId.of(timezone);
+        } catch (java.time.DateTimeException e) {
+            throw new IllegalArgumentException(
+                    "'" + timezone + "' is not a valid IANA timezone name (e.g. 'Asia/Ho_Chi_Minh', 'UTC')");
+        }
     }
 
     @Transactional(readOnly = true)

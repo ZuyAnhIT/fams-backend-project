@@ -738,9 +738,9 @@ SELECT gen_random_uuid(), t.id, 'DD/MM/YYYY', 'HH:mm',
        NOW() - '60 days'::INTERVAL, NOW()
 FROM tenants t
 JOIN (VALUES
-  ('acme-corp',         '#B22222', '#FFFFFF', '#FFD700', 'HL', 12),
-  ('beta-industries',   '#1E90FF', '#FFFFFF', '#FFA500', 'BM', 10),
-  ('gamma-logistics',   '#228B22', '#FFFFFF', '#00CED1', 'PN', 12),
+  ('acme-corp',         '#B22222', '#FFFFFF', '#FFD700', 'HL', 15),
+  ('beta-industries',   '#1E90FF', '#FFFFFF', '#FFA500', 'BM', 15),
+  ('gamma-logistics',   '#228B22', '#FFFFFF', '#00CED1', 'PN', 15),
   ('tia-sang-startup',  '#8A2BE2', '#FFFFFF', '#FF69B4', 'TS', 5),
   ('dong-a-jsc',        '#708090', '#FFFFFF', '#20B2AA', 'DA', 4)
 ) AS v(slug, primary_color, secondary_color, accent_color, prefix, seq) ON v.slug = t.slug
