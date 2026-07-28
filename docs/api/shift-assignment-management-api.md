@@ -15,7 +15,37 @@ Sau khi FE/App review lại đợt sửa đầu tiên (mục 0-4 dưới đây),
 
 **Kết quả test bổ sung**: build lại, test sống toàn bộ luồng check-in → sửa giờ ca → check-out → xác nhận `workMinutes` vẫn tính theo giờ ca lúc check-in (không bị giờ mới ảnh hưởng); test sống case "sáng Site A 06:00-12:00, tối Site B 18:00-22:00 cùng ngày" → nay được phép (`201`, trước đây sẽ bị `409` nhầm); test lại case chồng giờ thật (Site A 06:00-14:00, Site B 13:00-20:00 cùng ngày) → vẫn đúng bị chặn `409`. Chạy lại toàn bộ `tests/site/*.sh` (189 test) + `tests/report/*.sh` (67 test, vì đụng vào `AttendanceSummaryService`) + `tests/rbac/tests/workspace/tests/tenant/tests/employee` — **100% pass**.
 
-## 0. Tóm tắt kết quả (đợt review đầu — vẫn giữ nguyên, xem mục 0.1 ở trên cho bản vá mới nhất)
+## 0.2 [MỚI] Bản vá theo báo cáo App team — 4 lỗi P0 + 4 lỗi P1 (27/07/2026)
+
+App team gửi báo cáo `17_BAO_CAO_APP_CA_LAM_VIEC_VA_PHAN_CONG_2026-07-27.md` sau khi đọc trực tiếp code backend (không sửa backend), liệt kê 8 vấn đề. Đã xác minh từng vấn đề với code thật trước khi sửa — cả 8 đều có thật:
+
+| # | Vấn đề App nêu | Đã sửa | Chi tiết |
+|---|---|---|---|
+| P0-1 | Nhân viên `terminated`/`inactive` vẫn xem được available-sites và chấm công được | Có | `getAvailableSites` trả về `[]`; `submitCheckin` chặn `403 EMPLOYEE_NOT_ACTIVE` nếu `employee.status != 'active'` |
+| P0-2 | Site `inactive` vẫn nhận assignment mới và vẫn chấm công được | Có | `createAssignment`/`updateAssignment` chặn `400`; `submitCheckin` chặn `422 SITE_INACTIVE` nếu `site.status != 'active'` |
+| P0-3 | Check trùng chấm công chỉ theo `assignmentId` — nhân viên có 2 assignment (2 site) có thể mở 2 phiên chấm công song song | Có | Đổi sang check theo `(tenantId, employeeId)` — bất kỳ phiên mở nào (site nào) cũng chặn phiên mới. Thêm unique index DB (`V73`) chống race condition khi 2 request gửi gần như đồng thời |
+| P0-4 | `getAvailableSites`/`submitCheckin` dùng `LocalDate.now()` theo giờ server, không theo giờ site; ca qua đêm bị lệch ngày | Có | Cả hai giờ dùng chung 1 hàm `AssignmentService.resolveAvailableAssignmentsNow/resolveAvailableAssignmentForSiteNow` — tính theo timezone của từng site, xử lý đúng ca qua đêm bắt đầu "hôm qua" (giờ site) mà vẫn còn mở |
+| P1-1 | Tạo/sửa Shift không kiểm tra `startTime`/`endTime`/`allowOvernight` hợp lệ với nhau | Có | `ShiftService.validateShiftTimes`: ca trong ngày bắt buộc `startTime < endTime`; ca qua đêm bắt buộc 2 giờ khác nhau |
+| P1-2 | `validateNotTooEarly` chỉ chặn chấm công quá sớm, không chặn chấm công sau khi ca đã kết thúc | Có | Đổi thành `validateCheckinWindow` — chặn cả 2 chiều, lỗi mới `422 CHECKIN_TOO_LATE` |
+| P1-3 | `timezone` của Site chỉ giới hạn độ dài, không kiểm tra là IANA zone hợp lệ → lỗi 500 khi chấm công thay vì 400 khi tạo site | Có | `SiteService.validateTimezone` dùng `ZoneId.of()`, trả `400` ngay lúc tạo/sửa site |
+| P1-4/§5 | Đề xuất thêm `serverNow`/`checkinAllowedFrom`/`checkinAllowedUntil`/`availabilityStatus` vào `AvailableSiteResponse` | Có | 4 field mới, `availabilityStatus` ∈ `unrestricted\|upcoming\|open\|closed` — chỉ là gợi ý UX, backend vẫn validate lại khi submit |
+
+**Quyết định kiến trúc đáng chú ý:**
+- P0-3 + P0-4 dùng chung một cơ chế: `AssignmentService.AssignmentAvailability` (record mới) là nguồn sự thật duy nhất cho "assignment này có hợp lệ ngay bây giờ không", dùng chung bởi cả `getAvailableSites` và `submitCheckin` — App không bao giờ thấy 1 site "available" rồi bị `submitCheckin` từ chối vì lệch logic.
+- Nhân viên `inactive`/`terminated`: theo đúng pattern "deactivation chặn hành động MỚI, không xoá lịch sử" đã dùng xuyên suốt dự án — `getAvailableSites`/`submitCheckin` bị chặn, nhưng `submitCheckout` (hoàn tất phiên đang mở), `getCheckinHistory`, `getCheckinResult`, `explainCheckin` KHÔNG bị chặn.
+- P0-3: chọn chặn theo **employee** (không theo site) vì một người không thể có mặt vật lý ở 2 nơi cùng lúc — kể cả khi 2 assignment không xung đột giờ theo lịch (ví dụ sáng Site A, tối Site B), nếu quên checkout ở Site A thì vẫn không được checkin Site B.
+
+**Test sống đã chạy trên dữ liệu seed thật** (tenant `beta-industries`, các API thật qua `curl`, dọn dẹp toàn bộ dữ liệu test sau khi xong):
+- Nhân viên `terminated` → `available-sites` trả `[]`, `submitCheckin` → `403 EMPLOYEE_NOT_ACTIVE`.
+- Chấm công sau khi ca đã kết thúc (giờ site) → `422 CHECKIN_TOO_LATE` với đúng giờ kết thúc ca theo timezone site.
+- Site `inactive` → `submitCheckin` → `422 SITE_INACTIVE`; tạo assignment mới tại site đó → `400`.
+- Nhân viên có phiên chấm công đang mở ở Site A, thử chấm công ở Site B (assignment khác, không xung đột giờ) → `409 DUPLICATE_RESOURCE`, đúng site/giờ của phiên đang mở.
+- Tạo shift `startTime == endTime` (không qua đêm) → `400`; `startTime > endTime` không qua đêm → `400`.
+- Tạo site với `timezone: "Not/AZone"` → `400` ngay, không đợi tới lúc chấm công mới lỗi 500.
+
+Migration `V73__prevent_concurrent_open_checkins_per_employee.sql` — unique partial index `(employee_id) WHERE check_out_at IS NULL AND deleted_at IS NULL`. Chạy lại `tests/site/*.sh` (189 test) + `tests/report/*.sh` (67 test) sau khi sửa — **100% pass**. `tests/checkin/*.sh` có lỗi kịch bản test từ trước (dùng field `email` thay vì `identifier` khi login nhân viên ở dòng setup — không liên quan tới các thay đổi lần này, đã ghi nhận nhưng chưa sửa vì ngoài phạm vi báo cáo App).
+
+## 0. Tóm tắt kết quả (đợt review đầu — vẫn giữ nguyên, xem mục 0.1/0.2 ở trên cho các bản vá mới nhất)
 
 **9 tính năng bạn liệt kê đã được xây dựng đầy đủ, đúng nghiệp vụ từ trước** — tạo/danh sách/cập nhật/deactivate ca làm việc, cấu hình OT, tạo/danh sách/cập nhật/hủy phân công, và "site được phép check-in hôm nay" (App) đều có API thật, hoạt động tốt. Qua review sâu vào business logic (đúng như bạn yêu cầu — không chỉ kiểm tra API có chạy hay không, mà kiểm tra dữ liệu có **mạch lạc, không xung đột**), tôi tìm thấy và sửa **3 lỗ hổng xung đột dữ liệu thật** (nhân viên có thể bị phân công "có mặt ở 2 công trình cùng lúc"; assignment vẫn gắn được vào 1 ca đã deactivate; nhân viên đã nghỉ việc vẫn được phân công mới), và hoàn thiện **1 tính năng bỏ dở** (`shifts:delete` seed sẵn nhưng chưa có endpoint).
 
@@ -235,23 +265,38 @@ Lưu ý: `shiftSummary.status` phản ánh trạng thái **hiện tại** của 
 **Mã lỗi cần bắt trong form** (mới bổ sung so với trước, đánh dấu **MỚI**):
 | HTTP | Khi nào | Message mẫu |
 |---|---|---|
-| 400 | `endDate` trước `startDate`, `daysOfWeek` rỗng, ca inactive **(MỚI)**, nhân viên terminated **(MỚI)**, ca đã có lịch sử khi xóa **(MỚI)** | `"Shift 'X' is inactive and can no longer be assigned"`, `"Cannot assign a terminated employee to a site"`, `"Shift 'X' has been used by at least one assignment and cannot be deleted..."` |
+| 400 | `endDate` trước `startDate`, `daysOfWeek` rỗng, ca inactive, nhân viên terminated, ca đã có lịch sử khi xóa, site inactive khi tạo/sửa phân công **(MỚI — mục 0.2)**, giờ ca không hợp lệ khi tạo/sửa Shift **(MỚI — mục 0.2, P1-1)** | `"Shift 'X' is inactive and can no longer be assigned"`, `"Cannot assign a terminated employee to a site"`, `"Site 'X' is inactive and can no longer receive new assignments"`, `"startTime must be before endTime for a same-day shift..."` |
 | 403 | Site ngoài phạm vi site-scope của caller | `"You do not have permission to act on this site"` |
 | 404 | Site/employee/shift/assignment không tồn tại | `"Shift not found for this site: <id>"` |
 | 409 | Trùng active tại CÙNG site, hoặc trùng tên ca, **hoặc xung đột đa-site (MỚI)** | `"Employee already has an active assignment at this site"`, `"Employee already has an overlapping active assignment at site 'X'..."` |
 
-### 3.3 "Site được phép check-in hôm nay" (App) — đã có, xác nhận đúng thiết kế
+### 3.3 "Site được phép check-in hôm nay" (App) — cập nhật theo mục 0.2 (P0-4, §5)
 
-`GET /api/v1/tenants/{tenantId}/checkin/available-sites` (module Checkin, không đổi trong đợt review này) — trả về danh sách gộp sẵn site + ca + geofence cho MỌI phân công `active`, còn hiệu lực hôm nay (`startDate <= hôm nay <= endDate`), và `daysOfWeek` khớp thứ hôm nay (hoặc null = mọi ngày). Response mẫu:
+`GET /api/v1/tenants/{tenantId}/checkin/available-sites` (module Checkin) — trả về danh sách gộp sẵn site + ca + geofence cho MỌI phân công `active` mà nhân viên (`employee.status == 'active'`, xem P0-1) đang có, tính theo **timezone của từng site** (không phải giờ server — sửa ở P0-4), gồm cả ca qua đêm bắt đầu "hôm qua" theo giờ site nhưng vẫn còn mở. Response mẫu (đã thêm 4 field mới ở cuối):
 ```json
 {
   "assignmentId": "uuid", "assignmentRole": "worker",
   "site": { "id": "...", "name": "...", "code": "...", "address": "...", "latitude": 21.03, "longitude": 105.85, "timezone": "..." },
   "shift": { "id": "...", "name": "...", "startTime": "08:00:00", "endTime": "17:00:00", "allowOvernight": false, "earlyCheckinMinutes": 15, "lateCheckoutMinutes": 30 } ,
-  "geofence": { "id": "...", "coordinates": [[...]], "bufferMeters": 50 }
+  "geofence": { "id": "...", "coordinates": [[...]], "bufferMeters": 50 },
+  "serverNow": "2026-07-27T22:34:45+07:00",
+  "checkinAllowedFrom": "2026-07-27T05:45:00+07:00",
+  "checkinAllowedUntil": "2026-07-27T14:00:00+07:00",
+  "availabilityStatus": "open | upcoming | closed | unrestricted"
 }
 ```
-Nhờ đợt sửa mục 2.1, danh sách này giờ **không thể** hiện 2 site trùng giờ cho cùng 1 nhân viên nữa (vì việc tạo ra tình huống đó đã bị chặn ngay từ khi phân công) — trước đây về lý thuyết có thể xảy ra (dù hiếm) nếu HR vô tình tạo trùng lịch.
+`checkinAllowedFrom/Until`/`availabilityStatus` là **gợi ý UX cho App** (ví dụ để hiện đếm ngược hoặc mờ nút "Chấm công" khi `closed`) — `submitCheckin` vẫn tự validate lại độc lập bằng đúng logic tính giờ này (`AssignmentService.resolveAvailableAssignmentForSiteNow`), App không được tự làm lại logic timezone/ca-qua-đêm phía client để tránh lệch với backend. `unrestricted` = phân công không gắn ca cụ thể, được phép cả ngày (giờ địa phương của site).
+
+Nhờ đợt sửa mục 2.1, danh sách này **không thể** hiện 2 site trùng giờ cho cùng 1 nhân viên (việc tạo ra tình huống đó đã bị chặn ngay từ khi phân công). Nhưng lưu ý: danh sách vẫn có thể hiện nhiều site cùng ngày với `availabilityStatus` khác nhau (ví dụ sáng đã `closed`, tối `upcoming`) — đây là hành vi đúng, không phải lỗi (một nhân viên có thể làm nhiều ca/site không trùng giờ trong ngày).
+
+**Chấm công (`POST .../checkin`) — mã lỗi mới (mục 0.2):**
+| HTTP | errorCode | Khi nào |
+|---|---|---|
+| 403 | `EMPLOYEE_NOT_ACTIVE` | Nhân viên không ở trạng thái `active` (P0-1) |
+| 422 | `SITE_INACTIVE` | Site đang `inactive` (P0-2) |
+| 422 | `CHECKIN_TOO_EARLY` | Trước cửa sổ cho phép (như cũ) |
+| 422 | `CHECKIN_TOO_LATE` | Sau khi ca đã kết thúc (mới — P1-2) |
+| 409 | `DUPLICATE_RESOURCE` | Nhân viên đang có phiên chấm công mở **ở bất kỳ site nào** (đổi từ chỉ-theo-assignment sang theo-nhân viên — P0-3), kèm site/giờ của phiên đang mở trong message |
 
 ## 4. Xác nhận thêm — không cần sửa
 

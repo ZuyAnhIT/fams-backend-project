@@ -5,6 +5,7 @@ import lombok.Builder;
 import lombok.Data;
 
 import java.time.LocalTime;
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.UUID;
 
@@ -27,6 +28,24 @@ public class AvailableSiteResponse {
 
     @Schema(description = "Active geofence for the site, null if not configured")
     private GeofenceInfo geofence;
+
+    @Schema(description = "Server's current time, for the App to display a countdown without "
+            + "trusting the device clock", example = "2026-07-27T08:45:00+07:00")
+    private OffsetDateTime serverNow;
+
+    @Schema(description = "Earliest instant check-in is allowed for this occurrence (shift start "
+            + "minus earlyCheckinMinutes), null if the assignment has no shift (unrestricted)")
+    private OffsetDateTime checkinAllowedFrom;
+
+    @Schema(description = "Latest instant check-in is allowed for this occurrence (shift end), "
+            + "null if the assignment has no shift (unrestricted)")
+    private OffsetDateTime checkinAllowedUntil;
+
+    @Schema(description = "UX hint only — the backend still re-validates on submit. "
+            + "'unrestricted': no shift linked, any time today. 'upcoming': before checkinAllowedFrom. "
+            + "'open': within the check-in window now. 'closed': past checkinAllowedUntil.",
+            example = "open", allowableValues = {"unrestricted", "upcoming", "open", "closed"})
+    private String availabilityStatus;
 
     @Data
     @Builder

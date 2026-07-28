@@ -16,6 +16,12 @@ public interface CheckinRepository extends JpaRepository<CheckinRecord, UUID>, J
     /** Open session = no checkout yet for this assignment. */
     Optional<CheckinRecord> findByAssignmentIdAndCheckOutAtIsNullAndDeletedAtIsNull(UUID assignmentId);
 
+    /** An employee physically cannot be checked in at two places at once, even across different
+     *  assignments/sites — used to block a new check-in while any prior session (any site) is
+     *  still open, instead of only checking the one assignment being checked into. */
+    Optional<CheckinRecord> findByTenantIdAndEmployeeIdAndCheckOutAtIsNullAndDeletedAtIsNull(
+            UUID tenantId, UUID employeeId);
+
 
     Optional<CheckinRecord> findByIdAndTenantIdAndDeletedAtIsNull(UUID id, UUID tenantId);
 

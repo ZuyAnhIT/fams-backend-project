@@ -27,6 +27,7 @@ echo "--- Setup: Login as platform admin ---"
 ADMIN_TOKEN=$(curl -s -X POST "$BASE_URL/api/v1/auth/login" -H "Content-Type: application/json" \
     -d '{"identifier":"admin@fams.com","password":"Admin@1234"}' | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['accessToken'])")
 [ -z "$ADMIN_TOKEN" ] && echo "SETUP FAILED: no admin token" && exit 1
+ENTERPRISE_PLAN_ID=$(docker exec fams-postgres psql -U fams_user -d fams_db -t -c "SELECT id FROM plans WHERE name='enterprise';" | tr -d " \n")
 
 TS=$(date +%s)
 
@@ -38,7 +39,7 @@ t_resp=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/tenants" \
     -d "{\"name\":\"Recurring Corp ${TS}\",\"slug\":\"recurring-corp-${TS}\",\"ownerEmail\":\"admin@fams.com\"}")
 [ "$(echo "$t_resp" | tail -n1)" -eq 201 ] || { echo "SETUP FAILED: tenant"; exit 1; }
 TENANT_ID=$(echo "$t_resp" | head -n -1 | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['id'])")
-curl -s -o /dev/null -X PATCH "$BASE_URL/api/v1/tenants/$TENANT_ID/subscription" -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" -d '{"planId":"fc259250-bf91-4341-907e-00fa84587c38"}'  # bump trial->enterprise so site-limit (1) does not block multi-site tests
+curl -s -o /dev/null -X PATCH "$BASE_URL/api/v1/tenants/$TENANT_ID/subscription" -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" -d "{\"planId\":\"$ENTERPRISE_PLAN_ID\"}"  # bump trial->enterprise so site-limit (1) does not block multi-site tests
 
 s_resp=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/tenants/$TENANT_ID/sites" \
     -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" \

@@ -76,6 +76,8 @@ public class ShiftService {
                     "Shift '" + trimmedName + "' already exists for this site");
         }
 
+        validateShiftTimes(request.getStartTime(), request.getEndTime(), request.isAllowOvernight());
+
         Shift shift = Shift.builder()
                 .siteId(siteId)
                 .tenantId(tenantId)
@@ -167,9 +169,28 @@ public class ShiftService {
         if (request.getAllowOvernight() != null) shift.setAllowOvernight(request.getAllowOvernight());
         if (StringUtils.hasText(request.getStatus())) shift.setStatus(request.getStatus());
 
+        validateShiftTimes(shift.getStartTime(), shift.getEndTime(), shift.isAllowOvernight());
+
         shiftRepository.save(shift);
         log.info("Shift updated: id={} siteId={} tenantId={} by={}", shiftId, siteId, tenantId, callerUserId);
         return toResponse(shift);
+    }
+
+    /** startTime/endTime/allowOvernight must agree: a same-day shift (allowOvernight=false)
+     *  needs startTime strictly before endTime, otherwise the shift's duration is zero or
+     *  negative — a schedule an employee could never actually satisfy. An overnight shift needs
+     *  the two times to actually differ (startTime==endTime would mean either a zero-length
+     *  shift or a full 24h shift depending on interpretation — reject the ambiguity). */
+    private void validateShiftTimes(java.time.LocalTime startTime, java.time.LocalTime endTime,
+                                     boolean allowOvernight) {
+        if (!allowOvernight && !startTime.isBefore(endTime)) {
+            throw new IllegalArgumentException(
+                    "startTime must be before endTime for a same-day shift (set allowOvernight=true "
+                            + "for a shift that spans midnight)");
+        }
+        if (allowOvernight && startTime.equals(endTime)) {
+            throw new IllegalArgumentException("startTime and endTime must not be identical");
+        }
     }
 
     @Transactional(readOnly = true)
