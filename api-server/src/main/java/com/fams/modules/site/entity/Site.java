@@ -44,6 +44,9 @@ public class Site {
     @Column(nullable = false, length = 20)
     private String status;
 
+    @Column(name = "require_face_id_checkin", nullable = false)
+    private boolean requireFaceIdCheckin;
+
     @Column(name = "created_by")
     private UUID createdBy;
 

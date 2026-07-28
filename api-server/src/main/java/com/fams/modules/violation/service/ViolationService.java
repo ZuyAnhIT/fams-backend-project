@@ -185,6 +185,7 @@ public class ViolationService {
                 .siteId(violation.getSiteId())
                 .scheduledCheckId(violation.getScheduledCheckId())
                 .checkResponseId(violation.getCheckResponseId())
+                .checkinId(violation.getCheckinId())
                 .violationType(violation.getViolationType())
                 .checkDate(violation.getCheckDate())
                 .description(violation.getDescription())

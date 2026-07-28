@@ -34,7 +34,8 @@ public class FaceProfile {
     @Column(name = "status", nullable = false, length = 20)
     private String status;
 
-    // embedding column intentionally not mapped — fams-ai writes it directly via psycopg2
+    // embedding / pending_embedding columns intentionally not mapped — fams-ai is the only
+    // component that ever reads or writes raw biometric vectors, via psycopg2.
 
     @Column(name = "enrolled_at")
     private OffsetDateTime enrolledAt;
@@ -44,6 +45,27 @@ public class FaceProfile {
 
     @Column(name = "embedding_deleted", nullable = false)
     private boolean embeddingDeleted;
+
+    /** none | pending | rejected — independent of `status`, which stays the last APPROVED
+     *  state so an in-review re-enrollment never interrupts the employee's ability to check in
+     *  with their currently-approved face. See FaceIdService for the full state machine. */
+    @Column(name = "review_status", nullable = false, length = 20)
+    private String reviewStatus;
+
+    @Column(name = "pending_photo_count")
+    private Integer pendingPhotoCount;
+
+    @Column(name = "submitted_at")
+    private OffsetDateTime submittedAt;
+
+    @Column(name = "reviewed_by")
+    private UUID reviewedBy;
+
+    @Column(name = "reviewed_at")
+    private OffsetDateTime reviewedAt;
+
+    @Column(name = "rejection_reason")
+    private String rejectionReason;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
@@ -57,6 +79,7 @@ public class FaceProfile {
         if (createdAt == null) createdAt = now;
         if (updatedAt == null) updatedAt = now;
         if (status == null) status = "not_enrolled";
+        if (reviewStatus == null) reviewStatus = "none";
     }
 
     @PreUpdate

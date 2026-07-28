@@ -67,6 +67,7 @@ public class ReportService {
     private final UserRoleRepository userRoleRepository;
     private final EmployeeRepository employeeRepository;
     private final FaceProfileRepository faceProfileRepository;
+    private final com.fams.modules.rbac.service.SiteScopeService siteScopeService;
 
     public ReportService(AttendanceSummaryRepository summaryRepository,
                          AssignmentRepository assignmentRepository,
@@ -75,7 +76,8 @@ public class ReportService {
                          CheckinRepository checkinRepository,
                          UserRoleRepository userRoleRepository,
                          EmployeeRepository employeeRepository,
-                         FaceProfileRepository faceProfileRepository) {
+                         FaceProfileRepository faceProfileRepository,
+                         com.fams.modules.rbac.service.SiteScopeService siteScopeService) {
         this.summaryRepository = summaryRepository;
         this.assignmentRepository = assignmentRepository;
         this.violationRepository = violationRepository;
@@ -84,6 +86,7 @@ public class ReportService {
         this.userRoleRepository = userRoleRepository;
         this.employeeRepository = employeeRepository;
         this.faceProfileRepository = faceProfileRepository;
+        this.siteScopeService = siteScopeService;
     }
 
     @Transactional(readOnly = true)
@@ -560,6 +563,24 @@ public class ReportService {
         List<Employee> employees = employeeRepository.findAll(empSpec,
                 Sort.by(Sort.Direction.ASC, "lastName", "firstName"));
 
+        // Site-scope: a caller restricted to specific sites (e.g. SITE_SUPERVISOR) must not see
+        // Face ID status for employees outside their allowed sites — same treatment as every
+        // other employee-facing list in this system. Employee itself carries no direct site
+        // column, so scope via assignment linkage like EmployeeService does.
+        java.util.Optional<Set<UUID>> allowedSiteIds =
+                siteScopeService.resolveAllowedSiteIds(callerUserId, tenantId, callerIsPlatformAdmin);
+        if (allowedSiteIds.isPresent()) {
+            if (allowedSiteIds.get().isEmpty()) {
+                employees = List.of();
+            } else {
+                Set<UUID> visibleEmployeeIds = assignmentRepository
+                        .findDistinctEmployeeIdsByTenantIdAndSiteIdIn(tenantId, allowedSiteIds.get());
+                employees = employees.stream()
+                        .filter(e -> visibleEmployeeIds.contains(e.getId()))
+                        .collect(Collectors.toList());
+            }
+        }
+
         // Build map: employeeId → FaceProfile
         Map<UUID, FaceProfile> profileMap = faceProfileRepository.findAllByTenantId(tenantId)
                 .stream().collect(Collectors.toMap(FaceProfile::getEmployeeId, fp -> fp));
@@ -580,19 +601,31 @@ public class ReportService {
                     .consentGivenAt(fp != null ? fp.getConsentGivenAt() : null)
                     .enrolledAt(fp != null ? fp.getEnrolledAt() : null)
                     .revokedAt(fp != null ? fp.getRevokedAt() : null)
+                    .reviewStatus(fp != null ? fp.getReviewStatus() : "none")
+                    .submittedAt(fp != null ? fp.getSubmittedAt() : null)
+                    .rejectionReason(fp != null ? fp.getRejectionReason() : null)
                     .build();
         }).collect(Collectors.toList());
 
-        // Aggregate counts across all rows (before status filter)
+        // Aggregate counts across all rows (before status filter). "pending" here means
+        // reviewStatus=pending (an in-flight submission awaiting HR decision) — independent of
+        // faceIdStatus, since a re-enrollment can be pending while faceIdStatus is still
+        // "enrolled" (the old approved face keeps working during review).
         int enrolledCount    = (int) allRows.stream().filter(r -> "enrolled".equals(r.getFaceIdStatus())).count();
-        int pendingCount     = (int) allRows.stream().filter(r -> "pending".equals(r.getFaceIdStatus())).count();
+        int pendingCount     = (int) allRows.stream().filter(r -> "pending".equals(r.getReviewStatus())).count();
         int notEnrolledCount = (int) allRows.stream().filter(r -> "not_enrolled".equals(r.getFaceIdStatus())).count();
         int revokedCount     = (int) allRows.stream().filter(r -> "revoked".equals(r.getFaceIdStatus())).count();
 
-        // Apply optional status filter
-        List<FaceIdReportRow> filtered = (statusFilter == null || statusFilter.isBlank())
-                ? allRows
-                : allRows.stream().filter(r -> statusFilter.equals(r.getFaceIdStatus())).collect(Collectors.toList());
+        // Apply optional status filter — accepts either a faceIdStatus value or "pending" (mapped
+        // to reviewStatus=pending, for HR filtering down to the review queue from this same report).
+        List<FaceIdReportRow> filtered;
+        if (statusFilter == null || statusFilter.isBlank()) {
+            filtered = allRows;
+        } else if ("pending".equals(statusFilter)) {
+            filtered = allRows.stream().filter(r -> "pending".equals(r.getReviewStatus())).collect(Collectors.toList());
+        } else {
+            filtered = allRows.stream().filter(r -> statusFilter.equals(r.getFaceIdStatus())).collect(Collectors.toList());
+        }
 
         // Manual pagination
         int total   = filtered.size();

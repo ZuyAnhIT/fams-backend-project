@@ -23,5 +23,10 @@ AI_FACE_SIMILARITY_THRESHOLD: float = float(os.getenv("AI_FACE_SIMILARITY_THRESH
 AI_LIVENESS_THRESHOLD: float = float(os.getenv("AI_LIVENESS_THRESHOLD", "0.6"))
 AI_ENROLL_MIN_PHOTOS: int = int(os.getenv("AI_ENROLL_MIN_PHOTOS", "3"))
 AI_ENROLL_MAX_PHOTOS: int = int(os.getenv("AI_ENROLL_MAX_PHOTOS", "5"))
+# Slightly more lenient than AI_FACE_SIMILARITY_THRESHOLD: enrollment photos are deliberately
+# taken from varied angles (that's the point — a richer embedding), so pairwise similarity
+# within one enrollment batch runs lower than a same-angle verify-vs-enrolled comparison. Still
+# high enough to catch "these photos are of two different people".
+AI_ENROLL_SAME_PERSON_THRESHOLD: float = float(os.getenv("AI_ENROLL_SAME_PERSON_THRESHOLD", "0.45"))
 
 STORAGE_BASE_PATH: str = os.getenv("STORAGE_BASE_PATH", "/app/storage")

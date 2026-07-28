@@ -16,4 +16,7 @@ public interface FaceProfileRepository extends JpaRepository<FaceProfile, UUID> 
     List<FaceProfile> findAllByTenantId(UUID tenantId);
 
     List<FaceProfile> findAllByRevokedAtIsNotNullAndEmbeddingDeletedFalse();
+
+    /** HR review queue — profiles with a submitted-but-not-yet-decided enrollment batch. */
+    List<FaceProfile> findAllByTenantIdAndReviewStatus(UUID tenantId, String reviewStatus);
 }

@@ -64,6 +64,7 @@ public class EmployeeService {
     private final com.fams.modules.workspace.repository.WorkspaceMemberRepository workspaceMemberRepository;
     private final com.fams.modules.workspace.repository.WorkspaceRepository workspaceRepository;
     private final com.fams.modules.assignment.service.AssignmentService assignmentService;
+    private final FaceIdService faceIdService;
 
     public EmployeeService(EmployeeRepository employeeRepository,
                            UserRoleRepository userRoleRepository,
@@ -75,7 +76,8 @@ public class EmployeeService {
                            SiteScopeService siteScopeService,
                            com.fams.modules.workspace.repository.WorkspaceMemberRepository workspaceMemberRepository,
                            com.fams.modules.workspace.repository.WorkspaceRepository workspaceRepository,
-                           com.fams.modules.assignment.service.AssignmentService assignmentService) {
+                           com.fams.modules.assignment.service.AssignmentService assignmentService,
+                           FaceIdService faceIdService) {
         this.employeeRepository = employeeRepository;
         this.userRoleRepository = userRoleRepository;
         this.tenantRepository = tenantRepository;
@@ -87,6 +89,7 @@ public class EmployeeService {
         this.workspaceMemberRepository = workspaceMemberRepository;
         this.workspaceRepository = workspaceRepository;
         this.assignmentService = assignmentService;
+        this.faceIdService = faceIdService;
     }
 
     @Transactional
@@ -284,6 +287,21 @@ public class EmployeeService {
         employee.setStatus(request.getStatus());
         employeeRepository.save(employee);
         log.info("Employee status changed: id={} status={} tenantId={} by={}", employeeId, request.getStatus(), tenantId, callerUserId);
+
+        // Biometric data retention: the purpose for holding a terminated employee's face
+        // enrollment has ended, so revoke it immediately rather than leaving it to the weekly
+        // retention job — matches the same treatment as any other employee-initiated revoke
+        // (purges the embedding + stored photos via fams-ai). Deliberately NOT done for
+        // "inactive" (temporary/reversible, e.g. leave of absence) — only "terminated" is final.
+        if ("terminated".equals(request.getStatus())) {
+            try {
+                faceIdService.autoRevokeOnTermination(tenantId, employeeId);
+            } catch (Exception e) {
+                log.warn("Failed to auto-revoke Face ID on termination: employeeId={} error={}",
+                        employeeId, e.getMessage());
+            }
+        }
+
         return toResponse(employee);
     }
 

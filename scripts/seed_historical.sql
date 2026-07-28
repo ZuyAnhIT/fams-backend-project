@@ -39,10 +39,18 @@ BEGIN;
 -- Enrolled profiles get a short demo embedding vector (not a real face
 -- encoding — just enough to exercise the embedding_deleted / revoke paths).
 
+-- status (not_enrolled|enrolled|revoked) is the last-APPROVED state that gates checkin;
+-- review_status (none|pending|rejected) tracks an independent in-flight submission — see
+-- FaceIdService's class-level javadoc for the full state machine. Bucket 1 demos a first-time
+-- submission awaiting HR review (status stays not_enrolled); bucket 3 demos a RE-enrollment
+-- awaiting review on top of an already-approved face (status stays enrolled, old face still
+-- usable) — both populate docs/api/face-id-management-api.md's "hàng đợi duyệt" (pending-review
+-- queue) with realistic demo data instead of leaving it permanently empty.
 INSERT INTO face_profiles (
     id, tenant_id, employee_id,
     consent_given, consent_given_at,
     status, embedding, embedding_deleted,
+    review_status, pending_embedding, pending_photo_count, submitted_at,
     enrolled_at, revoked_at,
     created_at, updated_at
 )
@@ -54,7 +62,7 @@ SELECT
     NOW() - ((20 + (hashtext(e.id::text) % 20))::TEXT || ' days')::INTERVAL,
     CASE ((hashtext(e.id::text) % 10) + 10) % 10
         WHEN 0 THEN 'not_enrolled'
-        WHEN 1 THEN 'pending'
+        WHEN 1 THEN 'not_enrolled'
         WHEN 2 THEN 'revoked'
         ELSE      'enrolled'
     END,
@@ -68,6 +76,32 @@ SELECT
         )
     END,
     FALSE,
+    CASE ((hashtext(e.id::text) % 10) + 10) % 10
+        WHEN 1 THEN 'pending'
+        WHEN 3 THEN 'pending'
+        ELSE 'none'
+    END,
+    CASE ((hashtext(e.id::text) % 10) + 10) % 10
+        WHEN 1 THEN ARRAY(
+            SELECT round((((hashtext('pending:' || e.id::text || i::text) % 200) - 100))::NUMERIC / 100.0, 4)::DOUBLE PRECISION
+            FROM generate_series(1, 16) AS i
+        )
+        WHEN 3 THEN ARRAY(
+            SELECT round((((hashtext('pending:' || e.id::text || i::text) % 200) - 100))::NUMERIC / 100.0, 4)::DOUBLE PRECISION
+            FROM generate_series(1, 16) AS i
+        )
+        ELSE NULL
+    END,
+    CASE ((hashtext(e.id::text) % 10) + 10) % 10
+        WHEN 1 THEN 3 + (hashtext(e.id::text) % 3)
+        WHEN 3 THEN 3 + (hashtext(e.id::text) % 3)
+        ELSE NULL
+    END,
+    CASE ((hashtext(e.id::text) % 10) + 10) % 10
+        WHEN 1 THEN NOW() - ((1 + (hashtext(e.id::text) % 3))::TEXT || ' days')::INTERVAL
+        WHEN 3 THEN NOW() - ((1 + (hashtext(e.id::text) % 3))::TEXT || ' days')::INTERVAL
+        ELSE NULL
+    END,
     CASE ((hashtext(e.id::text) % 10) + 10) % 10
         WHEN 0 THEN NULL
         WHEN 1 THEN NULL

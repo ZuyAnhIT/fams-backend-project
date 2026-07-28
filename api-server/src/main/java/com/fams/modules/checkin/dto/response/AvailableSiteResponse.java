@@ -71,6 +71,12 @@ public class AvailableSiteResponse {
 
         @Schema(description = "Site timezone", example = "Asia/Ho_Chi_Minh")
         private String timezone;
+
+        @Schema(description = "Whether check-in at this site requires a passed active-liveness "
+                + "challenge (livenessChallengeId) instead of a plain photo — check this BEFORE "
+                + "submitting check-in so the camera flow can be started proactively instead of "
+                + "reacting to a 422 FACE_ID_REQUIRED after the fact", example = "false")
+        private boolean requireFaceIdCheckin;
     }
 
     @Data

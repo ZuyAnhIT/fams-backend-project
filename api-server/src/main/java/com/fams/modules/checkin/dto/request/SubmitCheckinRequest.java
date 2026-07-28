@@ -35,9 +35,16 @@ public class SubmitCheckinRequest {
     @Schema(description = "Device identifier for multi-device tracking (optional)", example = "device-abc-123")
     private String deviceId;
 
-    @Schema(description = "Base64-encoded selfie for face verification (optional, required when policy = location_face or location_face_liveness)")
+    @Schema(description = "Base64-encoded selfie for face verification. Optional at sites where "
+            + "requireFaceIdCheckin=false; ignored (livenessChallengeId is required instead) at sites where it's true.")
     private String employeePhotoBase64;
 
-    @Schema(description = "Require liveness check in addition to face match (policy = location_face_liveness)", example = "false", defaultValue = "false")
+    @Schema(description = "Require liveness check in addition to face match — only meaningful together "
+            + "with employeePhotoBase64 at a non-Face-ID-required site", example = "false", defaultValue = "false")
     private boolean requiresLiveness;
+
+    @Schema(description = "A PASSED, purpose=checkin active-liveness challenge UUID (from POST "
+            + ".../face-id/liveness-challenge + .../frames) — REQUIRED instead of employeePhotoBase64 "
+            + "at a site with requireFaceIdCheckin=true.", nullable = true)
+    private UUID livenessChallengeId;
 }

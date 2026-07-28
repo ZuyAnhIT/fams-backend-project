@@ -109,6 +109,7 @@ public class SiteService {
                 .longitude(request.getLongitude())
                 .timezone(timezone)
                 .status("active")
+                .requireFaceIdCheckin(request.isRequireFaceIdCheckin())
                 .createdBy(callerUserId)
                 .build();
 
@@ -207,6 +208,7 @@ public class SiteService {
             site.setTimezone(newTimezone);
         }
         if (StringUtils.hasText(request.getStatus()))   site.setStatus(request.getStatus());
+        if (request.getRequireFaceIdCheckin() != null)  site.setRequireFaceIdCheckin(request.getRequireFaceIdCheckin());
 
         siteRepository.save(site);
         log.info("Site updated: id={} tenantId={} by={}", siteId, tenantId, callerUserId);
@@ -259,6 +261,7 @@ public class SiteService {
                 .longitude(site.getLongitude())
                 .timezone(site.getTimezone())
                 .status(site.getStatus())
+                .requireFaceIdCheckin(site.isRequireFaceIdCheckin())
                 .createdBy(site.getCreatedBy())
                 .geofence(geofenceService.findActiveGeofenceForSite(site.getId()).orElse(null))
                 .shifts(shiftService.findActiveShiftsForSite(site.getId()))
@@ -309,6 +312,7 @@ public class SiteService {
                 .longitude(s.getLongitude())
                 .timezone(s.getTimezone())
                 .status(s.getStatus())
+                .requireFaceIdCheckin(s.isRequireFaceIdCheckin())
                 .createdBy(s.getCreatedBy())
                 .createdAt(s.getCreatedAt())
                 .updatedAt(s.getUpdatedAt())

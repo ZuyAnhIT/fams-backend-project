@@ -35,6 +35,11 @@ public class Violation {
     @Column(name = "check_response_id")
     private UUID checkResponseId;
 
+    /** Set when this violation originates from a regular (non-random-check) check-in whose
+     *  site requires Face ID and the async face verification came back failed/errored. */
+    @Column(name = "checkin_id")
+    private UUID checkinId;
+
     @Column(name = "violation_type", nullable = false, length = 30)
     private String violationType;
 
