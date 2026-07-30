@@ -47,6 +47,10 @@ public class Shift {
     @Column(name = "late_checkout_minutes", nullable = false)
     private int lateCheckoutMinutes;
 
+    /** gps_only | gps_face | gps_face_liveness | null (null = inherit the Site's policy). */
+    @Column(name = "checkin_policy_override", length = 20)
+    private String checkinPolicyOverride;
+
     @Column(nullable = false, length = 20)
     private String status;
 

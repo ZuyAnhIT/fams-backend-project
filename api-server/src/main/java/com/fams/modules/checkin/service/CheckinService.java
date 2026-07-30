@@ -150,65 +150,6 @@ public class CheckinService {
                     "Site status is '" + site.getStatus() + "', not active");
         }
 
-        // Sites can require Face ID for check-in (Site.requireFaceIdCheckin). Enforced here, not
-        // trusted from the client. A required site needs a PASSED active-liveness challenge
-        // (livenessChallengeId) — a raw employeePhotoBase64 is not accepted here, since that
-        // would let the App silently downgrade a policy-mandated check to a single static photo.
-        // An enrolled face is also required up front, so the employee gets a clear "go enroll
-        // first" message instead of a check-in that silently sails through unverified. A
-        // challenge that then FAILS the async embedding match is not blocked synchronously (the
-        // AI call is async) — instead FaceResultCallbackController escalates this check-in to
-        // pending_review + creates a violation once the result comes back, mirroring how the
-        // random-check module already treats face_fail/liveness_fail.
-        LivenessChallenge checkinChallenge = null;
-        if (site.isRequireFaceIdCheckin()) {
-            if (request.getLivenessChallengeId() == null) {
-                throw new BusinessException(
-                        "FACE_ID_REQUIRED",
-                        "Công trình này yêu cầu xác thực khuôn mặt chủ động (quay đầu/nháy mắt theo yêu cầu) khi chấm công.",
-                        HttpStatus.UNPROCESSABLE_ENTITY,
-                        "Site '" + site.getName() + "' requires a passed active-liveness challenge to check in");
-            }
-            boolean hasEnrolledFace = faceProfileRepository.findByEmployeeIdAndTenantId(employee.getId(), tenantId)
-                    .map(p -> "enrolled".equals(p.getStatus()))
-                    .orElse(false);
-            if (!hasEnrolledFace) {
-                throw new BusinessException(
-                        "FACE_ID_NOT_ENROLLED",
-                        "Công trình này yêu cầu Face ID nhưng bạn chưa đăng ký (hoặc chưa được duyệt). "
-                                + "Vui lòng hoàn tất đăng ký Face ID trước.",
-                        HttpStatus.UNPROCESSABLE_ENTITY,
-                        "Employee has no approved Face ID enrollment, required by site '" + site.getName() + "'");
-            }
-            checkinChallenge = livenessChallengeRepository
-                    .findByIdAndTenantIdAndEmployeeId(request.getLivenessChallengeId(), tenantId, employee.getId())
-                    .filter(c -> "checkin".equals(c.getPurpose()) && "passed".equals(c.getStatus()))
-                    // Must have been started FOR this exact site — otherwise a challenge
-                    // completed at Site A could be carried over and spent at Site B.
-                    .filter(c -> request.getSiteId().equals(c.getSiteId()))
-                    // Must be fresh — a 'passed' challenge sitting unused for a long time is a
-                    // window for reuse far from where/when it was actually performed.
-                    .filter(c -> c.getCompletedAt() != null
-                            && c.getCompletedAt().isAfter(OffsetDateTime.now().minusMinutes(CHECKIN_CHALLENGE_FRESHNESS_MINUTES)))
-                    .orElseThrow(() -> new BusinessException(
-                            "FACE_ID_REQUIRED",
-                            "Xác thực khuôn mặt chủ động không hợp lệ, không đúng công trình này, hoặc đã hết hạn. "
-                                    + "Vui lòng thực hiện lại ngay tại đây.",
-                            HttpStatus.UNPROCESSABLE_ENTITY,
-                            "livenessChallengeId is not a passed, unconsumed, fresh 'checkin' challenge "
-                                    + "for this employee at this exact site"));
-
-            // Atomic claim, inside this same transaction as the checkin insert below: only
-            // succeeds if the challenge is STILL 'passed' at this exact instant, so two
-            // concurrent submitCheckin calls replaying the same challengeId can't both get
-            // through — the loser gets rowcount=0 here and the whole transaction (including any
-            // checkin row this method builds afterward) rolls back on the exception.
-            if (livenessChallengeRepository.consumeIfPassed(checkinChallenge.getId()) == 0) {
-                throw new DuplicateResourceException(
-                        "This active-liveness challenge was already used by another request. Please perform a new one.");
-            }
-        }
-
         // Same site-timezone-aware resolution used by getAvailableSites, so the App can never
         // see a site listed as available and then have submitCheckin disagree about it.
         AssignmentService.AssignmentAvailability availability = assignmentService
@@ -238,6 +179,17 @@ public class CheckinService {
                 ? shiftRepository.findByIdAndSiteIdAndTenantIdAndDeletedAtIsNull(
                         assignment.getShiftId(), site.getId(), tenantId).orElse(null)
                 : null;
+
+        // Site policy (with the resolved Shift's optional override) decides how strict
+        // verification must be — see resolveEffectiveCheckinPolicy/enforceCheckinPolicy for the
+        // 3 tiers. Only known once the shift is resolved above, hence checked here rather than
+        // up front. A challenge that later FAILS the async embedding match is not blocked
+        // synchronously (the AI call is async) — instead FaceResultCallbackController escalates
+        // this check-in to pending_review + creates a violation once the result comes back,
+        // mirroring how the random-check module already treats face_fail/liveness_fail.
+        String effectivePolicy = resolveEffectiveCheckinPolicy(site, resolvedShift);
+        LivenessChallenge checkinChallenge = enforceCheckinPolicy(effectivePolicy, "checkin", request.getSiteId(),
+                employee.getId(), tenantId, request.getEmployeePhotoBase64(), request.getLivenessChallengeId());
 
         // Geofence validation via PostGIS
         boolean insideGeofence = true;
@@ -274,6 +226,8 @@ public class CheckinService {
                 .checkInInsideGeofence(insideGeofence)
                 .gpsRiskScore(riskScore)
                 .deviceId(request.getDeviceId())
+                .effectiveCheckinPolicy(effectivePolicy)
+                .source("online")
                 .build();
 
         try {
@@ -303,9 +257,11 @@ public class CheckinService {
                 // (not a violation: this is an infra failure, not a proven face mismatch).
                 log.warn("Failed to publish face verify job from challenge for checkin {}: {}",
                         record.getId(), e.getMessage());
-                if ("valid".equals(record.getStatus())) {
+                // Column-scoped conditional update (not a full save(record)) — see the repository
+                // method's javadoc for why: this must not race-clobber a checkout that could be
+                // landing on the same row concurrently.
+                if (checkinRepository.escalateToPendingReviewIfValid(record.getId()) > 0) {
                     record.setStatus("pending_review");
-                    checkinRepository.save(record);
                 }
             }
         } else if (request.getEmployeePhotoBase64() != null && !request.getEmployeePhotoBase64().isBlank()) {
@@ -324,7 +280,7 @@ public class CheckinService {
             log.warn("Failed to update attendance summary for checkin {}: {}", record.getId(), e.getMessage());
         }
 
-        return toCheckinResponse(record);
+        return toCheckinResponse(record, employee, site);
     }
 
     // ── Task 72: Submit GPS check-out ────────────────────────────────────────
@@ -348,6 +304,28 @@ public class CheckinService {
                     "Already checked out at " + record.getCheckOutAt());
         }
 
+        Site site = siteRepository.findByIdAndTenantIdAndDeletedAtIsNull(record.getSiteId(), tenantId)
+                .orElse(null);
+        Shift shift = record.getShiftId() != null && site != null
+                ? shiftRepository.findByIdAndSiteIdAndTenantIdAndDeletedAtIsNull(
+                        record.getShiftId(), site.getId(), tenantId).orElse(null)
+                : null;
+
+        // Checkout is verified against the SAME tier that applied at check-in — using the
+        // snapshot captured on the record then (V78), not a live re-resolve. If HR changes a
+        // site/shift's policy mid-shift, an employee already checked in under the old policy
+        // must not get stranded at checkout unable to satisfy a requirement they were never
+        // told about (same "snapshot at time of action" principle as the shift-time fields,
+        // V72). This does NOT weaken buddy-checkout prevention: that protection comes from
+        // "checkout requires the same proof check-in required", not from always tracking the
+        // latest policy value. Records predating V78 have no snapshot — fall back to a live
+        // resolve for those only.
+        String effectivePolicy = record.getEffectiveCheckinPolicy() != null
+                ? record.getEffectiveCheckinPolicy()
+                : (site != null ? resolveEffectiveCheckinPolicy(site, shift) : "gps_only");
+        LivenessChallenge checkoutChallenge = enforceCheckinPolicy(effectivePolicy, "checkout", record.getSiteId(),
+                employee.getId(), tenantId, request.getEmployeePhotoBase64(), request.getLivenessChallengeId());
+
         // Geofence validation for checkout location
         boolean insideGeofence = true;
         Optional<Geofence> geofenceOpt = geofenceRepository
@@ -366,20 +344,20 @@ public class CheckinService {
         // Task 73: apply late-checkout cap using the shift snapshot captured at check-in time
         // (never a live re-fetch — see CheckinRecord field comment) so a Shift edit made after
         // this employee already checked in can never change how this session's hours are counted.
-        String siteTimezone = siteRepository
-                .findByIdAndTenantIdAndDeletedAtIsNull(record.getSiteId(), tenantId)
-                .map(Site::getTimezone)
-                .orElse("UTC");
+        String siteTimezone = site != null ? site.getTimezone() : "UTC";
         int workMinutes = computeWorkMinutes(record.getCheckInAt(), checkOutAt,
                 record.getShiftStartTime(), record.getShiftEndTime(),
                 record.getShiftAllowOvernight(), record.getShiftAllowOvertime(),
                 record.getShiftLateCheckoutMinutes(), siteTimezone);
 
-        // Escalate to pending_review if checkout is outside geofence
-        if (!insideGeofence && "valid".equals(record.getStatus())) {
-            record.setStatus("pending_review");
-        }
-
+        // Column-scoped update (not a full save(record)) — a check-in/checkout face-verify
+        // callback for this SAME row can legitimately arrive and commit around the same instant
+        // (that race is exactly what caused an earlier check-out's checkOutAt to be observed
+        // reverted to NULL during testing). Writing only the checkout-specific columns here means
+        // a concurrent callback writing only ITS columns can never clobber this write or vice
+        // versa, regardless of which transaction commits first. See CheckinRepository javadoc.
+        checkinRepository.applyCheckout(record.getId(), checkOutAt, request.getLatitude(), request.getLongitude(),
+                request.getGpsAccuracy(), insideGeofence, workMinutes);
         record.setCheckOutAt(checkOutAt);
         record.setCheckOutLat(request.getLatitude());
         record.setCheckOutLon(request.getLongitude());
@@ -387,9 +365,39 @@ public class CheckinService {
         record.setCheckOutInsideGeofence(insideGeofence);
         record.setWorkMinutes(workMinutes);
 
-        checkinRepository.save(record);
+        // Escalate to pending_review if checkout is outside geofence — separate, idempotent,
+        // WHERE-guarded statement (see escalateToPendingReviewIfValid javadoc).
+        if (!insideGeofence && checkinRepository.escalateToPendingReviewIfValid(record.getId()) > 0) {
+            record.setStatus("pending_review");
+        }
+
         log.info("Check-out recorded: id={} employeeId={} siteId={} workMinutes={} insideGeofence={}",
                 record.getId(), employee.getId(), record.getSiteId(), workMinutes, insideGeofence);
+
+        // Async face verification at checkout — mirrors check-in: challenge-sourced when the
+        // policy demanded one, else the optional plain-photo path. FaceResultCallbackController
+        // routes sourceType="checkout" results to the checkout_* columns (kept separate from the
+        // check-in verification already on this same row) and escalates/creates a violation the
+        // same way a failed REQUIRED check-in verification does.
+        if (checkoutChallenge != null) {
+            try {
+                faceVerifyJobPublisher.publishFromChallenge(tenantId, employee.getId(), record.getId(),
+                        "checkout", checkoutChallenge.getId());
+            } catch (Exception e) {
+                log.warn("Failed to publish face verify job from challenge for checkout {}: {}",
+                        record.getId(), e.getMessage());
+                if (checkinRepository.escalateToPendingReviewIfValid(record.getId()) > 0) {
+                    record.setStatus("pending_review");
+                }
+            }
+        } else if (request.getEmployeePhotoBase64() != null && !request.getEmployeePhotoBase64().isBlank()) {
+            try {
+                faceVerifyJobPublisher.publish(tenantId, employee.getId(), record.getId(),
+                        "checkout", request.getEmployeePhotoBase64(), request.isRequiresLiveness());
+            } catch (Exception e) {
+                log.warn("Failed to publish face verify job for checkout {}: {}", record.getId(), e.getMessage());
+            }
+        }
 
         // Task 80: update daily attendance summary after every checkout
         try {
@@ -398,7 +406,7 @@ public class CheckinService {
             log.warn("Failed to update attendance summary for checkin {}: {}", record.getId(), e.getMessage());
         }
 
-        return toCheckinResponse(record);
+        return toCheckinResponse(record, employee, site);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -554,7 +562,8 @@ public class CheckinService {
                     "Check-in record does not belong to this employee");
         }
 
-        return toCheckinResponse(record);
+        Site site = siteRepository.findByIdAndTenantIdAndDeletedAtIsNull(record.getSiteId(), tenantId).orElse(null);
+        return toCheckinResponse(record, employee, site);
     }
 
     // ── Task 77: Employee check-in history ───────────────────────────────────
@@ -568,13 +577,12 @@ public class CheckinService {
         PageRequest pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "checkInAt"));
         Specification<CheckinRecord> spec =
                 CheckinSpecification.build(tenantId, employee.getId(), null, null, from, to);
-        Page<CheckinResponse> resultPage = checkinRepository.findAll(spec, pageable)
-                .map(this::toCheckinResponse);
+        Page<CheckinRecord> resultPage = checkinRepository.findAll(spec, pageable);
 
         log.info("Check-in history: tenantId={} employeeId={} from={} to={} total={}",
                 tenantId, employee.getId(), from, to, resultPage.getTotalElements());
 
-        return PageResponse.from(resultPage);
+        return toPageResponse(resultPage, toCheckinResponsesBatch(resultPage.getContent()));
     }
 
     // ── Task 78: HR check-in list ─────────────────────────────────────────────
@@ -626,13 +634,12 @@ public class CheckinService {
         Specification<CheckinRecord> spec =
                 CheckinSpecification.build(tenantId, employeeId, effectiveSiteFilter, status, from, to);
 
-        Page<CheckinResponse> resultPage = checkinRepository.findAll(spec, pageable)
-                .map(this::toCheckinResponse);
+        Page<CheckinRecord> resultPage = checkinRepository.findAll(spec, pageable);
 
         log.info("HR checkin list: tenantId={} employeeId={} siteId={} status={} total={}",
                 tenantId, employeeId, siteId, status, resultPage.getTotalElements());
 
-        return PageResponse.from(resultPage);
+        return toPageResponse(resultPage, toCheckinResponsesBatch(resultPage.getContent()));
     }
 
     // ── Task 113: Employee submit explanation for check-in ───────────────────────
@@ -695,13 +702,18 @@ public class CheckinService {
 
         record.setStatus(request.getStatus());
         record.setNote(request.getReason());
+        record.setOverriddenBy(callerUserId);
+        record.setOverriddenAt(OffsetDateTime.now());
         checkinRepository.save(record);
 
         log.info("HR override checkin: checkinId={} newStatus={} by={}", checkinId, request.getStatus(), callerUserId);
 
         attendanceSummaryService.recomputeForCheckin(record);
 
-        return toCheckinResponse(record);
+        Employee employee = employeeRepository.findByIdAndTenantIdAndDeletedAtIsNull(record.getEmployeeId(), tenantId)
+                .orElse(null);
+        Site site = siteRepository.findByIdAndTenantIdAndDeletedAtIsNull(record.getSiteId(), tenantId).orElse(null);
+        return toCheckinResponse(record, employee, site);
     }
 
     // ── Task 79: HR check-in detail ───────────────────────────────────────────
@@ -795,6 +807,18 @@ public class CheckinService {
                 .checkOutAccuracy(r.getCheckOutAccuracy())
                 .checkOutInsideGeofence(r.getCheckOutInsideGeofence())
                 .workMinutes(r.getWorkMinutes())
+                .faceVerified(r.getFaceVerified())
+                .livenessVerified(r.getLivenessVerified())
+                .faceVerifyScore(r.getFaceVerifyScore())
+                .checkoutFaceVerified(r.getCheckoutFaceVerified())
+                .checkoutLivenessVerified(r.getCheckoutLivenessVerified())
+                .checkoutFaceVerifyScore(r.getCheckoutFaceVerifyScore())
+                .effectiveCheckinPolicy(r.getEffectiveCheckinPolicy())
+                .source(r.getSource())
+                .clientNonce(r.getClientNonce())
+                .note(r.getNote())
+                .overriddenBy(r.getOverriddenBy())
+                .overriddenAt(r.getOverriddenAt())
                 .employee(empInfo)
                 .site(siteInfo)
                 .shift(shiftInfo)
@@ -818,6 +842,10 @@ public class CheckinService {
                 .checkInAccuracy(r.getCheckInAccuracy())
                 .checkInInsideGeofence(r.isCheckInInsideGeofence())
                 .checkOutAt(r.getCheckOutAt())
+                .checkOutLat(r.getCheckOutLat())
+                .checkOutLon(r.getCheckOutLon())
+                .checkOutAccuracy(r.getCheckOutAccuracy())
+                .checkOutInsideGeofence(r.getCheckOutInsideGeofence())
                 .workMinutes(r.getWorkMinutes())
                 .gpsRiskScore(r.getGpsRiskScore())
                 .deviceId(r.getDeviceId())
@@ -827,6 +855,58 @@ public class CheckinService {
                 .faceVerified(r.getFaceVerified())
                 .livenessVerified(r.getLivenessVerified())
                 .faceVerifyScore(r.getFaceVerifyScore())
+                .checkoutFaceVerified(r.getCheckoutFaceVerified())
+                .checkoutLivenessVerified(r.getCheckoutLivenessVerified())
+                .checkoutFaceVerifyScore(r.getCheckoutFaceVerifyScore())
+                .effectiveCheckinPolicy(r.getEffectiveCheckinPolicy())
+                .source(r.getSource())
+                .build();
+    }
+
+    /** Same mapping, plus batch-resolved display names — avoids a client-side N+1 lookup for
+     *  list/history screens (Web integration report, 2026-07-29). Employee/Site are optional
+     *  (null if not resolved/found); names are simply left null in that case. */
+    private CheckinResponse toCheckinResponse(CheckinRecord r, Employee employee, Site site) {
+        CheckinResponse response = toCheckinResponse(r);
+        if (employee != null) {
+            response.setEmployeeName((employee.getFirstName() + " " + employee.getLastName()).trim());
+            response.setEmployeeCode(employee.getEmployeeCode());
+        }
+        if (site != null) {
+            response.setSiteName(site.getName());
+        }
+        return response;
+    }
+
+    /** Batch-fetches Employee/Site for a page of records in 2 queries total instead of N+1. */
+    private List<CheckinResponse> toCheckinResponsesBatch(List<CheckinRecord> records) {
+        Set<UUID> employeeIds = records.stream().map(CheckinRecord::getEmployeeId).collect(Collectors.toSet());
+        Set<UUID> siteIds = records.stream().map(CheckinRecord::getSiteId).collect(Collectors.toSet());
+
+        java.util.Map<UUID, Employee> employeesById = employeeIds.isEmpty() ? java.util.Map.of()
+                : employeeRepository.findAllById(employeeIds).stream()
+                        .collect(Collectors.toMap(Employee::getId, e -> e));
+        java.util.Map<UUID, Site> sitesById = siteIds.isEmpty() ? java.util.Map.of()
+                : siteRepository.findAllById(siteIds).stream()
+                        .collect(Collectors.toMap(Site::getId, s -> s));
+
+        return records.stream()
+                .map(r -> toCheckinResponse(r, employeesById.get(r.getEmployeeId()), sitesById.get(r.getSiteId())))
+                .toList();
+    }
+
+    /** Rebuilds a PageResponse from a JPA Page's pagination metadata plus a separately-mapped
+     *  content list — needed because Page.map() only supports 1:1 mapping, not the batch
+     *  employee/site lookup toCheckinResponsesBatch does. */
+    private PageResponse<CheckinResponse> toPageResponse(Page<CheckinRecord> sourcePage, List<CheckinResponse> content) {
+        return PageResponse.<CheckinResponse>builder()
+                .content(content)
+                .page(sourcePage.getNumber())
+                .size(sourcePage.getSize())
+                .totalElements(sourcePage.getTotalElements())
+                .totalPages(sourcePage.getTotalPages())
+                .first(sourcePage.isFirst())
+                .last(sourcePage.isLast())
                 .build();
     }
 
@@ -836,9 +916,15 @@ public class CheckinService {
             case "valid" -> checkedOut
                     ? "Check-out recorded successfully. You worked " + r.getWorkMinutes() + " minutes."
                     : "Check-in recorded successfully.";
+            // pending_review can now come from more than just geofence (P0-3 async face-verify
+            // escalation, offline-sync best-effort verification) — keep the message generic
+            // rather than always blaming location, which would mislead someone whose actual
+            // issue was a failed face match.
             case "pending_review" -> checkedOut
-                    ? "Check-out recorded. Your location was outside the site geofence — HR will review your attendance."
-                    : "Check-in recorded. Your location was outside the site geofence — HR will review your attendance.";
+                    ? "Check-out recorded, but needs HR review (location or face verification). "
+                            + "This won't affect your pay until reviewed."
+                    : "Check-in recorded, but needs HR review (location or face verification). "
+                            + "You may proceed with work as normal.";
             case "rejected" -> "Your attendance record was rejected by HR. Please contact your manager.";
             default -> "Attendance recorded with status: " + r.getStatus() + ".";
         };
@@ -854,13 +940,14 @@ public class CheckinService {
                 .orElseThrow(() -> new ResourceNotFoundException(
                         "Site not found: " + assignment.getSiteId()));
 
+        Shift resolvedShift = null;
         AvailableSiteResponse.ShiftInfo shiftInfo = null;
         if (assignment.getShiftId() != null) {
-            shiftInfo = shiftRepository
+            resolvedShift = shiftRepository
                     .findByIdAndSiteIdAndTenantIdAndDeletedAtIsNull(
                             assignment.getShiftId(), site.getId(), tenantId)
-                    .map(this::toShiftInfo)
                     .orElse(null);
+            shiftInfo = resolvedShift != null ? toShiftInfo(resolvedShift) : null;
         }
 
         AvailableSiteResponse.GeofenceInfo geofenceInfo = geofenceRepository
@@ -893,6 +980,7 @@ public class CheckinService {
                 .checkinAllowedUntil(availability.checkinAllowedUntil() != null
                         ? availability.checkinAllowedUntil().atZone(zone).toOffsetDateTime() : null)
                 .availabilityStatus(availabilityStatus)
+                .effectiveCheckinPolicy(resolveEffectiveCheckinPolicy(site, resolvedShift))
                 .build();
     }
 
@@ -905,8 +993,104 @@ public class CheckinService {
                 .latitude(site.getLatitude())
                 .longitude(site.getLongitude())
                 .timezone(site.getTimezone())
-                .requireFaceIdCheckin(site.isRequireFaceIdCheckin())
                 .build();
+    }
+
+    /** A Shift's override wins if set; otherwise inherit the Site's policy. */
+    private String resolveEffectiveCheckinPolicy(Site site, Shift shift) {
+        if (shift != null && shift.getCheckinPolicyOverride() != null) {
+            return shift.getCheckinPolicyOverride();
+        }
+        return site.getCheckinPolicy();
+    }
+
+    /**
+     * Shared by submitCheckin and submitCheckout — validates whatever the client supplied
+     * (photoBase64 and/or challengeId) actually satisfies the effective policy tier, atomically
+     * consuming a challenge if one both applies and was used. Never trusts the client's own
+     * choice of which proof to send; always re-derives what's REQUIRED from the policy itself.
+     *
+     * <ul>
+     *   <li>gps_only — nothing required, returns null (caller's existing optional-photo path,
+     *       if any, is untouched by this method).</li>
+     *   <li>gps_face — requires an enrolled face, then EITHER a plain photo OR a passed challenge
+     *       (the challenge is accepted too — it's the strictly stronger proof, and a client that
+     *       already did the full active-liveness dance shouldn't be forced to also send a plain
+     *       photo). Returns the challenge if one was used, else null (caller publishes from the
+     *       plain photo itself).</li>
+     *   <li>gps_face_liveness — requires an enrolled face AND a passed challenge specifically;
+     *       a plain photo alone is rejected. Always returns the (now-consumed) challenge.</li>
+     * </ul>
+     *
+     * @param purpose "checkin" or "checkout" — must match the challenge's own purpose column, so
+     *                a check-in challenge can't be spent at checkout or vice versa.
+     */
+    private LivenessChallenge enforceCheckinPolicy(String policy, String purpose, UUID siteId,
+                                                    UUID employeeId, UUID tenantId,
+                                                    String photoBase64, UUID challengeId) {
+        if ("gps_only".equals(policy)) {
+            return null;
+        }
+
+        boolean hasEnrolledFace = faceProfileRepository.findByEmployeeIdAndTenantId(employeeId, tenantId)
+                .map(p -> "enrolled".equals(p.getStatus()))
+                .orElse(false);
+        if (!hasEnrolledFace) {
+            throw new BusinessException(
+                    "FACE_ID_NOT_ENROLLED",
+                    "Địa điểm/ca này yêu cầu Face ID nhưng bạn chưa đăng ký (hoặc chưa được duyệt). "
+                            + "Vui lòng hoàn tất đăng ký Face ID trước.",
+                    HttpStatus.UNPROCESSABLE_ENTITY,
+                    "Employee has no approved Face ID enrollment, required by policy '" + policy + "'");
+        }
+
+        boolean challengeRequired = "gps_face_liveness".equals(policy);
+        if (!challengeRequired && challengeId == null) {
+            // gps_face tier satisfied via the simpler plain-photo path.
+            if (photoBase64 == null || photoBase64.isBlank()) {
+                throw new BusinessException(
+                        "FACE_ID_REQUIRED",
+                        "Cần xác thực khuôn mặt (ảnh chụp hoặc quay động) để tiếp tục.",
+                        HttpStatus.UNPROCESSABLE_ENTITY,
+                        "Policy '" + policy + "' requires a Face ID photo or an active-liveness challenge");
+            }
+            return null;
+        }
+
+        if (challengeId == null) {
+            throw new BusinessException(
+                    "FACE_ID_REQUIRED",
+                    "Cần xác thực khuôn mặt chủ động (quay đầu/nháy mắt theo yêu cầu).",
+                    HttpStatus.UNPROCESSABLE_ENTITY,
+                    "Policy '" + policy + "' requires a passed active-liveness challenge");
+        }
+        LivenessChallenge challenge = livenessChallengeRepository
+                .findByIdAndTenantIdAndEmployeeId(challengeId, tenantId, employeeId)
+                .filter(c -> purpose.equals(c.getPurpose()) && "passed".equals(c.getStatus()))
+                // Must have been started FOR this exact site — otherwise a challenge completed
+                // at Site A could be carried over and spent at Site B.
+                .filter(c -> siteId.equals(c.getSiteId()))
+                // Must be fresh — a 'passed' challenge sitting unused for a long time is a
+                // window for reuse far from where/when it was actually performed.
+                .filter(c -> c.getCompletedAt() != null
+                        && c.getCompletedAt().isAfter(OffsetDateTime.now().minusMinutes(CHECKIN_CHALLENGE_FRESHNESS_MINUTES)))
+                .orElseThrow(() -> new BusinessException(
+                        "FACE_ID_REQUIRED",
+                        "Xác thực khuôn mặt chủ động không hợp lệ, không đúng địa điểm này, hoặc đã hết hạn. "
+                                + "Vui lòng thực hiện lại ngay tại đây.",
+                        HttpStatus.UNPROCESSABLE_ENTITY,
+                        "livenessChallengeId is not a passed, unconsumed, fresh '" + purpose + "' challenge "
+                                + "for this employee at this exact site"));
+
+        // Atomic claim, inside this same transaction as the checkin/checkout write: only
+        // succeeds if the challenge is STILL 'passed' at this exact instant, so two concurrent
+        // requests replaying the same challengeId can't both get through — the loser gets
+        // rowcount=0 here and the whole transaction rolls back on the exception.
+        if (livenessChallengeRepository.consumeIfPassed(challenge.getId()) == 0) {
+            throw new DuplicateResourceException(
+                    "This active-liveness challenge was already used by another request. Please perform a new one.");
+        }
+        return challenge;
     }
 
     private AvailableSiteResponse.ShiftInfo toShiftInfo(Shift shift) {

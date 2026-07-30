@@ -47,6 +47,14 @@ public class AvailableSiteResponse {
             example = "open", allowableValues = {"unrestricted", "upcoming", "open", "closed"})
     private String availabilityStatus;
 
+    @Schema(description = "Resolved check-in/check-out verification tier for THIS occurrence — "
+            + "the shift's override if it has one, otherwise the site's policy. Use this (not "
+            + "site.checkinPolicy) to decide whether to open the camera flow before submitting: "
+            + "gps_only = nothing extra needed; gps_face = need a Face ID photo or challenge; "
+            + "gps_face_liveness = need a PASSED active-liveness challenge specifically.",
+            example = "gps_only", allowableValues = {"gps_only", "gps_face", "gps_face_liveness"})
+    private String effectiveCheckinPolicy;
+
     @Data
     @Builder
     @Schema(description = "Site details")
@@ -71,12 +79,6 @@ public class AvailableSiteResponse {
 
         @Schema(description = "Site timezone", example = "Asia/Ho_Chi_Minh")
         private String timezone;
-
-        @Schema(description = "Whether check-in at this site requires a passed active-liveness "
-                + "challenge (livenessChallengeId) instead of a plain photo — check this BEFORE "
-                + "submitting check-in so the camera flow can be started proactively instead of "
-                + "reacting to a 422 FACE_ID_REQUIRED after the fact", example = "false")
-        private boolean requireFaceIdCheckin;
     }
 
     @Data

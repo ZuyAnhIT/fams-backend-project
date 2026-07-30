@@ -154,7 +154,7 @@ public class FaceIdController {
                     + "dynamic actions from turn_left/turn_right/look_up/look_down/blink) the caller must "
                     + "perform, one photo per action, submitted in order to POST .../liveness-challenge/{challengeId}/frames "
                     + "within the challenge's expiry window. Required for self-service enrollment (see POST /enroll/from-challenge) "
-                    + "and for check-in at a site with requireFaceIdCheckin=true. "
+                    + "and for check-in/check-out at a site or shift whose effective policy is gps_face_liveness. "
                     + "Callable by the employee themselves or a user with face_id:manage permission.")
     @ApiResponses({
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Challenge started",
@@ -168,9 +168,9 @@ public class FaceIdController {
     public ResponseEntity<ApiResponse<LivenessChallengeResponse>> startLivenessChallenge(
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
             @Parameter(description = "Employee UUID") @PathVariable UUID employeeId,
-            @Parameter(description = "'enroll' or 'checkin'") @RequestParam String purpose,
-            @Parameter(description = "Site UUID — REQUIRED when purpose=checkin (binds the challenge to that "
-                    + "site so it can't be consumed by a check-in at a different one); ignored for purpose=enroll")
+            @Parameter(description = "'enroll', 'checkin', or 'checkout'") @RequestParam String purpose,
+            @Parameter(description = "Site UUID — REQUIRED when purpose=checkin/checkout (binds the challenge to "
+                    + "that site so it can't be consumed by a check-in/check-out at a different one); ignored for purpose=enroll")
             @RequestParam(required = false) UUID siteId,
             @AuthenticationPrincipal FamsUserDetails userDetails) {
         log.info("Liveness challenge start tenantId={} employeeId={} purpose={} siteId={} by={}",

@@ -77,6 +77,9 @@ public class ShiftService {
         }
 
         validateShiftTimes(request.getStartTime(), request.getEndTime(), request.isAllowOvernight());
+        if (request.getCheckinPolicyOverride() != null) {
+            validateCheckinPolicy(request.getCheckinPolicyOverride());
+        }
 
         Shift shift = Shift.builder()
                 .siteId(siteId)
@@ -86,6 +89,7 @@ public class ShiftService {
                 .endTime(request.getEndTime())
                 .allowOvernight(request.isAllowOvernight())
                 .status("active")
+                .checkinPolicyOverride(request.getCheckinPolicyOverride())
                 .createdBy(callerUserId)
                 .build();
 
@@ -169,6 +173,13 @@ public class ShiftService {
         if (request.getAllowOvernight() != null) shift.setAllowOvernight(request.getAllowOvernight());
         if (StringUtils.hasText(request.getStatus())) shift.setStatus(request.getStatus());
 
+        if (request.isClearCheckinPolicyOverride()) {
+            shift.setCheckinPolicyOverride(null);
+        } else if (request.getCheckinPolicyOverride() != null) {
+            validateCheckinPolicy(request.getCheckinPolicyOverride());
+            shift.setCheckinPolicyOverride(request.getCheckinPolicyOverride());
+        }
+
         validateShiftTimes(shift.getStartTime(), shift.getEndTime(), shift.isAllowOvernight());
 
         shiftRepository.save(shift);
@@ -190,6 +201,15 @@ public class ShiftService {
         }
         if (allowOvernight && startTime.equals(endTime)) {
             throw new IllegalArgumentException("startTime and endTime must not be identical");
+        }
+    }
+
+    private static final Set<String> VALID_CHECKIN_POLICIES = Set.of("gps_only", "gps_face", "gps_face_liveness");
+
+    private void validateCheckinPolicy(String policy) {
+        if (!VALID_CHECKIN_POLICIES.contains(policy)) {
+            throw new IllegalArgumentException(
+                    "checkinPolicyOverride must be one of " + VALID_CHECKIN_POLICIES + ", got '" + policy + "'");
         }
     }
 
@@ -290,6 +310,7 @@ public class ShiftService {
                 .earlyCheckinMinutes(s.getEarlyCheckinMinutes())
                 .lateCheckoutMinutes(s.getLateCheckoutMinutes())
                 .status(s.getStatus())
+                .checkinPolicyOverride(s.getCheckinPolicyOverride())
                 .assignmentHistoryCount(assignmentHistoryCount)
                 .canDelete(assignmentHistoryCount == 0)
                 .createdBy(s.getCreatedBy())

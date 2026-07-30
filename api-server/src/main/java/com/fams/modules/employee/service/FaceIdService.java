@@ -239,12 +239,12 @@ public class FaceIdService {
                 .orElseThrow(() -> new ResourceNotFoundException("Employee not found: " + employeeId));
         requireManageOrSelf(employee, tenantId, callerUserId, callerIsPlatformAdmin);
 
-        if (!"enroll".equals(purpose) && !"checkin".equals(purpose)) {
-            throw new IllegalArgumentException("purpose must be 'enroll' or 'checkin'");
+        if (!"enroll".equals(purpose) && !"checkin".equals(purpose) && !"checkout".equals(purpose)) {
+            throw new IllegalArgumentException("purpose must be 'enroll', 'checkin', or 'checkout'");
         }
-        if ("checkin".equals(purpose) && siteId == null) {
-            throw new IllegalArgumentException("siteId is required for purpose=checkin — the resulting "
-                    + "challenge can only be consumed by a check-in at that exact site");
+        if (("checkin".equals(purpose) || "checkout".equals(purpose)) && siteId == null) {
+            throw new IllegalArgumentException("siteId is required for purpose=checkin/checkout — the "
+                    + "resulting challenge can only be consumed by a check-in/check-out at that exact site");
         }
 
         // Never let the server start capturing/analyzing biometric photos for a self-enrollment

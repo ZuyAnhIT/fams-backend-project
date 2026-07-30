@@ -113,8 +113,35 @@ public class CheckinRecord {
     @Column(name = "face_verify_score")
     private Double faceVerifyScore;
 
+    @Column(name = "checkout_face_verified")
+    private Boolean checkoutFaceVerified;
+
+    @Column(name = "checkout_liveness_verified")
+    private Boolean checkoutLivenessVerified;
+
+    @Column(name = "checkout_face_verify_score")
+    private Double checkoutFaceVerifyScore;
+
     @Column(name = "client_nonce")
     private UUID clientNonce;
+
+    // Snapshot of the resolved (site, with shift override) policy AT CHECK-IN TIME — checkout
+    // enforces against THIS, not a live re-resolve, so a policy change mid-shift can't strand an
+    // already-checked-in employee at checkout. Null for records predating this column (V78);
+    // callers fall back to a live resolve for those. See CheckinService.enforceCheckinPolicy.
+    @Column(name = "effective_checkin_policy", length = 20)
+    private String effectiveCheckinPolicy;
+
+    // "online" (submitCheckin) | "offline" (OfflineSyncService) — lets HR distinguish
+    // live-submitted records from ones synced later from a device that was offline.
+    @Column(nullable = false, length = 10)
+    private String source;
+
+    @Column(name = "overridden_by")
+    private UUID overriddenBy;
+
+    @Column(name = "overridden_at")
+    private OffsetDateTime overriddenAt;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
@@ -131,6 +158,7 @@ public class CheckinRecord {
         if (createdAt == null) createdAt = now;
         if (updatedAt == null) updatedAt = now;
         if (status == null) status = "valid";
+        if (source == null) source = "online";
     }
 
     @PreUpdate

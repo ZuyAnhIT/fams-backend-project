@@ -28,4 +28,18 @@ public class SubmitCheckoutRequest {
 
     @Schema(description = "Device identifier (optional)", example = "device-abc-123")
     private String deviceId;
+
+    @Schema(description = "Base64-encoded selfie for face verification at checkout. Optional at "
+            + "gps_only/gps_face sites (gps_face also accepts this OR livenessChallengeId); ignored "
+            + "(livenessChallengeId is required instead) at gps_face_liveness sites.")
+    private String employeePhotoBase64;
+
+    @Schema(description = "Require liveness check in addition to face match — only meaningful "
+            + "together with employeePhotoBase64", example = "false", defaultValue = "false")
+    private boolean requiresLiveness;
+
+    @Schema(description = "A PASSED, purpose=checkout active-liveness challenge UUID (from POST "
+            + ".../face-id/liveness-challenge + .../frames) — required instead of employeePhotoBase64 "
+            + "at a gps_face_liveness site.", nullable = true)
+    private java.util.UUID livenessChallengeId;
 }

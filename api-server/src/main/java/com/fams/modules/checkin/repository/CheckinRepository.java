@@ -3,6 +3,7 @@ package com.fams.modules.checkin.repository;
 import com.fams.modules.checkin.entity.CheckinRecord;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -85,4 +86,48 @@ public interface CheckinRepository extends JpaRepository<CheckinRecord, UUID>, J
             @Param("lat") double lat,
             @Param("polygonWkt") String polygonWkt,
             @Param("bufferMeters") int bufferMeters);
+
+    // ── Column-scoped updates ────────────────────────────────────────────────
+    // submitCheckout and the async face-result callback can run concurrently against the SAME
+    // row (checkout fires the async job, then returns — the callback can arrive before checkout's
+    // own transaction is even visible elsewhere). A "load full entity, mutate several fields,
+    // save()" pattern in both places is a classic lost-update race: whichever transaction's
+    // full-entity save() commits SECOND silently reverts the columns the OTHER one just wrote,
+    // because Hibernate's save() writes every mapped column from its own (possibly stale)
+    // in-memory copy. Each write path below touches ONLY the columns it actually owns, so two
+    // concurrent updates to disjoint column sets can never clobber each other regardless of
+    // commit order — this was caught via live testing (a checkout's check_out_at was observed
+    // reverted to NULL by a fast-arriving face-result callback) and applies equally to the
+    // check-in side, which had the identical latent risk.
+
+    @Modifying
+    @Query("UPDATE CheckinRecord c SET c.checkOutAt = :checkOutAt, c.checkOutLat = :checkOutLat, "
+            + "c.checkOutLon = :checkOutLon, c.checkOutAccuracy = :checkOutAccuracy, "
+            + "c.checkOutInsideGeofence = :checkOutInsideGeofence, c.workMinutes = :workMinutes "
+            + "WHERE c.id = :id")
+    int applyCheckout(@Param("id") UUID id,
+                       @Param("checkOutAt") OffsetDateTime checkOutAt,
+                       @Param("checkOutLat") Double checkOutLat,
+                       @Param("checkOutLon") Double checkOutLon,
+                       @Param("checkOutAccuracy") Double checkOutAccuracy,
+                       @Param("checkOutInsideGeofence") boolean checkOutInsideGeofence,
+                       @Param("workMinutes") int workMinutes);
+
+    @Modifying
+    @Query("UPDATE CheckinRecord c SET c.faceVerified = :faceVerified, c.livenessVerified = :livenessVerified, "
+            + "c.faceVerifyScore = :score WHERE c.id = :id")
+    int applyCheckinFaceResult(@Param("id") UUID id, @Param("faceVerified") Boolean faceVerified,
+                                @Param("livenessVerified") Boolean livenessVerified, @Param("score") Double score);
+
+    @Modifying
+    @Query("UPDATE CheckinRecord c SET c.checkoutFaceVerified = :faceVerified, "
+            + "c.checkoutLivenessVerified = :livenessVerified, c.checkoutFaceVerifyScore = :score WHERE c.id = :id")
+    int applyCheckoutFaceResult(@Param("id") UUID id, @Param("faceVerified") Boolean faceVerified,
+                                 @Param("livenessVerified") Boolean livenessVerified, @Param("score") Double score);
+
+    /** Idempotent, race-safe escalation: only moves valid -> pending_review, never the reverse,
+     *  and the WHERE guard means concurrent callers racing this never "un-escalate" each other. */
+    @Modifying
+    @Query("UPDATE CheckinRecord c SET c.status = 'pending_review' WHERE c.id = :id AND c.status = 'valid'")
+    int escalateToPendingReviewIfValid(@Param("id") UUID id);
 }

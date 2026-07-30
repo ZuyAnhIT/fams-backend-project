@@ -44,8 +44,10 @@ public class Site {
     @Column(nullable = false, length = 20)
     private String status;
 
-    @Column(name = "require_face_id_checkin", nullable = false)
-    private boolean requireFaceIdCheckin;
+    /** gps_only | gps_face | gps_face_liveness — see CheckinService.resolveEffectiveCheckinPolicy
+     *  for how this combines with a Shift's optional override. */
+    @Column(name = "checkin_policy", nullable = false, length = 20)
+    private String checkinPolicy;
 
     @Column(name = "created_by")
     private UUID createdBy;
@@ -66,6 +68,7 @@ public class Site {
         if (updatedAt == null) updatedAt = now;
         if (timezone == null) timezone = "UTC";
         if (status == null) status = "active";
+        if (checkinPolicy == null) checkinPolicy = "gps_only";
     }
 
     @PreUpdate
