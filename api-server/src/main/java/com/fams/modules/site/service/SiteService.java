@@ -99,6 +99,10 @@ public class SiteService {
                 ? request.getTimezone().trim() : "UTC";
         validateTimezone(timezone);
 
+        String checkinPolicy = StringUtils.hasText(request.getCheckinPolicy())
+                ? request.getCheckinPolicy().trim() : "gps_only";
+        validateCheckinPolicy(checkinPolicy);
+
         Site site = Site.builder()
                 .tenantId(tenantId)
                 .name(request.getName().trim())
@@ -109,7 +113,7 @@ public class SiteService {
                 .longitude(request.getLongitude())
                 .timezone(timezone)
                 .status("active")
-                .requireFaceIdCheckin(request.isRequireFaceIdCheckin())
+                .checkinPolicy(checkinPolicy)
                 .createdBy(callerUserId)
                 .build();
 
@@ -208,7 +212,11 @@ public class SiteService {
             site.setTimezone(newTimezone);
         }
         if (StringUtils.hasText(request.getStatus()))   site.setStatus(request.getStatus());
-        if (request.getRequireFaceIdCheckin() != null)  site.setRequireFaceIdCheckin(request.getRequireFaceIdCheckin());
+        if (StringUtils.hasText(request.getCheckinPolicy())) {
+            String newPolicy = request.getCheckinPolicy().trim();
+            validateCheckinPolicy(newPolicy);
+            site.setCheckinPolicy(newPolicy);
+        }
 
         siteRepository.save(site);
         log.info("Site updated: id={} tenantId={} by={}", siteId, tenantId, callerUserId);
@@ -225,6 +233,15 @@ public class SiteService {
         } catch (java.time.DateTimeException e) {
             throw new IllegalArgumentException(
                     "'" + timezone + "' is not a valid IANA timezone name (e.g. 'Asia/Ho_Chi_Minh', 'UTC')");
+        }
+    }
+
+    private static final Set<String> VALID_CHECKIN_POLICIES = Set.of("gps_only", "gps_face", "gps_face_liveness");
+
+    private void validateCheckinPolicy(String policy) {
+        if (!VALID_CHECKIN_POLICIES.contains(policy)) {
+            throw new IllegalArgumentException(
+                    "checkinPolicy must be one of " + VALID_CHECKIN_POLICIES + ", got '" + policy + "'");
         }
     }
 
@@ -261,7 +278,7 @@ public class SiteService {
                 .longitude(site.getLongitude())
                 .timezone(site.getTimezone())
                 .status(site.getStatus())
-                .requireFaceIdCheckin(site.isRequireFaceIdCheckin())
+                .checkinPolicy(site.getCheckinPolicy())
                 .createdBy(site.getCreatedBy())
                 .geofence(geofenceService.findActiveGeofenceForSite(site.getId()).orElse(null))
                 .shifts(shiftService.findActiveShiftsForSite(site.getId()))
@@ -312,7 +329,7 @@ public class SiteService {
                 .longitude(s.getLongitude())
                 .timezone(s.getTimezone())
                 .status(s.getStatus())
-                .requireFaceIdCheckin(s.isRequireFaceIdCheckin())
+                .checkinPolicy(s.getCheckinPolicy())
                 .createdBy(s.getCreatedBy())
                 .createdAt(s.getCreatedAt())
                 .updatedAt(s.getUpdatedAt())

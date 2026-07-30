@@ -51,6 +51,18 @@ public class CheckinResponse {
     @Schema(description = "Check-out timestamp (null until checked out)")
     private OffsetDateTime checkOutAt;
 
+    @Schema(description = "Check-out latitude (null until checked out)")
+    private Double checkOutLat;
+
+    @Schema(description = "Check-out longitude (null until checked out)")
+    private Double checkOutLon;
+
+    @Schema(description = "Check-out GPS accuracy in metres (null until checked out)")
+    private Double checkOutAccuracy;
+
+    @Schema(description = "Whether the check-out GPS point was inside the site geofence (null until checked out)")
+    private Boolean checkOutInsideGeofence;
+
     @Schema(description = "Minutes worked (null until checked out)")
     private Integer workMinutes;
 
@@ -78,4 +90,31 @@ public class CheckinResponse {
 
     @Schema(description = "Face similarity score 0.0 – 1.0 (null until async job completes)", example = "0.92")
     private Double faceVerifyScore;
+
+    @Schema(description = "Face verification result AT CHECKOUT (null until checked out or async job completes)", example = "true")
+    private Boolean checkoutFaceVerified;
+
+    @Schema(description = "Liveness check result AT CHECKOUT (null unless liveness was required/provided)", example = "true")
+    private Boolean checkoutLivenessVerified;
+
+    @Schema(description = "Face similarity score AT CHECKOUT 0.0 – 1.0", example = "0.92")
+    private Double checkoutFaceVerifyScore;
+
+    @Schema(description = "Policy tier (gps_only|gps_face|gps_face_liveness) resolved and snapshotted at "
+            + "check-in time. Disambiguates a null Face ID field (\"not applicable\") from \"still verifying\". "
+            + "Null only for records created before this field existed.")
+    private String effectiveCheckinPolicy;
+
+    @Schema(description = "online (submitted live via the App) | offline (arrived through POST .../checkin/sync)")
+    private String source;
+
+    @Schema(description = "Employee full name — batch-resolved for list/history responses to avoid a "
+            + "client-side N+1 lookup; null on responses that don't resolve it")
+    private String employeeName;
+
+    @Schema(description = "Employee code")
+    private String employeeCode;
+
+    @Schema(description = "Site name")
+    private String siteName;
 }

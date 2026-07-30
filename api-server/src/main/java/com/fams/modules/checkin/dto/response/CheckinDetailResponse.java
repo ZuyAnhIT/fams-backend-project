@@ -70,6 +70,49 @@ public class CheckinDetailResponse {
     @Schema(description = "Minutes worked (null until checked out)")
     private Integer workMinutes;
 
+    // ── Face ID / liveness evidence ───────────────────────────────────────────
+
+    @Schema(description = "Face verification result at check-in (null = not yet resolved by the async worker; "
+            + "always null if effectiveCheckinPolicy was gps_only)")
+    private Boolean faceVerified;
+
+    @Schema(description = "Liveness check result at check-in")
+    private Boolean livenessVerified;
+
+    @Schema(description = "Face similarity score at check-in, 0.0 – 1.0")
+    private Double faceVerifyScore;
+
+    @Schema(description = "Face verification result at check-out")
+    private Boolean checkoutFaceVerified;
+
+    @Schema(description = "Liveness check result at check-out")
+    private Boolean checkoutLivenessVerified;
+
+    @Schema(description = "Face similarity score at check-out, 0.0 – 1.0")
+    private Double checkoutFaceVerifyScore;
+
+    // ── Audit / provenance ─────────────────────────────────────────────────────
+
+    @Schema(description = "Policy tier (gps_only|gps_face|gps_face_liveness) resolved and snapshotted AT CHECK-IN "
+            + "TIME — disambiguates a null Face ID result (\"not applicable under this policy\") from "
+            + "\"still verifying\". Null only for records created before this field existed.")
+    private String effectiveCheckinPolicy;
+
+    @Schema(description = "online (submitted live via the App) | offline (arrived through POST .../checkin/sync)")
+    private String source;
+
+    @Schema(description = "Idempotency key supplied by the client for offline sync — null for online records")
+    private java.util.UUID clientNonce;
+
+    @Schema(description = "HR override reason, if this record's status was ever changed via POST .../override")
+    private String note;
+
+    @Schema(description = "User UUID of the HR/admin who last overrode this record's status, if any")
+    private java.util.UUID overriddenBy;
+
+    @Schema(description = "Timestamp of the last override, if any")
+    private OffsetDateTime overriddenAt;
+
     // ── Embedded context ──────────────────────────────────────────────────────
 
     @Schema(description = "Employee who performed the check-in")

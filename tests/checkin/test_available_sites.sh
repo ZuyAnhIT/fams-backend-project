@@ -95,7 +95,7 @@ echo "Invitation accepted."
 # Login as the employee
 emp_login_resp=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d "{\"email\":\"$INVITE_EMAIL\",\"password\":\"Employee@1234\"}")
+    -d "{\"identifier\":\"$INVITE_EMAIL\",\"password\":\"Employee@1234\"}")
 emp_login_body=$(echo "$emp_login_resp" | head -n -1)
 if [ "$(echo "$emp_login_resp" | tail -n 1)" -ne 200 ]; then echo "SETUP FAILED: employee login"; exit 1; fi
 EMP_TOKEN=$(echo "$emp_login_body" | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4)

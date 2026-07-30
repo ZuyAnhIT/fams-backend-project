@@ -45,7 +45,10 @@ public class UpdateSiteRequest {
     @Pattern(regexp = "^(active|inactive)$", message = "Status must be 'active' or 'inactive'")
     private String status;
 
-    @Schema(description = "If true, check-in at this site requires a Face ID photo that passes "
-            + "verification. Omit to leave unchanged.", nullable = true)
-    private Boolean requireFaceIdCheckin;
+    @Schema(description = "New check-in/check-out verification tier: gps_only | gps_face | "
+            + "gps_face_liveness. Omit to leave unchanged.", nullable = true,
+            allowableValues = {"gps_only", "gps_face", "gps_face_liveness"})
+    @Pattern(regexp = "^(gps_only|gps_face|gps_face_liveness)$",
+            message = "checkinPolicy must be 'gps_only', 'gps_face', or 'gps_face_liveness'")
+    private String checkinPolicy;
 }

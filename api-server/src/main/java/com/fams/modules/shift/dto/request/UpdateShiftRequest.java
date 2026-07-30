@@ -31,4 +31,15 @@ public class UpdateShiftRequest {
             allowableValues = {"active", "inactive"})
     @Pattern(regexp = "^(active|inactive)$", message = "Status must be 'active' or 'inactive'")
     private String status;
+
+    @Schema(description = "New check-in/check-out verification tier override for this shift. "
+            + "Omit to leave unchanged; use clearCheckinPolicyOverride to go back to inheriting "
+            + "the site's policy.", nullable = true,
+            allowableValues = {"gps_only", "gps_face", "gps_face_liveness"})
+    @Pattern(regexp = "^(gps_only|gps_face|gps_face_liveness)$",
+            message = "checkinPolicyOverride must be 'gps_only', 'gps_face', or 'gps_face_liveness'")
+    private String checkinPolicyOverride;
+
+    @Schema(description = "Set to true to explicitly clear the override and inherit the site's policy again")
+    private boolean clearCheckinPolicyOverride;
 }

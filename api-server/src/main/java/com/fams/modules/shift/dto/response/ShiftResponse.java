@@ -49,6 +49,11 @@ public class ShiftResponse {
     @Schema(description = "Status: active or inactive", example = "active")
     private String status;
 
+    @Schema(description = "Check-in/check-out verification tier override for this shift; null means "
+            + "it inherits the site's policy", nullable = true,
+            allowableValues = {"gps_only", "gps_face", "gps_face_liveness"})
+    private String checkinPolicyOverride;
+
     @Schema(description = "Number of assignments (active or historical) that have ever referenced this shift.", example = "0")
     private long assignmentHistoryCount;
 

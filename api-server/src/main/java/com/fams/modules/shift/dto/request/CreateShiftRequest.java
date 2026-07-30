@@ -31,4 +31,10 @@ public class CreateShiftRequest {
     @Schema(description = "Set to true for overnight shifts where endTime is on the next calendar day",
             example = "false", defaultValue = "false")
     private boolean allowOvernight = false;
+
+    @Schema(description = "Override the site's check-in/check-out verification tier for this specific "
+            + "shift (e.g. a night shift can require gps_face_liveness even at an otherwise gps_only "
+            + "site). Omit/null to inherit the site's policy.", nullable = true,
+            allowableValues = {"gps_only", "gps_face", "gps_face_liveness"})
+    private String checkinPolicyOverride;
 }
