@@ -44,7 +44,7 @@ class UserProfileServiceTest {
                 emailVerificationService,
                 emailService,
                 phoneOtpService,
-                "http://192.168.1.7:3000");
+                "http://192.168.1.155:3000");
 
         service.requestEmailChange(userId, "NEW@example.com");
 
@@ -53,6 +53,6 @@ class UserProfileServiceTest {
                 org.mockito.ArgumentMatchers.eq("new@example.com"),
                 url.capture());
         assertThat(url.getValue()).isEqualTo(
-                "http://192.168.1.7:3000/verify-email?token=change-token&mode=email-change");
+                "http://192.168.1.155:3000/verify-email?token=change-token&mode=email-change");
     }
 }

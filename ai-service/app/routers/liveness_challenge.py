@@ -6,23 +6,26 @@ import logging
 import random
 from typing import List
 
-import face_recognition
 from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
-from PIL import Image
-import io
-import numpy as np
 
 from app import config
 from app.db import get_conn, put_conn
 from app.dependencies import verify_internal_secret
 from app.services import face_service, storage_service
-from app.services.head_pose_service import classify_frame
+from app.services.head_pose_service import classify_frame, estimate_baseline_pose
 from app.services.liveness_service import check_liveness
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(dependencies=[Depends(verify_internal_secret)])
 
+# look_up/look_down restored to the pool (2026-07-31) — the previous removal was a workaround for
+# dlib 6-point + solvePnP's systematic pitch bias, not a limitation of the action itself. Pose
+# now comes from InsightFace's landmark_3d_68 model via a 3D similarity transform against a
+# canonical mean face (see head_pose_service.py) — fundamentally more accurate, verified
+# numerically against this service's test fixture (near-zero pitch/yaw on a frontal photo,
+# unlike the old pipeline's large systematic offset). Still recommend real-device QA before
+# relying on this at scale — this environment has no camera to validate that directly.
 _ACTION_POOL = ["turn_left", "turn_right", "look_up", "look_down", "blink"]
 _CHALLENGE_TTL_SECONDS = 90
 _SAME_PERSON_THRESHOLD = 0.45
@@ -102,34 +105,41 @@ async def submit_frames(
             status_code=400,
             detail=f"expected {len(actions)} frames (one per action {actions}), got {len(frames)}")
 
-    frame_bytes_list: list[bytes] = []
+    frame_bytes_list: list[bytes] = [await photo.read() for photo in frames]
+
+    # Establish a session-relative pose baseline from the 'center' frame BEFORE classifying any
+    # frame — see estimate_baseline_pose's docstring for why: an assumed (0, 0) baseline doesn't
+    # match how a phone is actually held, causing systematic false-rejects. Falls back to (0, 0)
+    # if the center frame is unreadable.
+    baseline_pitch, baseline_yaw = 0.0, 0.0
+    try:
+        center_idx = actions.index("center")
+        center_face = face_service.detect_single_face(frame_bytes_list[center_idx])
+        baseline = estimate_baseline_pose(center_face)
+        if baseline is not None:
+            baseline_pitch, baseline_yaw = baseline
+    except Exception as exc:
+        logger.warning("Could not establish pose baseline for challenge %s, falling back to "
+                        "absolute (0, 0): %s", challenge_id, exc)
+
     embeddings: list[list[float]] = []
     steps: list[dict] = []
     center_frame_bytes: bytes | None = None
     failure_reason: str | None = None
 
-    for i, (photo, expected_action) in enumerate(zip(frames, actions)):
-        data = await photo.read()
-        frame_bytes_list.append(data)
-
+    for i, (data, expected_action) in enumerate(zip(frame_bytes_list, actions)):
         try:
-            img_array = np.array(Image.open(io.BytesIO(data)).convert("RGB"))
+            face = face_service.detect_single_face(data)
+        except ValueError as exc:
+            steps.append({"action": expected_action, "passed": False, "reason": str(exc)})
+            failure_reason = failure_reason or f"frame {i + 1}: {exc}"
+            continue
         except Exception:
             steps.append({"action": expected_action, "passed": False, "reason": "invalid_image"})
             failure_reason = failure_reason or f"frame {i + 1}: invalid_image"
             continue
 
-        landmarks_list = face_recognition.face_landmarks(img_array)
-        if len(landmarks_list) == 0:
-            steps.append({"action": expected_action, "passed": False, "reason": "no_face_detected"})
-            failure_reason = failure_reason or f"frame {i + 1}: no_face_detected"
-            continue
-        if len(landmarks_list) > 1:
-            steps.append({"action": expected_action, "passed": False, "reason": "multiple_faces_detected"})
-            failure_reason = failure_reason or f"frame {i + 1}: multiple_faces_detected"
-            continue
-
-        satisfied = classify_frame(landmarks_list[0], img_array.shape)
+        satisfied = classify_frame(face, baseline_pitch, baseline_yaw)
         passed = expected_action in satisfied
         steps.append({"action": expected_action, "passed": passed, "detected": sorted(satisfied)})
         if not passed:
@@ -137,13 +147,9 @@ async def submit_frames(
                 f"frame {i + 1}: expected '{expected_action}', detected {sorted(satisfied) or ['none']}")
             continue
 
-        try:
-            embeddings.append(face_service.extract_embedding(data))
-        except ValueError as exc:
-            steps[-1]["passed"] = False
-            steps[-1]["reason"] = str(exc)
-            failure_reason = failure_reason or f"frame {i + 1}: {exc}"
-            continue
+        # InsightFace's detect_single_face already computed the embedding in this same pass —
+        # no need for a second, redundant detection call like the old dlib pipeline needed.
+        embeddings.append(face.normed_embedding.tolist())
 
         if expected_action == "center":
             center_frame_bytes = data
@@ -152,7 +158,7 @@ async def submit_frames(
         # All frames individually satisfied their expected action AND yielded an embedding —
         # now the two whole-batch checks: same person across every frame (catches someone
         # splicing in a different person's blink/turn frame), and anti-spoofing on the center
-        # frame (catches a well-lit printed photo that could otherwise pass pose/EAR checks).
+        # frame (catches a well-lit printed photo that could otherwise pass pose/blink checks).
         for (i, emb_a), (j, emb_b) in itertools.combinations(enumerate(embeddings), 2):
             sim = face_service.cosine_similarity(emb_a, emb_b)
             if sim < _SAME_PERSON_THRESHOLD:

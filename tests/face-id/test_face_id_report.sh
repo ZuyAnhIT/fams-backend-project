@@ -45,7 +45,7 @@ ADMIN_TOKEN=$(echo "$login_resp" | head -n -1 | grep -o '"accessToken":"[^"]*"' 
 TS=$(date +%s)
 TENANT_ID=$(curl -s -X POST "$BASE_URL/api/v1/tenants" \
     -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"name\":\"FaceReport Corp\",\"slug\":\"facereport-${TS}\"}" \
+    -d "{\"name\":\"FaceReport Corp\",\"slug\":\"facereport-${TS}\",\"ownerEmail\":\"admin@fams.com\"}" \
     | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 [ -z "$TENANT_ID" ] && { echo "SETUP FAILED: tenant"; exit 1; }
 

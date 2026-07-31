@@ -68,7 +68,7 @@ t_resp=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/tenants" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"name\":\"Enroll Corp\",\"slug\":\"enroll-corp-${TS}\"}")
+    -d "{\"name\":\"Enroll Corp\",\"slug\":\"enroll-corp-${TS}\",\"ownerEmail\":\"admin@fams.com\"}")
 TENANT_ID=$(echo "$t_resp" | head -n -1 | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 [ -z "$TENANT_ID" ] && { echo "SETUP FAILED: Could not create tenant"; exit 1; }
 

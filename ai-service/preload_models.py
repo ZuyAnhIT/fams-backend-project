@@ -13,3 +13,9 @@ try:
 except Exception as e:
     print(f"Weights cached (expected on blank image): {type(e).__name__}")
 print("Liveness model pre-download complete.")
+
+print("Downloading InsightFace buffalo_l pack (SCRFD + ArcFace + landmarks, ~280MB)...")
+import insightface
+app = insightface.app.FaceAnalysis(name="buffalo_l", providers=["CPUExecutionProvider"])
+app.prepare(ctx_id=-1, det_size=(640, 640))
+print("InsightFace model pre-download complete.")

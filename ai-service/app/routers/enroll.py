@@ -322,9 +322,9 @@ def revoke_face(
                     pending_photo_count = NULL,
                     rejection_reason    = NULL,
                     updated_at          = now()
-                WHERE employee_id = %s::uuid
+                WHERE employee_id = %s::uuid AND tenant_id = %s::uuid
                 """,
-                [employee_id],
+                [employee_id, tenant_id],
             )
         conn.commit()
     except Exception as exc:

@@ -46,8 +46,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends libgl1 && rm -r
 COPY preload_models.py /tmp/preload_models.py
 RUN python /tmp/preload_models.py
 
-# Verify face_recognition (dlib ResNet-34) models are accessible
-RUN python -c "import face_recognition; print('face_recognition models OK')"
+# Verify InsightFace (SCRFD + ArcFace + landmarks) models are accessible
+RUN python -c "import insightface; insightface.app.FaceAnalysis(name='buffalo_l', providers=['CPUExecutionProvider']).prepare(ctx_id=-1, det_size=(640, 640)); print('insightface models OK')"
 
 COPY . .
 

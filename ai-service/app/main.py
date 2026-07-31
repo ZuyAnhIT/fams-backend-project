@@ -12,10 +12,10 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger(__name__)
 
 
-def _load_face_recognition() -> None:
-    import face_recognition  # noqa: F401 — imports bundled dlib ResNet-34 weights
+def _load_insightface() -> None:
+    from app.services.face_service import get_face_app
 
-    logger.info("face_recognition (dlib ResNet-34) ready")
+    get_face_app()  # loads the buffalo_l pack (SCRFD + ArcFace + landmarks) once, up front
 
 
 def _load_liveness_model() -> None:
@@ -32,7 +32,7 @@ def _load_liveness_model() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Loading AI models...")
-    _load_face_recognition()
+    _load_insightface()
     _load_liveness_model()
 
     from app.redis_client import get_redis
