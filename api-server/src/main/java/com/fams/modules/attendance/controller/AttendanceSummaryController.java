@@ -1,11 +1,11 @@
 package com.fams.modules.attendance.controller;
 
 import com.fams.modules.attendance.dto.request.AdjustAttendanceSummaryRequest;
+import com.fams.modules.attendance.dto.request.UnlockAttendanceSummaryRequest;
 import com.fams.modules.attendance.dto.response.AttendanceHrMonthlyResponse;
 import com.fams.modules.attendance.dto.response.AttendanceMonthlyResponse;
 import com.fams.modules.attendance.dto.response.AttendanceSummaryResponse;
 import com.fams.modules.attendance.service.AttendanceSummaryService;
-import com.fams.modules.rbac.repository.UserRoleRepository;
 import com.fams.shared.pagination.PageResponse;
 import com.fams.shared.response.ApiResponse;
 import com.fams.shared.security.FamsUserDetails;
@@ -23,7 +23,6 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
-import java.util.Set;
 import java.util.UUID;
 
 @Slf4j
@@ -33,12 +32,9 @@ import java.util.UUID;
 public class AttendanceSummaryController {
 
     private final AttendanceSummaryService attendanceSummaryService;
-    private final UserRoleRepository userRoleRepository;
 
-    public AttendanceSummaryController(AttendanceSummaryService attendanceSummaryService,
-                                       UserRoleRepository userRoleRepository) {
+    public AttendanceSummaryController(AttendanceSummaryService attendanceSummaryService) {
         this.attendanceSummaryService = attendanceSummaryService;
-        this.userRoleRepository = userRoleRepository;
     }
 
     @Operation(
@@ -252,6 +248,45 @@ public class AttendanceSummaryController {
     }
 
     @Operation(
+        summary = "Unlock and recompute an HR-adjusted attendance summary (HR/Admin)",
+        description = "An HR-adjusted summary (see .../adjust) is permanently protected from automatic " +
+                      "recompute so its manual override is never silently overwritten. Use this endpoint when " +
+                      "new source data has legitimately arrived (e.g. a late-approved check-in) and the summary " +
+                      "should be released back to normal automatic aggregation. Clears the adjustment, re-runs " +
+                      "the standard recompute for that employee/site/date, and records an audit log entry " +
+                      "(before/after totalWorkMinutes, previous adjustment reason, unlock reason). " +
+                      "A reason is required. Requires attendance:list permission."
+    )
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "200",
+            description = "Attendance summary unlocked and recomputed",
+            content = @Content(schema = @Schema(implementation = AttendanceSummaryResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "400",
+            description = "Validation error — missing reason"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "403",
+            description = "Missing attendance:list permission or site not allowed"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "404",
+            description = "Attendance summary not found")
+    })
+    @PostMapping("/{summaryId}/unlock-and-recompute")
+    public ResponseEntity<ApiResponse<AttendanceSummaryResponse>> unlockAndRecompute(
+            @PathVariable UUID tenantId,
+            @PathVariable UUID summaryId,
+            @Valid @RequestBody UnlockAttendanceSummaryRequest request,
+            @AuthenticationPrincipal FamsUserDetails caller) {
+
+        log.info("HR unlock-and-recompute attendance summary tenantId={} summaryId={} by={}",
+                tenantId, summaryId, caller.getUserId());
+        AttendanceSummaryResponse result = attendanceSummaryService.unlockAndRecompute(
+                tenantId, summaryId, request.getReason(), caller.getUserId(), caller.isPlatformAdmin());
+        return ResponseEntity.ok(ApiResponse.success(result));
+    }
+
+    @Operation(
         summary = "Trigger attendance summary recompute for a date (HR/Admin)",
         description = "Recomputes attendance summaries for all sessions whose attendance date equals the given date. " +
                       "Idempotent — safe to call multiple times. Use this to backfill missing_checkout flags " +
@@ -272,18 +307,15 @@ public class AttendanceSummaryController {
             @Parameter(description = "Date to recompute (yyyy-MM-dd)", required = true)
                 @RequestParam @org.springframework.format.annotation.DateTimeFormat(
                     iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE) LocalDate date,
+            @Parameter(description = "Restrict recompute to one site — required if the caller is "
+                    + "scoped to more than one site") @RequestParam(required = false) UUID siteId,
             @AuthenticationPrincipal FamsUserDetails caller) {
 
-        if (!caller.isPlatformAdmin()) {
-            Set<String> perms = userRoleRepository
-                    .findPermissionNamesByUserIdAndTenantId(caller.getUserId(), tenantId);
-            if (!perms.contains("attendance:list")) {
-                throw new org.springframework.security.access.AccessDeniedException(
-                        "You do not have permission to trigger attendance recompute");
-            }
-        }
-
-        attendanceSummaryService.recomputeForDate(date);
+        // Permission + site-scope resolution now live in the service (triggerRecompute) —
+        // consistent with every other endpoint here, and critically, properly scoped to
+        // tenantId so this can never touch another tenant's data (see service Javadoc).
+        attendanceSummaryService.triggerRecompute(
+                tenantId, siteId, date, caller.getUserId(), caller.isPlatformAdmin());
         return ResponseEntity.ok(ApiResponse.success("Recompute triggered for date: " + date));
     }
 }

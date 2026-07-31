@@ -46,7 +46,10 @@ public class AttendanceSummaryResponse {
     @Schema(description = "Timestamp of the last check-out session of the day (null if any session is still open)")
     private OffsetDateTime lastCheckoutAt;
 
-    @Schema(description = "Total paid work minutes summed across all sessions", example = "480")
+    @Schema(description = "Total paid work minutes summed across all sessions with status='valid' only "
+            + "— excludes pending_review/rejected sessions, see hasPendingReviewSession/hasRejectedSession. "
+            + "Already includes any OT portion (see otMinutes) — do not add otMinutes on top when computing "
+            + "total paid hours, it is a breakdown of this total, not additional to it.", example = "480")
     private int totalWorkMinutes;
 
     @Schema(description = "Number of check-in sessions for this day", example = "1")
@@ -71,8 +74,18 @@ public class AttendanceSummaryResponse {
     @Schema(description = "Total overtime minutes worked beyond shift end, capped per session by lateCheckoutMinutes. 0 when shift.allowOvertime=false or no overtime worked.", example = "0")
     private int otMinutes;
 
-    @Schema(description = "True when the attendance date is in the past and at least one session has no check-out. Set by the nightly catch-up job.", example = "false")
+    @Schema(description = "True when the attendance date is in the past and at least one VALID session has no check-out. Set by the nightly catch-up job.", example = "false")
     private boolean missingCheckout;
+
+    @Schema(description = "True if at least one checkin session this day is status=pending_review (unconfirmed "
+            + "— e.g. GPS/face-verify escalation). That session's time is NOT included in totalWorkMinutes/"
+            + "late/earlyLeave/otMinutes above — this day's numbers may look lower than expected until HR "
+            + "resolves it. Show a caution indicator in UI when true.", example = "false")
+    private boolean hasPendingReviewSession;
+
+    @Schema(description = "True if at least one checkin session this day was rejected by HR (confirmed invalid, "
+            + "e.g. buddy check-in) — excluded from every computed field above.", example = "false")
+    private boolean hasRejectedSession;
 
     @Schema(description = "Record creation timestamp")
     private OffsetDateTime createdAt;

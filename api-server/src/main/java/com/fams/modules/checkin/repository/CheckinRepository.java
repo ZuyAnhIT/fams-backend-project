@@ -59,10 +59,25 @@ public interface CheckinRepository extends JpaRepository<CheckinRecord, UUID>, J
     List<CheckinRecord> findOpenSessionsBySite(@Param("tenantId") UUID tenantId,
                                                 @Param("siteId") UUID siteId);
 
-    /** All non-deleted checkins whose check_in_at falls within the given UTC range. Used by the daily summary job. */
+    /** All non-deleted checkins whose check_in_at falls within the given UTC range, across EVERY
+     *  tenant — intentionally unscoped, used only by the nightly AttendanceSummaryJob batch (a
+     *  system job, not a user-triggered action, so tenant-agnostic is correct here). Do NOT reuse
+     *  this for any user-facing/API-triggered recompute — see findCheckinsBetweenForTenant. */
     @Query("SELECT c FROM CheckinRecord c WHERE c.deletedAt IS NULL " +
            "AND c.checkInAt >= :from AND c.checkInAt < :to")
     List<CheckinRecord> findCheckinsBetween(@Param("from") OffsetDateTime from, @Param("to") OffsetDateTime to);
+
+    /** Tenant-scoped (and optionally site-scoped) variant for the user-facing POST .../recompute
+     *  endpoint — found via audit (2026-07-31) that the endpoint was calling the tenant-agnostic
+     *  findCheckinsBetween above, letting any HR/Admin in ANY tenant trigger a recompute that
+     *  touched every OTHER tenant's attendance data for that date. */
+    @Query("SELECT c FROM CheckinRecord c WHERE c.tenantId = :tenantId AND c.deletedAt IS NULL " +
+           "AND c.checkInAt >= :from AND c.checkInAt < :to " +
+           "AND (:siteId IS NULL OR c.siteId = :siteId)")
+    List<CheckinRecord> findCheckinsBetweenForTenant(@Param("tenantId") UUID tenantId,
+                                                       @Param("siteId") UUID siteId,
+                                                       @Param("from") OffsetDateTime from,
+                                                       @Param("to") OffsetDateTime to);
 
     Optional<CheckinRecord> findByEmployeeIdAndClientNonceAndDeletedAtIsNull(UUID employeeId, UUID clientNonce);
 

@@ -43,7 +43,7 @@ TS=$(date +%s)
 echo "--- Setup: Create tenant ---"
 t_resp=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/tenants" \
     -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"name\":\"Att Names Corp\",\"slug\":\"att-names-$TS\"}")
+    -d "{\"name\":\"Att Names Corp\",\"slug\":\"att-names-$TS\",\"ownerEmail\":\"admin@fams.com\"}")
 t_body=$(echo "$t_resp" | head -n -1); t_status=$(echo "$t_resp" | tail -n 1)
 [ "$t_status" -eq 201 ] || { echo "SETUP FAILED: create tenant HTTP $t_status"; exit 1; }
 TENANT_ID=$(echo "$t_body" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)

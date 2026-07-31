@@ -48,6 +48,13 @@ public class AttendanceMonthlyResponse {
     @Schema(description = "Number of days flagged as missing checkout (past day, open session)", example = "0")
     private int missingCheckoutDays;
 
+    @Schema(description = "Days with at least one unconfirmed (pending_review) session — those days' totals "
+            + "above may be understated until HR resolves them. Not payroll-final.", example = "0")
+    private int daysWithPendingReview;
+
+    @Schema(description = "Days with at least one HR-rejected session (excluded from all totals above)", example = "0")
+    private int daysWithRejectedSession;
+
     @Schema(description = "Daily attendance summaries for the month, sorted by date ascending")
     private List<AttendanceSummaryResponse> dailySummaries;
 }

@@ -47,7 +47,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -167,43 +166,20 @@ public class ReportService {
             }
         }
 
-        LocalDate from = LocalDate.of(year, month, 1);
-        LocalDate to   = from.plusMonths(1).minusDays(1);
-
-        Specification<AttendanceSummary> spec =
-                AttendanceSummarySpecification.build(tenantId, null, siteId, null, from, to);
-
-        List<AttendanceSummary> allForMonth = summaryRepository.findAll(spec);
-
-        // Group by employeeId+siteId to build per-employee monthly aggregates
-        Map<String, List<AttendanceSummary>> grouped = new LinkedHashMap<>();
-        for (AttendanceSummary row : allForMonth) {
-            String key = row.getEmployeeId() + ":" + row.getSiteId();
-            grouped.computeIfAbsent(key, k -> new ArrayList<>()).add(row);
+        UUID effectiveSiteId;
+        try {
+            effectiveSiteId = resolveSiteFilterForReports(callerUserId, tenantId, siteId, callerIsPlatformAdmin);
+        } catch (NoSitesAllowedForReport e) {
+            return MonthlyAttendanceReportResponse.builder()
+                    .year(year).month(month).siteId(siteId)
+                    .records(PageResponse.from(Page.empty(PageRequest.of(page, size))))
+                    .build();
         }
 
-        List<AttendanceHrMonthlyResponse> aggregated = grouped.values().stream()
-                .map(group -> {
-                    AttendanceSummary first = group.get(0);
-                    return AttendanceHrMonthlyResponse.builder()
-                            .tenantId(tenantId)
-                            .employeeId(first.getEmployeeId())
-                            .siteId(first.getSiteId())
-                            .year(year)
-                            .month(month)
-                            .presentDays(group.size())
-                            .totalWorkMinutes(group.stream().mapToInt(AttendanceSummary::getTotalWorkMinutes).sum())
-                            .lateDays((int) group.stream().filter(AttendanceSummary::isLate).count())
-                            .totalLateMinutes(group.stream().mapToInt(AttendanceSummary::getLateMinutes).sum())
-                            .earlyLeaveDays((int) group.stream().filter(AttendanceSummary::isEarlyLeave).count())
-                            .totalEarlyLeaveMinutes(group.stream().mapToInt(AttendanceSummary::getEarlyLeaveMinutes).sum())
-                            .totalOtMinutes(group.stream().mapToInt(AttendanceSummary::getOtMinutes).sum())
-                            .missingCheckoutDays((int) group.stream().filter(AttendanceSummary::isMissingCheckout).count())
-                            .build();
-                })
-                .collect(Collectors.toList());
+        List<AttendanceHrMonthlyResponse> aggregated = aggregateMonthlyRows(tenantId, siteId, effectiveSiteId, year, month);
 
-        // Tenant-wide totals
+        // Tenant-wide totals — computed once here, over every row in scope (not just the page
+        // being returned), so the UI can show accurate month totals alongside the paginated list.
         int totalEmployees        = aggregated.size();
         int totalPresentDays      = aggregated.stream().mapToInt(AttendanceHrMonthlyResponse::getPresentDays).sum();
         int totalWorkMinutes      = aggregated.stream().mapToInt(AttendanceHrMonthlyResponse::getTotalWorkMinutes).sum();
@@ -213,8 +189,9 @@ public class ReportService {
         int totalEarlyLeaveMinutes = aggregated.stream().mapToInt(AttendanceHrMonthlyResponse::getTotalEarlyLeaveMinutes).sum();
         int totalMissingCheckoutDays = aggregated.stream().mapToInt(AttendanceHrMonthlyResponse::getMissingCheckoutDays).sum();
         int totalOtMinutes        = aggregated.stream().mapToInt(AttendanceHrMonthlyResponse::getTotalOtMinutes).sum();
+        int totalRowsWithPendingReview = (int) aggregated.stream().filter(r -> r.getDaysWithPendingReview() > 0).count();
+        int totalRowsWithRejectedSession = (int) aggregated.stream().filter(r -> r.getDaysWithRejectedSession() > 0).count();
 
-        // Manual pagination over aggregated list
         int total    = aggregated.size();
         int fromIdx  = Math.min(page * size, total);
         int toIdx    = Math.min(fromIdx + size, total);
@@ -223,8 +200,10 @@ public class ReportService {
         PageResponse<AttendanceHrMonthlyResponse> recordPage =
                 PageResponse.from(new PageImpl<>(pageContent, pageable, total));
 
-        log.info("Monthly attendance report: tenantId={} {}/{} siteId={} employees={} presentDays={}",
-                tenantId, year, month, siteId, totalEmployees, totalPresentDays);
+        log.info("Monthly attendance report: tenantId={} {}/{} siteId={} employees={} presentDays={} " +
+                "rowsWithPendingReview={} rowsWithRejected={}",
+                tenantId, year, month, siteId, totalEmployees, totalPresentDays,
+                totalRowsWithPendingReview, totalRowsWithRejectedSession);
 
         return MonthlyAttendanceReportResponse.builder()
                 .year(year)
@@ -239,86 +218,107 @@ public class ReportService {
                 .totalEarlyLeaveMinutes(totalEarlyLeaveMinutes)
                 .totalMissingCheckoutDays(totalMissingCheckoutDays)
                 .totalOtMinutes(totalOtMinutes)
+                .totalRowsWithPendingReview(totalRowsWithPendingReview)
+                .totalRowsWithRejectedSession(totalRowsWithRejectedSession)
                 .records(recordPage)
                 .build();
     }
 
     @Transactional(readOnly = true)
     public byte[] exportMonthlyAttendance(UUID tenantId, int year, int month, UUID siteId,
+                                          boolean confirmDespiteWarnings,
                                           UUID callerUserId, boolean callerIsPlatformAdmin) {
         if (!callerIsPlatformAdmin) {
             Set<String> perms = userRoleRepository
                     .findPermissionNamesByUserIdAndTenantId(callerUserId, tenantId);
-            if (!perms.contains("reports:export")) {
-                throw new AccessDeniedException("reports:export permission required to export attendance data");
+            // attendance:export, not reports:export — found via audit (2026-07-31): the seed
+            // migration (V13) creates and assigns a dedicated attendance:export permission for
+            // exactly this action, but the code was checking the unrelated reports:export
+            // permission instead, so a role granted attendance:export specifically could not
+            // actually export, and reports:export (a broader "reports module" permission not
+            // necessarily meant for payroll-affecting attendance data) could.
+            if (!perms.contains("attendance:export")) {
+                throw new AccessDeniedException("attendance:export permission required to export attendance data");
             }
         }
 
-        LocalDate from = LocalDate.of(year, month, 1);
-        LocalDate to   = from.plusMonths(1).minusDays(1);
-
-        Specification<AttendanceSummary> spec =
-                AttendanceSummarySpecification.build(tenantId, null, siteId, null, from, to);
-        List<AttendanceSummary> allForMonth = summaryRepository.findAll(spec);
-
-        Map<String, List<AttendanceSummary>> grouped = new LinkedHashMap<>();
-        for (AttendanceSummary row : allForMonth) {
-            String key = row.getEmployeeId() + ":" + row.getSiteId();
-            grouped.computeIfAbsent(key, k -> new ArrayList<>()).add(row);
+        UUID effectiveSiteId;
+        try {
+            effectiveSiteId = resolveSiteFilterForReports(callerUserId, tenantId, siteId, callerIsPlatformAdmin);
+        } catch (NoSitesAllowedForReport e) {
+            effectiveSiteId = siteId; // no allowed sites -> aggregateMonthlyRows below returns empty, correct no-data export
         }
 
-        List<AttendanceHrMonthlyResponse> aggregated = grouped.values().stream()
-                .map(group -> {
-                    AttendanceSummary first = group.get(0);
-                    return AttendanceHrMonthlyResponse.builder()
-                            .tenantId(tenantId)
-                            .employeeId(first.getEmployeeId())
-                            .siteId(first.getSiteId())
-                            .year(year)
-                            .month(month)
-                            .presentDays(group.size())
-                            .totalWorkMinutes(group.stream().mapToInt(AttendanceSummary::getTotalWorkMinutes).sum())
-                            .lateDays((int) group.stream().filter(AttendanceSummary::isLate).count())
-                            .totalLateMinutes(group.stream().mapToInt(AttendanceSummary::getLateMinutes).sum())
-                            .earlyLeaveDays((int) group.stream().filter(AttendanceSummary::isEarlyLeave).count())
-                            .totalEarlyLeaveMinutes(group.stream().mapToInt(AttendanceSummary::getEarlyLeaveMinutes).sum())
-                            .totalOtMinutes(group.stream().mapToInt(AttendanceSummary::getOtMinutes).sum())
-                            .missingCheckoutDays((int) group.stream().filter(AttendanceSummary::isMissingCheckout).count())
-                            .build();
-                })
-                .collect(Collectors.toList());
+        List<AttendanceHrMonthlyResponse> aggregated = aggregateMonthlyRows(tenantId, siteId, effectiveSiteId, year, month);
+
+        // Payroll readiness guard (2026-07-31 audit): refuse to export silently when the scope
+        // still has unconfirmed/rejected sessions feeding into it — the whole point of the V79
+        // status-filtering fix was that pending_review/rejected sessions must not affect pay
+        // until resolved; exporting them into a payroll file without an explicit, informed
+        // override defeats that. Caller must pass confirmDespiteWarnings=true to proceed anyway
+        // (e.g. because the pending items are known to be irrelevant to this specific run).
+        long rowsWithPendingReview = aggregated.stream().filter(r -> r.getDaysWithPendingReview() > 0).count();
+        long rowsWithRejected = aggregated.stream().filter(r -> r.getDaysWithRejectedSession() > 0).count();
+        if (!confirmDespiteWarnings && (rowsWithPendingReview > 0 || rowsWithRejected > 0)) {
+            throw new com.fams.shared.exception.BusinessException(
+                    "ATTENDANCE_NOT_READY",
+                    String.format("Có %d nhân viên còn chấm công chờ duyệt và %d nhân viên có chấm công bị từ chối "
+                                    + "trong tháng này — số liệu có thể chưa chính xác. Xác nhận để xuất file dù vậy?",
+                            rowsWithPendingReview, rowsWithRejected),
+                    org.springframework.http.HttpStatus.CONFLICT,
+                    String.format("Export blocked: %d rows with pending review, %d rows with rejected sessions "
+                                    + "in scope tenantId=%s %d/%d siteId=%s. Pass confirmDespiteWarnings=true to override.",
+                            rowsWithPendingReview, rowsWithRejected, tenantId, year, month, siteId));
+        }
+
+        Set<UUID> empIds = aggregated.stream().map(AttendanceHrMonthlyResponse::getEmployeeId).collect(Collectors.toSet());
+        Set<UUID> siteIds = aggregated.stream().map(AttendanceHrMonthlyResponse::getSiteId).collect(Collectors.toSet());
+        Map<UUID, String> empCodes = employeeRepository.findAllByTenantIdAndIdInAndDeletedAtIsNull(tenantId, empIds)
+                .stream().collect(Collectors.toMap(Employee::getId, Employee::getEmployeeCode, (a, b) -> a));
 
         try (XSSFWorkbook workbook = new XSSFWorkbook()) {
             Sheet sheet = workbook.createSheet(
                     String.format("Attendance %d-%02d", year, month));
 
+            Row metaRow = sheet.createRow(0);
+            metaRow.createCell(0).setCellValue("Exported at");
+            metaRow.createCell(1).setCellValue(OffsetDateTime.now().toString());
+            metaRow.createCell(3).setCellValue("Rows with pending review");
+            metaRow.createCell(4).setCellValue(rowsWithPendingReview);
+            metaRow.createCell(5).setCellValue("Rows with rejected sessions");
+            metaRow.createCell(6).setCellValue(rowsWithRejected);
+
             String[] headers = {
-                "Employee ID", "Site ID", "Year", "Month",
-                "Present Days", "Work Minutes",
+                "Employee Code", "Employee Name", "Site Name", "Year", "Month",
+                "Present Days", "Work Minutes (incl. OT)",
                 "Late Days", "Late Minutes",
                 "Early Leave Days", "Early Leave Minutes",
-                "OT Minutes", "Missing Checkout Days"
+                "OT Minutes", "Missing Checkout Days",
+                "Days With Pending Review", "Days With Rejected Session"
             };
-            Row headerRow = sheet.createRow(0);
+            Row headerRow = sheet.createRow(1);
             for (int i = 0; i < headers.length; i++) {
                 headerRow.createCell(i).setCellValue(headers[i]);
             }
 
-            int rowNum = 1;
+            int rowNum = 2;
             for (AttendanceHrMonthlyResponse rec : aggregated) {
                 Row row = sheet.createRow(rowNum++);
-                row.createCell(0).setCellValue(rec.getEmployeeId().toString());
-                row.createCell(1).setCellValue(rec.getSiteId().toString());
-                row.createCell(2).setCellValue(rec.getYear());
-                row.createCell(3).setCellValue(rec.getMonth());
-                row.createCell(4).setCellValue(rec.getPresentDays());
-                row.createCell(5).setCellValue(rec.getTotalWorkMinutes());
-                row.createCell(6).setCellValue(rec.getLateDays());
-                row.createCell(7).setCellValue(rec.getTotalLateMinutes());
-                row.createCell(8).setCellValue(rec.getEarlyLeaveDays());
-                row.createCell(9).setCellValue(rec.getTotalEarlyLeaveMinutes());
-                row.createCell(10).setCellValue(rec.getTotalOtMinutes());
-                row.createCell(11).setCellValue(rec.getMissingCheckoutDays());
+                row.createCell(0).setCellValue(empCodes.getOrDefault(rec.getEmployeeId(), rec.getEmployeeId().toString()));
+                row.createCell(1).setCellValue(rec.getEmployeeName() != null ? rec.getEmployeeName() : "");
+                row.createCell(2).setCellValue(rec.getSiteName() != null ? rec.getSiteName() : "");
+                row.createCell(3).setCellValue(rec.getYear());
+                row.createCell(4).setCellValue(rec.getMonth());
+                row.createCell(5).setCellValue(rec.getPresentDays());
+                row.createCell(6).setCellValue(rec.getTotalWorkMinutes());
+                row.createCell(7).setCellValue(rec.getLateDays());
+                row.createCell(8).setCellValue(rec.getTotalLateMinutes());
+                row.createCell(9).setCellValue(rec.getEarlyLeaveDays());
+                row.createCell(10).setCellValue(rec.getTotalEarlyLeaveMinutes());
+                row.createCell(11).setCellValue(rec.getTotalOtMinutes());
+                row.createCell(12).setCellValue(rec.getMissingCheckoutDays());
+                row.createCell(13).setCellValue(rec.getDaysWithPendingReview());
+                row.createCell(14).setCellValue(rec.getDaysWithRejectedSession());
             }
 
             for (int i = 0; i < headers.length; i++) {
@@ -327,12 +327,93 @@ public class ReportService {
 
             ByteArrayOutputStream out = new ByteArrayOutputStream();
             workbook.write(out);
-            log.info("Attendance export: tenantId={} {}/{} siteId={} rows={}",
-                    tenantId, year, month, siteId, aggregated.size());
+            log.info("Attendance export: tenantId={} {}/{} siteId={} rows={} pendingReviewRows={} rejectedRows={} by={}",
+                    tenantId, year, month, siteId, aggregated.size(), rowsWithPendingReview, rowsWithRejected, callerUserId);
             return out.toByteArray();
         } catch (IOException e) {
             throw new RuntimeException("Failed to generate Excel export", e);
         }
+    }
+
+    /** Shared by getMonthlyAttendanceReport and exportMonthlyAttendance — uses the DB-level
+     *  GROUP BY aggregate (AttendanceSummaryRepository.aggregateMonthly), not the old
+     *  load-everything-then-group-in-Java approach, and hydrates employee/site display names. */
+    private List<AttendanceHrMonthlyResponse> aggregateMonthlyRows(
+            UUID tenantId, UUID requestedSiteId, UUID effectiveSiteId, int year, int month) {
+        LocalDate from = LocalDate.of(year, month, 1);
+        LocalDate to   = from.plusMonths(1);
+
+        List<com.fams.modules.attendance.repository.AttendanceMonthlyAggregateProjection> rows = summaryRepository
+                .aggregateMonthly(tenantId, null, effectiveSiteId, from, to, PageRequest.of(0, Integer.MAX_VALUE))
+                .getContent();
+
+        Set<UUID> empIds = rows.stream()
+                .map(com.fams.modules.attendance.repository.AttendanceMonthlyAggregateProjection::getEmployeeId)
+                .collect(Collectors.toSet());
+        Set<UUID> siteIds = rows.stream()
+                .map(com.fams.modules.attendance.repository.AttendanceMonthlyAggregateProjection::getSiteId)
+                .collect(Collectors.toSet());
+        Map<UUID, String> empNames = empIds.isEmpty() ? Map.of()
+                : employeeRepository.findAllByTenantIdAndIdInAndDeletedAtIsNull(tenantId, empIds).stream()
+                        .collect(Collectors.toMap(Employee::getId, e -> (e.getFirstName() + " " + e.getLastName()).trim()));
+        Map<UUID, String> siteNames = siteIds.isEmpty() ? Map.of()
+                : siteRepository.findAllByTenantIdAndIdInAndDeletedAtIsNull(tenantId, siteIds).stream()
+                        .collect(Collectors.toMap(Site::getId, Site::getName));
+
+        return rows.stream()
+                .map(row -> AttendanceHrMonthlyResponse.builder()
+                        .tenantId(tenantId)
+                        .employeeId(row.getEmployeeId())
+                        .employeeName(empNames.get(row.getEmployeeId()))
+                        .siteId(row.getSiteId())
+                        .siteName(siteNames.get(row.getSiteId()))
+                        .year(year)
+                        .month(month)
+                        .presentDays(row.getPresentDays().intValue())
+                        .totalWorkMinutes(row.getTotalWorkMinutes().intValue())
+                        .lateDays(row.getLateDays().intValue())
+                        .totalLateMinutes(row.getTotalLateMinutes().intValue())
+                        .earlyLeaveDays(row.getEarlyLeaveDays().intValue())
+                        .totalEarlyLeaveMinutes(row.getTotalEarlyLeaveMinutes().intValue())
+                        .totalOtMinutes(row.getTotalOtMinutes().intValue())
+                        .missingCheckoutDays(row.getMissingCheckoutDays().intValue())
+                        .daysWithPendingReview(row.getDaysWithPendingReview().intValue())
+                        .daysWithRejectedSession(row.getDaysWithRejectedSession().intValue())
+                        .build())
+                .collect(Collectors.toList());
+    }
+
+    /** Marker for "caller has zero allowed sites" — mirrors AttendanceSummaryService's identical
+     *  pattern (not shared cross-service; small enough not to warrant the coupling). */
+    private static final class NoSitesAllowedForReport extends RuntimeException {
+    }
+
+    /** Resolves the effective siteId to query with, enforcing site-scope for a restricted caller
+     *  (e.g. SITE_SUPERVISOR) — found missing entirely on both attendance report/export methods
+     *  in an audit (2026-07-31): a site-scoped caller could previously pass ANY siteId (or none,
+     *  seeing every site) with no restriction check at all. */
+    private UUID resolveSiteFilterForReports(UUID callerUserId, UUID tenantId, UUID requestedSiteId,
+                                              boolean callerIsPlatformAdmin) {
+        java.util.Optional<Set<UUID>> allowed =
+                siteScopeService.resolveAllowedSiteIds(callerUserId, tenantId, callerIsPlatformAdmin);
+        if (allowed.isEmpty()) {
+            return requestedSiteId;
+        }
+        Set<UUID> allowedSites = allowed.get();
+        if (allowedSites.isEmpty()) {
+            throw new NoSitesAllowedForReport();
+        }
+        if (requestedSiteId != null) {
+            if (!allowedSites.contains(requestedSiteId)) {
+                throw new AccessDeniedException("You do not have permission to view/export attendance for this site");
+            }
+            return requestedSiteId;
+        }
+        if (allowedSites.size() == 1) {
+            return allowedSites.iterator().next();
+        }
+        throw new AccessDeniedException(
+                "You are scoped to multiple sites — pass a specific siteId to view/export this report");
     }
 
     @Transactional(readOnly = true)
