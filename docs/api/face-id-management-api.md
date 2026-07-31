@@ -1,8 +1,99 @@
 # Tài liệu tích hợp Face ID — Review, sửa lỗi, bổ sung và API tham chiếu
 
-> Cập nhật theo code đang chạy ngày 28/07/2026. Base path: `/api/v1/tenants/{tenantId}/employees/{employeeId}/face-id` (theo nhân viên) và `/api/v1/tenants/{tenantId}/face-id` (hàng đợi duyệt của HR).
+> Cập nhật theo code đang chạy ngày 30/07/2026. Base path: `/api/v1/tenants/{tenantId}/employees/{employeeId}/face-id` (theo nhân viên) và `/api/v1/tenants/{tenantId}/face-id` (hàng đợi duyệt của HR).
 
-## 0.2 [MỚI] Sửa theo báo cáo Web + App team sau khi tích hợp active liveness
+## 0.0 [MỚI] P0: sửa lỗi hệ thống "center bị nhận nhầm thành look_down" trên thiết bị thật
+
+Bạn gửi đề xuất nâng cấp Active Liveness V2 (`20_DE_XUAT_NANG_CAP_FACE_ID_LIVENESS_V2_2026-07-30.md`) sau khi test 4/4 lần trên camera điện thoại thật đều bị lỗi `expected 'center', detected ['look_down']`. Đã xác minh chẩn đoán trong tài liệu là đúng, sửa ngay phần P0 (an toàn, không cần kiến trúc mới), phần V2 (video liên tục + MediaPipe) trình bày ở mục 0.1 dưới đây để bạn quyết định vì đây là dự án nhiều tuần, đụng tới cả `fams-front-app-project` lẫn thêm dependency mới cho AI service.
+
+### Nguyên nhân gốc
+
+Pipeline cũ dùng **1 ảnh tĩnh cho mỗi hành động**, phân loại `center`/`look_up`/`look_down` bằng cách so **pitch tuyệt đối** (từ `solvePnP`) với ngưỡng cố định quanh 0°. Trên thực tế, camera trước điện thoại hầu như không bao giờ được cầm đúng ngang tầm mắt — người dùng thường cầm điện thoại thấp hơn mặt, khiến ngay cả một khung hình "nhìn thẳng vào camera" có ý định đúng đắn vẫn cho ra pitch âm đáng kể theo phép đo `solvePnP`. Ngưỡng tuyệt đối coi đây là `look_down` một cách có hệ thống — đúng như 4/4 lần test thật của bạn cho thấy.
+
+### Đã sửa (an toàn, tương thích ngược)
+
+1. **Baseline theo phiên thay vì giả định (0°, 0°)** — `ai-service/app/services/head_pose_service.py` thêm `estimate_baseline_pose()`: đo pitch/yaw của chính khung hình `center` trong challenge đó, dùng làm điểm gốc (không phải 0 tuyệt đối). Mọi hành động sau đó (`turn_left`/`turn_right`/`blink`) được so **lệch (delta)** với baseline này, không so tuyệt đối nữa. `classify_frame()` nhận thêm `baseline_pitch`/`baseline_yaw` (mặc định `0.0` — giữ nguyên hành vi cũ cho caller nào chưa truyền).
+2. **Bound hợp lý cho baseline** — `CENTER_BASELINE_SANITY_DEG=45°`: chỉ từ chối baseline rõ ràng phi lý (chụp nghiêng gần như quay mặt đi), không đụng tới độ lệch tự nhiên vài-đến-nhiều-độ khi cầm điện thoại thấp. Nếu không đo được baseline hợp lý → fallback về (0°, 0°) — đúng hành vi CŨ, không bao giờ tệ hơn trước.
+3. **Tạm bỏ `look_up`/`look_down` khỏi action pool** — `ai-service/app/routers/liveness_challenge.py`, `_ACTION_POOL` giờ chỉ còn `["turn_left", "turn_right", "blink"]`. Đúng theo đề xuất P0 của bạn: 2 hành động dựa vào pitch cần QA lại trên thiết bị thật (nhiều máy, nhiều góc cầm) trước khi bật lại — môi trường agent này không có camera thật để tự QA, nên không tự ý bật lại.
+4. **`submit_frames` tính baseline TRƯỚC khi phân loại bất kỳ khung nào** — đọc hết bytes các khung trước, tìm khung `center` (theo `actions.index("center")`, không giả định vị trí cố định), tính baseline từ đó, rồi mới chạy vòng lặp phân loại chính với baseline đã có.
+
+### Test đã chạy — và giới hạn thành thật
+
+- **Test sống qua API thật**: start challenge `purpose=enroll` → xác nhận `actions` trả về không còn `look_up`/`look_down` (chỉ còn tổ hợp từ `turn_left`/`turn_right`/`blink`). Nộp cùng 1 ảnh tĩnh cho 3 hành động (test hồi quy giống các lần trước) → `center` vẫn đúng đắn pass, `turn_left`/`blink` vẫn đúng đắn fail (ảnh tĩnh không thể tạo chuyển động thật) — xác nhận **không có hồi quy** so với hành vi trước khi sửa.
+- **Giới hạn — chưa thể tự kiểm chứng phần quan trọng nhất**: môi trường agent này KHÔNG có camera/thiết bị thật, chỉ có 1 ảnh khuôn mặt tĩnh làm fixture — không thể tự tái hiện chính xác lỗi gốc (một ảnh chụp thật từ camera điện thoại cầm thấp hơn mặt) để chứng minh trực tiếp rằng baseline mới KHẮC PHỤC được lỗi `center→look_down`. Việc sửa dựa trên chẩn đoán kỹ thuật đúng đắn (bias hệ thống từ góc cầm máy, không phải lỗi ngẫu nhiên) và toán học rõ ràng (trừ theo baseline thay vì so tuyệt đối phải loại bỏ đúng loại bias này), nhưng **cần đội QA xác nhận lại trên thiết bị thật** trước khi coi là đã khắc phục hoàn toàn — đúng khuyến nghị trong chính đề xuất của bạn.
+
+### 0.0b [MỚI] Đã thử thay thuật toán đo góc bằng MediaPipe — KHÔNG thành công, đã rollback
+
+Sau khi bạn xác nhận muốn thử "giữ active liveness nhưng thay bằng thư viện đo góc tốt hơn (MediaPipe)" thay vì đơn giản hóa nghiệp vụ, đã thử triển khai — nhưng gặp 2 trở ngại thực tế nghiêm trọng, buộc phải **rollback về đúng trạng thái P0** (baseline theo phiên trên dlib, mục 0.0) để không để hệ thống ở trạng thái hỏng:
+
+1. **Băng thông mạng của môi trường build cực kỳ chậm** (~48KB/s đo được thực tế tới PyPI) — tải các gói phụ thuộc cần thiết (riêng `opencv-contrib-python` ~90MB đã mất hơn nửa tiếng không xong) khiến việc cài đặt không khả thi trong thời gian hợp lý của 1 phiên làm việc.
+2. **Phiên bản `mediapipe` tương thích với stack hiện tại (protobuf/tensorflow đã cài) là `1.0.0`** — bản này đã **loại bỏ hoàn toàn API `mediapipe.solutions.face_mesh`** (API cũ, đơn giản, dùng để lấy landmark từ 1 ảnh tĩnh) mà tôi định dùng, chỉ còn API Tasks mới hơn (`FaceLandmarker`) — API này cần tải riêng 1 file model `.task` từ máy chủ Google (thêm 1 lần tải file lớn nữa qua đúng đường truyền chậm ở trên). Các phiên bản `mediapipe` cũ hơn (0.10.x, còn giữ `solutions` API) lại đòi `protobuf<4`, xung đột trực tiếp với `protobuf` bản mới đã có sẵn trong môi trường — quay lại đúng vấn đề ban đầu khiến lần thử đầu tiên bị treo hơn 50 phút.
+
+**Đã làm để không để lại hậu quả**: revert sạch `head_pose_service.py`, `liveness_challenge.py`, `requirements.txt` về đúng trạng thái mục 0.0 (dlib + baseline theo phiên, KHÔNG có MediaPipe) — build lại, test sống xác nhận `center` vẫn đúng, action pool vẫn không có `look_up`/`look_down`, không hồi quy.
+
+**Ý nghĩa cho quyết định tiếp theo**: hướng "giữ nguyên kiến trúc, chỉ thay thư viện đo góc" không khả thi ở MÔI TRƯỜNG AGENT NÀY (giới hạn hạ tầng, không phải giới hạn kỹ thuật của chính giải pháp) — nhưng **hoàn toàn có thể khả thi trong môi trường build thật của bạn** (băng thông bình thường). Nếu muốn theo hướng này, cần một trong hai:
+- Dùng `mediapipe==1.0.0` + API Tasks mới (`FaceLandmarker` + file `.task`) — cần viết lại phần trích landmark theo API mới, không phải chỉ đổi tên hàm.
+- Hoặc ép môi trường xuống `protobuf<4`/`tensorflow` bản cũ hơn để dùng được `mediapipe` 0.10.x với `solutions` API — rủi ro: có thể ảnh hưởng tới `deepface`/`tensorflow` đang dùng cho passive anti-spoofing (MiniFASNet), cần test lại toàn bộ.
+
+Vì cả 2 hướng đều cần tài nguyên (băng thông, thời gian build/test) mà môi trường agent không đáp ứng được, khuyến nghị: nếu muốn tiếp tục hướng MediaPipe, nên thực hiện trên máy/CI của bạn (có mạng nhanh hơn) theo đúng 2 lựa chọn kỹ thuật nêu trên — tôi có thể viết code cho phương án nào bạn chọn, chỉ không tự build/test được ở đây.
+
+## 0.0c [MỚI — ĐÃ TRIỂN KHAI] Chuyển toàn bộ pipeline sang InsightFace (SCRFD + ArcFace + 106pt landmarks)
+
+Bạn đề xuất kiến trúc mới thay hẳn nền tảng nhận diện: `InsightFace Detect → ArcFace Embedding → MiniFASNet → 106 Landmark → Blink → Head Turn → Cosine Similarity → Checkin`. Đã kiểm tra phù hợp với đúng nghiệp vụ hiện có (không đổi API, không đổi luồng consent/HR duyệt/policy 3 tầng) và **đã triển khai**, khác với đề xuất V2 (video+MediaPipe) ở mục 0.1 bên dưới — đây là thay đổi *nền tảng nhận diện*, không phải thay đổi *kiến trúc giao thức/API*.
+
+### Thay thế những gì
+
+| Thành phần | Trước (dlib) | Sau (InsightFace `buffalo_l`) |
+|---|---|---|
+| Phát hiện khuôn mặt | `face_recognition` (dlib HOG) | SCRFD (`det_10g.onnx`) |
+| Embedding nhận diện | dlib ResNet-34, 128 chiều | ArcFace (`w600k_r50.onnx`), **512 chiều** |
+| Landmark | dlib 68 điểm | 106 điểm (2D) + 68 điểm (3D) |
+| Đo góc đầu | OpenCV `solvePnP` + mô hình 3D chung cho mọi người | Biến đổi tương đồng 3D (Umeyama/Procrustes) so với khuôn mặt trung bình chuẩn — tích hợp sẵn trong thư viện, không tự viết `solvePnP` nữa |
+| Nháy mắt | EAR trên 6 điểm mắt dlib | Tỷ lệ cao/rộng của cụm 10 điểm contour mắt (106pt) — cùng nguyên lý EAR, chịu được việc chưa xác định chính xác thứ tự điểm mí trên/dưới |
+| Chống ảnh giả (passive PAD) | MiniFASNet (DeepFace) | **Không đổi** — vẫn MiniFASNet, chạy độc lập trên bytes ảnh, không phụ thuộc detector nào |
+
+### Vì sao đây là bản sửa đúng gốc rễ, không phải vá thêm
+
+Nguyên nhân gốc của lỗi `center` bị nhận nhầm `look_down` (bạn phát hiện qua test thật) là `solvePnP` dùng 1 mô hình khuôn mặt 3D **chung** cho mọi người — không tính đến khác biệt hình học khuôn mặt thật giữa các cá nhân, cũng không tính đến góc cầm điện thoại tự nhiên (luôn thấp hơn mắt). Bản vá P0 (baseline theo phiên) chỉ giảm nhẹ triệu chứng bằng cách so lệch tương đối thay vì tuyệt đối — vẫn dùng đúng thuật toán yếu bên dưới. InsightFace's landmark_3d_68 dùng mạng neural đã huấn luyện chuyên biệt để định vị 68 điểm 3D chính xác hơn nhiều so với suy luận hình học từ 6 điểm, rồi tính góc bằng phép biến đổi tương đồng so với khuôn mặt trung bình chuẩn (kỹ thuật kinh điển trong tài liệu học thuật về căn chỉnh khuôn mặt, không phải công nghệ thử nghiệm). Baseline theo phiên (mục 0.0) vẫn được **giữ lại** làm lớp bảo vệ bổ sung.
+
+**Xác nhận số học trên fixture test (ảnh chính diện thật)**: pose đo được `pitch=2.78°, yaw=-4.73°, roll=0.27°` — rất gần 0 đúng như kỳ vọng cho ảnh chính diện, khác hẳn độ lệch lớn có hệ thống của pipeline dlib cũ.
+
+### ⚠️ Thay đổi phá vỡ tương thích ngược — CẦN LƯU Ý khi triển khai thật
+
+**Mọi nhân viên đã đăng ký Face ID trước đây (embedding 128 chiều dlib) đều KHÔNG so khớp được với embedding mới (512 chiều ArcFace)** — 2 không gian vector hoàn toàn khác nhau, không thể so sánh trực tiếp. Đã thêm lớp bảo vệ để không làm sập worker khi gặp trường hợp này (`cosine_similarity` phát hiện lệch chiều dài vector → báo lỗi rõ ràng `embedding_dimension_mismatch` thay vì crash), nhưng **về nghiệp vụ, mọi nhân viên đã enrolled trước đợt deploy này đều cần đăng ký lại Face ID**. Đã test sống trực tiếp: giả lập 1 embedding 128 chiều cũ, gọi checkout → kết quả sạch sẽ `checkoutFaceVerified=false`, escalate đúng sang `pending_review`, không có exception nào bị nuốt.
+
+**Khuyến nghị khi go-live thật**: thông báo trước cho toàn bộ nhân viên đã đăng ký Face ID rằng cần đăng ký lại 1 lần sau đợt nâng cấp này — không có cách nào tự động "nâng cấp" embedding cũ lên không gian vector mới vì bản chất 2 mô hình học ra biểu diễn khác nhau hoàn toàn.
+
+### Đã khôi phục `look_up`/`look_down` vào action pool
+
+Vì nguyên nhân gốc (thuật toán đo góc yếu) đã được sửa tận gốc chứ không chỉ vá triệu chứng, action pool quay lại đủ 5 hành động (`turn_left`/`turn_right`/`look_up`/`look_down`/`blink`) thay vì tạm bớt 2 hành động như ở P0.
+
+### Test đã chạy — và giới hạn thành thật (không đổi so với các đợt trước)
+
+- **Test sống đầy đủ qua API thật, không mock**: đăng ký Face ID (ảnh tĩnh) → embedding 512 chiều lưu đúng → HR duyệt → check-in với đúng ảnh đã đăng ký → worker xác thực bất đồng bộ trả `faceVerified=true, score=1.0` (khớp hoàn hảo, đúng kỳ vọng vì cùng 1 ảnh) → check-out cũng qua được luồng tương tự.
+- Test challenge liveness: `actions` trả về đủ cả `look_up`/`look_down` (đã khôi phục), `center` tiếp tục được nhận đúng khi nộp lại đúng 1 ảnh tĩnh cho 3 hành động (không hồi quy so với hành vi trước).
+- Test riêng dimension-mismatch: xác nhận không crash, escalate đúng.
+- Hồi quy `tests/checkin/test_basic_checkin.sh` (11/11 pass, không liên quan Face ID nhưng dùng chung service) và các suite `tests/face-id/*.sh` khác — các lỗi còn lại đều là lỗi kịch bản test có từ trước (field `email`/`identifier`, thứ tự test tự-consent), không phải hồi quy từ thay đổi này.
+- **Giới hạn còn nguyên**: vẫn KHÔNG có camera thật trong môi trường agent — chỉ verify được bằng 1 ảnh tĩnh cố định. Việc quay đầu/nháy mắt thật trên tay người dùng **vẫn cần bạn tự test trên điện thoại thật** để xác nhận cuối cùng, dù xác suất thành công giờ cao hơn nhiều nhờ thuật toán đo góc chính xác hơn hẳn.
+
+### Việc KHÔNG tự triển khai — cần bạn quyết định (mục 0.1)
+
+## 0.1 Đề xuất Active Liveness V2 (video liên tục + MediaPipe) — cần quyết định trước khi làm
+
+Phần P0 ở mục 0.0 là fix an toàn, đúng, đã kiểm chứng logic — nhưng đây chỉ là "giảm đau" trên kiến trúc hiện tại (1 ảnh/hành động, ngưỡng heuristic). Đề xuất V2 trong tài liệu bạn gửi đúng hướng về mặt kỹ thuật (video liên tục, MediaPipe Face Landmarker, baseline đa khung, PAD đa khung, kiểm tra danh tính xuyên suốt, state machine `created→evidence_uploaded→processing→passed/failed/expired`) nhưng là **một dự án kiến trúc nhiều tuần**, không phải một đợt sửa lỗi:
+
+- Đụng tới **2 repo** (`fams-backend-project` + `fams-front-app-project`) — App cần chuyển từ Expo Go sang Development Build, tích hợp ML Kit native, quay video liên tục thay vì chụp ảnh.
+- Thêm **dependency mới** cho AI service (MediaPipe Face Landmarker) — cần đánh giá tương thích, hiệu năng, kích thước image.
+- Cần **hạ tầng xử lý bất đồng bộ mới**: upload video (endpoint `202 Accepted` + poll kết quả), decode video, trích frame, giới hạn dung lượng/thời lượng, dọn dẹp evidence theo retention.
+- Cần **bộ test nghiệm thu bằng thiết bị thật** (mục 12 trong đề xuất của bạn: ít nhất 3 Android + 2 iPhone, nhiều điều kiện ánh sáng/góc camera/nhân khẩu học) — **môi trường agent này không có khả năng tự thực hiện**, chỉ backend/AI code có thể viết trước, không thể tự QA đạt chuẩn "90% pass lần đầu, 95% trong 2 lần" mà đề xuất đặt ra.
+
+**Khuyến nghị**: triển khai đúng theo lộ trình giảm rủi ro đã đề xuất trong tài liệu của bạn (mục 13) — P0 (đã làm ở mục 0.0) → P1 (V2 đầy đủ, chạy shadow mode song song V1 trước khi quyết định nghiệp vụ) → P2 (bật theo feature flag từng tenant, hardening). Trước khi tôi bắt đầu viết code cho P1 (API V2, MediaPipe, state machine), cần bạn xác nhận:
+
+1. **Có triển khai V2 ngay hay dừng ở P0 trước, đo hiệu quả P0 trên thiết bị thật rồi mới quyết định có cần V2 không?** (P0 có thể đã đủ tốt — nguyên nhân gốc bạn tự chẩn đoán là bias baseline, chính là thứ P0 sửa trực tiếp; look_up/look_down tạm bỏ thì tổn thất tính năng không lớn).
+2. **Nếu làm V2**: có chấp nhận rủi ro thêm MediaPipe làm dependency mới (kích thước, license, bảo trì) hay ưu tiên giải pháp khác?
+3. **Ai/khi nào thực hiện bộ test thiết bị thật ở mục 12** — cần trước khi bật production, không thể agent tự làm.
+
+Toàn bộ chi tiết kỹ thuật (giao thức API V2, thuật toán AI, state machine, mã lỗi chuẩn hóa, kế hoạch test) đã có sẵn, chất lượng tốt, trong tài liệu bạn gửi — khi có quyết định, dùng thẳng tài liệu đó làm spec triển khai.
 
 Cả 2 team (Web: `17_BAO_CAO_FACE_ID_UI_2026-07-28.md`, App: `18_BAO_CAO_APP_FACE_ID_ACTIVE_LIVENESS_2026-07-28.md`) tích hợp xong theo tài liệu mục 0.1 và báo lại — đã xác minh từng điểm với code thật, tất cả đều đúng, đã sửa:
 

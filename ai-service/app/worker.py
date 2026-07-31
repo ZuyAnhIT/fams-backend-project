@@ -106,7 +106,19 @@ def _process_job(job_data: dict) -> None:
         send_face_result(source_id, tenant_id, source_type, False, liveness_verified, None, "extraction_error")
         return
 
-    score = cosine_similarity(stored_embedding, checkin_embedding)
+    try:
+        score = cosine_similarity(stored_embedding, checkin_embedding)
+    except ValueError as e:
+        # Only happens for a profile enrolled under a since-replaced embedding model (different
+        # vector dimensionality) — e.g. the ArcFace switch (2026-07-31, see
+        # docs/api/face-id-management-api.md). Report clearly instead of letting np.dot raise an
+        # opaque shape-mismatch error that would otherwise just get swallowed by the worker
+        # loop's broad except, silently leaving this checkin/checkout's face result unset forever.
+        logger.warning("Embedding dimension mismatch for sourceId=%s (stale enrollment under a "
+                        "prior model — employee must re-enroll): %s", source_id, e)
+        send_face_result(source_id, tenant_id, source_type, False, liveness_verified, None, str(e))
+        return
+
     face_verified = score >= AI_FACE_SIMILARITY_THRESHOLD
 
     send_face_result(source_id, tenant_id, source_type, face_verified, liveness_verified, score, None)

@@ -46,7 +46,7 @@ TS=$(date +%s)
 TENANT_ID=$(curl -s -X POST "$BASE_URL/api/v1/tenants" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"name\":\"Status Corp\",\"slug\":\"status-corp-${TS}\"}" \
+    -d "{\"name\":\"Status Corp\",\"slug\":\"status-corp-${TS}\",\"ownerEmail\":\"admin@fams.com\"}" \
     | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 [ -z "$TENANT_ID" ] && { echo "SETUP FAILED: tenant"; exit 1; }
 

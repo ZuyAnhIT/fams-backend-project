@@ -55,7 +55,7 @@ ADMIN_TOKEN=$(echo "$login_resp" | head -n -1 | grep -o '"accessToken":"[^"]*"' 
 TS=$(date +%s)
 t_resp=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/tenants" \
     -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"name\":\"LivenessCI Corp\",\"slug\":\"liveness-ci-${TS}\"}")
+    -d "{\"name\":\"LivenessCI Corp\",\"slug\":\"liveness-ci-${TS}\",\"ownerEmail\":\"admin@fams.com\"}")
 [ "$(echo "$t_resp" | tail -n 1)" -ne 201 ] && { echo "SETUP FAILED: tenant"; exit 1; }
 TENANT_ID=$(echo "$t_resp" | head -n -1 | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 

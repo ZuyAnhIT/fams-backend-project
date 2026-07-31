@@ -2,21 +2,16 @@ from __future__ import annotations
 
 import logging
 
-import cv2
 import numpy as np
 
 logger = logging.getLogger(__name__)
 
-# Generic 3D reference face (arbitrary units) — the standard 6-point model used for
-# solvePnP-based head pose estimation (nose tip is the coordinate-system origin).
-_MODEL_POINTS = np.array([
-    (0.0, 0.0, 0.0),          # Nose tip
-    (0.0, -330.0, -65.0),     # Chin
-    (-225.0, 170.0, -135.0),  # Left eye, outer corner
-    (225.0, 170.0, -135.0),   # Right eye, outer corner
-    (-150.0, -150.0, -125.0), # Left mouth corner
-    (150.0, -150.0, -125.0),  # Right mouth corner
-], dtype=np.float64)
+# InsightFace's 106-point landmark scheme (landmark_2d_106) — indices for the two eye contours,
+# verified empirically against this service's own test fixture (not blindly trusted from a
+# secondhand diagram): each eye is a contiguous run of 10 points, clustered by relative position
+# to the face bbox. See docs/api/face-id-management-api.md for how these were derived.
+_LEFT_EYE_IDX = slice(33, 43)
+_RIGHT_EYE_IDX = slice(87, 97)
 
 # Degrees. A frontal ("center") face should read close to 0 on both axes; a genuine turn/tilt
 # needs to clear this margin to count — wide enough to tolerate normal hand-held-phone jitter,
@@ -25,103 +20,100 @@ YAW_THRESHOLD_DEG = 15.0
 PITCH_THRESHOLD_DEG = 12.0
 CENTER_MAX_DEVIATION_DEG = 10.0
 
-# Eye Aspect Ratio: open eyes are usually 0.25-0.35 for a face-forward camera; this drops
-# sharply (typically <0.15-0.18) when eyes are closed. See Soukupová & Čech, "Real-Time Eye
-# Blink Detection using Facial Landmarks" (2016) — the standard reference for this technique.
-EAR_BLINK_THRESHOLD = 0.20
+# Generous sanity bound for the BASELINE itself (not the tight tolerance above, which is for
+# classifying frames relative to that baseline). Even though InsightFace's pose estimate (3D
+# similarity transform against a canonical mean face, not a generic 6-point solvePnP — see
+# docs/api/face-id-management-api.md) is far more accurate than the old dlib pipeline, a real
+# phone selfie camera is still essentially never held perfectly at eye level, so some natural
+# bias in the 'center' frame's own reading is expected and fine. This bound only rejects
+# genuinely implausible baselines (e.g. a profile shot).
+CENTER_BASELINE_SANITY_DEG = 45.0
+
+# Eye "openness" = height/width of the 10-point eye-contour cluster's bounding extent — the same
+# principle as the classic Eye Aspect Ratio (Soukupová & Čech, 2016: shrinks sharply when the
+# eye closes) computed via extents rather than matched corner/lid point PAIRS, because
+# InsightFace's exact within-cluster point ORDER (which of the 10 points is "upper lid center"
+# vs "lower lid center") is not documented precisely enough to trust blind pairing — extents are
+# robust to that ambiguity. Calibrated against this service's own open-eye test fixture
+# (~0.25-0.26); NOT yet validated against a real closed-eye photo (this environment has no
+# camera) — flag for real-device QA, same caveat as the previous EAR threshold.
+EYE_OPEN_THRESHOLD = 0.16
 
 
-def _landmark_points(landmarks: dict) -> np.ndarray | None:
-    """Extract the 6 points solvePnP needs, in the same order as _MODEL_POINTS."""
-    try:
-        nose_tip = landmarks["nose_tip"][2]
-        chin = landmarks["chin"][8]
-        left_eye_outer = landmarks["left_eye"][0]
-        right_eye_outer = landmarks["right_eye"][3]
-        mouth_left = landmarks["top_lip"][0]
-        mouth_right = landmarks["top_lip"][6]
-    except (KeyError, IndexError):
+def estimate_head_pose(face) -> tuple[float, float, float] | None:
+    """Returns (pitch, yaw, roll) in degrees from an InsightFace Face object, or None if this
+    face has no pose (only present when the landmark_3d_68 model ran, which buffalo_l always
+    includes). pitch > 0 ~ looking up, pitch < 0 ~ looking down; yaw > 0 / < 0 ~ turned to one
+    side vs the other — same sign convention as before, InsightFace's own pose[0]=pitch,
+    pose[1]=yaw, pose[2]=roll (see insightface/model_zoo/landmark.py)."""
+    pose = getattr(face, "pose", None)
+    if pose is None:
         return None
-    return np.array([nose_tip, chin, left_eye_outer, right_eye_outer, mouth_left, mouth_right],
-                     dtype=np.float64)
-
-
-def estimate_head_pose(landmarks: dict, image_shape: tuple[int, int]) -> tuple[float, float, float] | None:
-    """Returns (pitch, yaw, roll) in degrees, or None if landmarks are unusable.
-
-    pitch > 0 ~ looking up, pitch < 0 ~ looking down (sign depends on solvePnP's convention,
-    calibrated against a known-frontal frame during testing — see docs/api/face-id-management-api.md).
-    yaw > 0 / < 0 ~ turned to one side vs the other.
-    """
-    image_points = _landmark_points(landmarks)
-    if image_points is None:
-        return None
-
-    height, width = image_shape[:2]
-    focal_length = width
-    center = (width / 2, height / 2)
-    camera_matrix = np.array([
-        [focal_length, 0, center[0]],
-        [0, focal_length, center[1]],
-        [0, 0, 1],
-    ], dtype=np.float64)
-    dist_coeffs = np.zeros((4, 1))
-
-    success, rotation_vector, translation_vector = cv2.solvePnP(
-        _MODEL_POINTS, image_points, camera_matrix, dist_coeffs, flags=cv2.SOLVEPNP_ITERATIVE)
-    if not success:
-        return None
-
-    rotation_matrix, _ = cv2.Rodrigues(rotation_vector)
-    projection_matrix = np.hstack((rotation_matrix, translation_vector))
-    euler_angles = cv2.decomposeProjectionMatrix(projection_matrix)[6]
-    pitch, yaw, roll = (float(a) for a in euler_angles.flatten())
-
-    # cv2.decomposeProjectionMatrix has a well-known sign ambiguity for a face looking roughly
-    # at the camera: it can return the mathematically-equivalent "flipped" solution (pitch/roll
-    # near +-180 instead of near 0). Detected via roll being near +-180 (a webcam-facing head is
-    # never actually rolled that far) and corrected by folding pitch/roll back into [-90, 90].
-    if abs(roll) > 90:
-        pitch = pitch - 180 if pitch > 0 else pitch + 180
-        roll = roll - 180 if roll > 0 else roll + 180
-
+    pitch, yaw, roll = (float(v) for v in pose)
     return pitch, yaw, roll
 
 
-def eye_aspect_ratio(eye_points: list[tuple[int, int]]) -> float:
-    """Standard 6-point EAR: (|p2-p6| + |p3-p5|) / (2 * |p1-p4|)."""
-    p = [np.array(pt, dtype=np.float64) for pt in eye_points]
-    vertical_1 = np.linalg.norm(p[1] - p[5])
-    vertical_2 = np.linalg.norm(p[2] - p[4])
-    horizontal = np.linalg.norm(p[0] - p[3])
-    if horizontal == 0:
+def estimate_baseline_pose(face) -> tuple[float, float] | None:
+    """Pitch/yaw to use as the zero-point for delta-based classification of the rest of a
+    challenge's frames — derived from that challenge's own 'center' frame instead of assuming
+    an idealized, unrealistic (0, 0) frontal pose. Returns None (caller falls back to an
+    absolute (0, 0) baseline) if pose can't be read or is wildly implausible as a "roughly facing
+    the camera" starting point."""
+    pose = estimate_head_pose(face)
+    if pose is None:
+        return None
+    pitch, yaw, _roll = pose
+    if abs(pitch) > CENTER_BASELINE_SANITY_DEG or abs(yaw) > CENTER_BASELINE_SANITY_DEG:
+        return None
+    return pitch, yaw
+
+
+def eye_openness(eye_points: np.ndarray) -> float:
+    """height/width of a 10-point eye-contour cluster's bounding box — see EYE_OPEN_THRESHOLD
+    docstring for why this shape (not classic paired-point EAR) was used."""
+    xs = eye_points[:, 0]
+    ys = eye_points[:, 1]
+    width = float(xs.max() - xs.min())
+    height = float(ys.max() - ys.min())
+    if width == 0:
         return 0.0
-    return (vertical_1 + vertical_2) / (2.0 * horizontal)
+    return height / width
 
 
-def classify_frame(landmarks: dict, image_shape: tuple[int, int]) -> set[str]:
+def classify_frame(face, baseline_pitch: float = 0.0, baseline_yaw: float = 0.0) -> set[str]:
     """Returns every action this single frame's face pose/eye-state satisfies (a frame can
     satisfy multiple loosely — e.g. 'center' and nothing else, or 'blink' regardless of yaw).
-    The caller matches this against the ONE expected action for that position in the sequence."""
+    The caller matches this against the ONE expected action for that position in the sequence.
+
+    `face` is an InsightFace Face object (from face_service.detect_single_face) — carries both
+    pose and landmark_2d_106 in one shot, unlike the old dlib pipeline which needed the raw image
+    array passed separately for pose.
+
+    Pose classification is relative to (baseline_pitch, baseline_yaw) — the challenge's own
+    'center' frame's measured pose (see estimate_baseline_pose), not an assumed (0, 0)."""
     satisfied: set[str] = set()
 
-    pose = estimate_head_pose(landmarks, image_shape)
+    pose = estimate_head_pose(face)
     if pose is not None:
         pitch, yaw, roll = pose
-        if abs(yaw) <= CENTER_MAX_DEVIATION_DEG and abs(pitch) <= CENTER_MAX_DEVIATION_DEG:
+        pitch_delta = pitch - baseline_pitch
+        yaw_delta = yaw - baseline_yaw
+        if abs(yaw_delta) <= CENTER_MAX_DEVIATION_DEG and abs(pitch_delta) <= CENTER_MAX_DEVIATION_DEG:
             satisfied.add("center")
-        if yaw >= YAW_THRESHOLD_DEG:
+        if yaw_delta >= YAW_THRESHOLD_DEG:
             satisfied.add("turn_right")
-        elif yaw <= -YAW_THRESHOLD_DEG:
+        elif yaw_delta <= -YAW_THRESHOLD_DEG:
             satisfied.add("turn_left")
-        if pitch >= PITCH_THRESHOLD_DEG:
+        if pitch_delta >= PITCH_THRESHOLD_DEG:
             satisfied.add("look_up")
-        elif pitch <= -PITCH_THRESHOLD_DEG:
+        elif pitch_delta <= -PITCH_THRESHOLD_DEG:
             satisfied.add("look_down")
 
-    left_ear = eye_aspect_ratio(landmarks["left_eye"])
-    right_ear = eye_aspect_ratio(landmarks["right_eye"])
-    if (left_ear + right_ear) / 2.0 < EAR_BLINK_THRESHOLD:
-        satisfied.add("blink")
+    landmarks = getattr(face, "landmark_2d_106", None)
+    if landmarks is not None:
+        left_openness = eye_openness(landmarks[_LEFT_EYE_IDX])
+        right_openness = eye_openness(landmarks[_RIGHT_EYE_IDX])
+        if (left_openness + right_openness) / 2.0 < EYE_OPEN_THRESHOLD:
+            satisfied.add("blink")
 
     return satisfied
