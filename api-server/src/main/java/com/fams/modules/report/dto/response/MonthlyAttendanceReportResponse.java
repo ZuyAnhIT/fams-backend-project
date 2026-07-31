@@ -49,6 +49,15 @@ public class MonthlyAttendanceReportResponse {
     @Schema(description = "Sum of totalOtMinutes across all employees for the month", example = "1800")
     private int totalOtMinutes;
 
+    @Schema(description = "Number of employee+site rows with at least one unconfirmed (pending_review) session "
+            + "this month — non-zero means the report is NOT payroll-final; resolve these before exporting.",
+            example = "0")
+    private int totalRowsWithPendingReview;
+
+    @Schema(description = "Number of employee+site rows with at least one HR-rejected session this month",
+            example = "0")
+    private int totalRowsWithRejectedSession;
+
     @Schema(description = "Paginated per-employee monthly attendance aggregates")
     private PageResponse<AttendanceHrMonthlyResponse> records;
 }

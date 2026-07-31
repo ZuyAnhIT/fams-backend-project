@@ -1,6 +1,8 @@
 package com.fams.modules.attendance.repository;
 
 import com.fams.modules.attendance.entity.AttendanceSummary;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
@@ -35,4 +37,47 @@ public interface AttendanceSummaryRepository
 
     @Query("SELECT COUNT(a) FROM AttendanceSummary a WHERE a.tenantId = :tenantId AND a.attendanceDate = :date AND a.late = true AND a.deletedAt IS NULL")
     long countLateByTenantAndDate(@Param("tenantId") UUID tenantId, @Param("date") LocalDate date);
+
+    /**
+     * HR monthly aggregate (one row per employee+site), grouped and paginated at the DB level —
+     * replaces the previous approach of loading every daily row for the whole tenant/month into
+     * Java and grouping/paging in memory (a real scaling concern flagged in an audit, 2026-07-31,
+     * see docs/api/attendance-management-api.md). `employeeId`/`siteId` are nullable filters
+     * (pass null to mean "no filter on this dimension").
+     */
+    @Query(value = """
+            SELECT employee_id AS employeeId, site_id AS siteId,
+                   COUNT(*) AS presentDays,
+                   COALESCE(SUM(total_work_minutes), 0) AS totalWorkMinutes,
+                   COALESCE(SUM(CASE WHEN is_late THEN 1 ELSE 0 END), 0) AS lateDays,
+                   COALESCE(SUM(late_minutes), 0) AS totalLateMinutes,
+                   COALESCE(SUM(CASE WHEN is_early_leave THEN 1 ELSE 0 END), 0) AS earlyLeaveDays,
+                   COALESCE(SUM(early_leave_minutes), 0) AS totalEarlyLeaveMinutes,
+                   COALESCE(SUM(ot_minutes), 0) AS totalOtMinutes,
+                   COALESCE(SUM(CASE WHEN missing_checkout THEN 1 ELSE 0 END), 0) AS missingCheckoutDays,
+                   COALESCE(SUM(CASE WHEN has_pending_review_session THEN 1 ELSE 0 END), 0) AS daysWithPendingReview,
+                   COALESCE(SUM(CASE WHEN has_rejected_session THEN 1 ELSE 0 END), 0) AS daysWithRejectedSession
+            FROM attendance_summaries
+            WHERE tenant_id = :tenantId AND deleted_at IS NULL
+              AND attendance_date >= :from AND attendance_date < :to
+              AND (CAST(:employeeId AS uuid) IS NULL OR employee_id = :employeeId)
+              AND (CAST(:siteId AS uuid) IS NULL OR site_id = :siteId)
+            GROUP BY employee_id, site_id
+            ORDER BY employee_id, site_id
+            """,
+            countQuery = """
+            SELECT COUNT(*) FROM (
+                SELECT 1 FROM attendance_summaries
+                WHERE tenant_id = :tenantId AND deleted_at IS NULL
+                  AND attendance_date >= :from AND attendance_date < :to
+                  AND (CAST(:employeeId AS uuid) IS NULL OR employee_id = :employeeId)
+                  AND (CAST(:siteId AS uuid) IS NULL OR site_id = :siteId)
+                GROUP BY employee_id, site_id
+            ) grouped
+            """,
+            nativeQuery = true)
+    Page<AttendanceMonthlyAggregateProjection> aggregateMonthly(
+            @Param("tenantId") UUID tenantId, @Param("employeeId") UUID employeeId,
+            @Param("siteId") UUID siteId, @Param("from") LocalDate from, @Param("to") LocalDate to,
+            Pageable pageable);
 }

@@ -74,6 +74,16 @@ public class AttendanceSummary {
     @Column(name = "missing_checkout", nullable = false)
     private boolean missingCheckout;
 
+    // All computed fields above (workMinutes/late/earlyLeave/ot/missingCheckout) only aggregate
+    // status='valid' sessions — these 2 flags surface WHY a day's numbers might look
+    // provisional/incomplete (a pending_review or rejected session was excluded), instead of
+    // silently dropping them with no explanation. See V79 migration.
+    @Column(name = "has_pending_review_session", nullable = false)
+    private boolean hasPendingReviewSession;
+
+    @Column(name = "has_rejected_session", nullable = false)
+    private boolean hasRejectedSession;
+
     @Column(name = "adjustment_reason", columnDefinition = "TEXT")
     private String adjustmentReason;
 

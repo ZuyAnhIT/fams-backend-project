@@ -1,5 +1,6 @@
 package com.fams.modules.platform.controller;
 
+import com.fams.modules.attendance.service.AttendanceSummaryService;
 import com.fams.modules.platform.dto.SystemStatusResponse;
 import com.fams.modules.randomcheck.redis.RandomCheckDispatchQueue;
 import com.fams.modules.tenant.repository.TenantRepository;
@@ -8,6 +9,7 @@ import com.fams.shared.monitoring.ScheduledJobStatus;
 import com.fams.shared.monitoring.ScheduledJobStatusRepository;
 import com.fams.shared.response.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.extern.slf4j.Slf4j;
@@ -15,12 +17,16 @@ import org.springframework.boot.actuate.health.HealthComponent;
 import org.springframework.boot.actuate.health.HealthEndpoint;
 import org.springframework.boot.actuate.health.SystemHealth;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -40,19 +46,22 @@ public class SystemStatusController {
     private final TenantRepository tenantRepository;
     private final RandomCheckDispatchQueue dispatchQueue;
     private final StringRedisTemplate redisTemplate;
+    private final AttendanceSummaryService attendanceSummaryService;
 
     public SystemStatusController(HealthEndpoint healthEndpoint,
                                    ScheduledJobMonitor jobMonitor,
                                    ScheduledJobStatusRepository jobStatusRepository,
                                    TenantRepository tenantRepository,
                                    RandomCheckDispatchQueue dispatchQueue,
-                                   StringRedisTemplate redisTemplate) {
+                                   StringRedisTemplate redisTemplate,
+                                   AttendanceSummaryService attendanceSummaryService) {
         this.healthEndpoint = healthEndpoint;
         this.jobMonitor = jobMonitor;
         this.jobStatusRepository = jobStatusRepository;
         this.tenantRepository = tenantRepository;
         this.dispatchQueue = dispatchQueue;
         this.redisTemplate = redisTemplate;
+        this.attendanceSummaryService = attendanceSummaryService;
     }
 
     @Operation(
@@ -99,6 +108,45 @@ public class SystemStatusController {
 
         log.info("System status requested by platform admin — overall={}", overallHealth);
         return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    @Operation(
+        summary = "Backfill attendance summaries for a date range, across every tenant",
+        description = "Re-runs the standard attendance recompute for every day in [from, to] — needed after a "
+                      + "migration/code change to the recompute formula (e.g. V79's status-filtering fix, "
+                      + "2026-07-31) so historical summary rows computed under the OLD logic get reconciled. "
+                      + "Reuses the exact same recompute() logic as real-time/nightly recompute — never a "
+                      + "separate SQL formula. Skips any summary already manually adjusted by HR (unchanged, "
+                      + "same protection as every other recompute path). Cross-tenant by nature — restricted "
+                      + "to PLATFORM_ADMIN, never exposed to a tenant-scoped HR/Admin role."
+    )
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Backfill completed (see body for per-day success/failure counts)"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Unauthorized"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "Forbidden — PLATFORM_ADMIN only")
+    })
+    @PreAuthorize("hasRole('PLATFORM_ADMIN')")
+    @PostMapping("/attendance/backfill")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> backfillAttendance(
+            @Parameter(description = "Start date, inclusive (yyyy-MM-dd)", required = true)
+                @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @Parameter(description = "End date, inclusive (yyyy-MM-dd)", required = true)
+                @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
+
+        if (to.isBefore(from)) {
+            throw new IllegalArgumentException("'to' must not be before 'from'");
+        }
+
+        log.info("Platform admin triggered attendance backfill: from={} to={}", from, to);
+        AttendanceSummaryService.BackfillResult result = attendanceSummaryService.backfillDateRange(from, to);
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("from", from);
+        body.put("to", to);
+        body.put("daysProcessed", result.daysProcessed());
+        body.put("daysFailed", result.daysFailed());
+
+        return ResponseEntity.ok(ApiResponse.success(body));
     }
 
     private Map<String, Object> flattenHealth(HealthComponent component) {

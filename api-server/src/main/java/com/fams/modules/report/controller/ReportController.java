@@ -123,7 +123,9 @@ public class ReportController {
         description = "Generates and downloads an Excel (.xlsx) file containing the monthly attendance " +
                       "timesheet: one row per employee+site combination with present days, work minutes, " +
                       "late, early-leave, OT, and missing-checkout totals. " +
-                      "Optionally filter by siteId. Requires reports:export permission."
+                      "Optionally filter by siteId. Requires attendance:export permission. Blocked with 409 " +
+                      "ATTENDANCE_NOT_READY if any row in scope still has pending-review or rejected sessions " +
+                      "unless confirmDespiteWarnings=true is passed."
     )
     @ApiResponses({
         @io.swagger.v3.oas.annotations.responses.ApiResponse(
@@ -137,7 +139,10 @@ public class ReportController {
             description = "Unauthorized — valid JWT required"),
         @io.swagger.v3.oas.annotations.responses.ApiResponse(
             responseCode = "403",
-            description = "Forbidden — reports:export permission required")
+            description = "Forbidden — attendance:export permission required"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "409",
+            description = "ATTENDANCE_NOT_READY — pending-review/rejected sessions in scope; retry with confirmDespiteWarnings=true")
     })
     @GetMapping("/attendance/export")
     public ResponseEntity<byte[]> exportMonthlyAttendance(
@@ -146,6 +151,8 @@ public class ReportController {
             @Parameter(description = "Month (1–12)", required = true) @RequestParam int month,
             @Parameter(description = "Restrict export to one site (optional)")
                 @RequestParam(required = false) UUID siteId,
+            @Parameter(description = "Export anyway despite unresolved pending-review/rejected sessions in scope")
+                @RequestParam(defaultValue = "false") boolean confirmDespiteWarnings,
             @AuthenticationPrincipal FamsUserDetails caller) {
 
         if (month < 1 || month > 12) {
@@ -153,7 +160,7 @@ public class ReportController {
         }
 
         byte[] content = reportService.exportMonthlyAttendance(
-                tenantId, year, month, siteId,
+                tenantId, year, month, siteId, confirmDespiteWarnings,
                 caller.getUserId(), caller.isPlatformAdmin());
 
         String filename = String.format("attendance-%d-%02d.xlsx", year, month);

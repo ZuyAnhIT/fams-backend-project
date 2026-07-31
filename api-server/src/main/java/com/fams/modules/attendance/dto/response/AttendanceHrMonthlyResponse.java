@@ -55,4 +55,13 @@ public class AttendanceHrMonthlyResponse {
 
     @Schema(description = "Days flagged as missing checkout (past day with open session)", example = "0")
     private int missingCheckoutDays;
+
+    @Schema(description = "Days with at least one unconfirmed (pending_review) session this month — exclude or "
+            + "double-check these before finalizing payroll export, totals above may be understated for them",
+            example = "0")
+    private int daysWithPendingReview;
+
+    @Schema(description = "Days with at least one HR-rejected session this month (excluded from all totals above)",
+            example = "0")
+    private int daysWithRejectedSession;
 }

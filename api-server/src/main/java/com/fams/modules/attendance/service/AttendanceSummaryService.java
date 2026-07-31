@@ -4,8 +4,10 @@ import com.fams.modules.attendance.dto.response.AttendanceHrMonthlyResponse;
 import com.fams.modules.attendance.dto.response.AttendanceMonthlyResponse;
 import com.fams.modules.attendance.dto.response.AttendanceSummaryResponse;
 import com.fams.modules.attendance.entity.AttendanceSummary;
+import com.fams.modules.attendance.repository.AttendanceMonthlyAggregateProjection;
 import com.fams.modules.attendance.repository.AttendanceSummaryRepository;
 import com.fams.modules.attendance.specification.AttendanceSummarySpecification;
+import com.fams.modules.audit.service.AuditLogService;
 import com.fams.modules.checkin.entity.CheckinRecord;
 import com.fams.modules.checkin.repository.CheckinRepository;
 import com.fams.modules.employee.entity.Employee;
@@ -32,7 +34,6 @@ import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -52,19 +53,22 @@ public class AttendanceSummaryService {
     private final EmployeeRepository employeeRepository;
     private final UserRoleRepository userRoleRepository;
     private final SiteScopeService siteScopeService;
+    private final AuditLogService auditLogService;
 
     public AttendanceSummaryService(AttendanceSummaryRepository summaryRepository,
                                     CheckinRepository checkinRepository,
                                     SiteRepository siteRepository,
                                     EmployeeRepository employeeRepository,
                                     UserRoleRepository userRoleRepository,
-                                    SiteScopeService siteScopeService) {
+                                    SiteScopeService siteScopeService,
+                                    AuditLogService auditLogService) {
         this.summaryRepository = summaryRepository;
         this.checkinRepository = checkinRepository;
         this.siteRepository = siteRepository;
         this.employeeRepository = employeeRepository;
         this.userRoleRepository = userRoleRepository;
         this.siteScopeService = siteScopeService;
+        this.auditLogService = auditLogService;
     }
 
     /** Marker thrown internally by resolveSiteFilter to signal "no sites allowed at all" —
@@ -122,18 +126,92 @@ public class AttendanceSummaryService {
     }
 
     /**
-     * Nightly catch-up: recomputes summaries for all check-in records whose local
-     * attendance date equals {@code targetDate}. Called by AttendanceSummaryJob.
+     * Nightly catch-up: recomputes summaries for EVERY tenant's check-in records whose local
+     * attendance date equals {@code targetDate}. Called only by AttendanceSummaryJob — a system
+     * batch job, so tenant-agnostic is correct here. User-facing/API-triggered recompute must go
+     * through {@link #triggerRecompute} instead, which is properly tenant/site-scoped.
      */
     @Transactional
     public void recomputeForDate(LocalDate targetDate) {
-        // Use a ±1 day UTC window to capture all timezone offsets (UTC-12 to UTC+14).
         OffsetDateTime from = targetDate.minusDays(1).atStartOfDay().atOffset(ZoneOffset.UTC);
         OffsetDateTime to   = targetDate.plusDays(2).atStartOfDay().atOffset(ZoneOffset.UTC);
-
         List<CheckinRecord> candidates = checkinRepository.findCheckinsBetween(from, to);
+        recomputeGroups(candidates, targetDate);
+    }
+
+    /**
+     * Platform-admin-only backfill for a date range, across every tenant — reuses the exact same
+     * recompute() logic as every other path (not a separate SQL formula), so results are
+     * guaranteed consistent with real-time recompute. Needed after V79 (2026-07-31): that
+     * migration added has_pending_review_session/has_rejected_session with a default of false
+     * and did NOT retroactively fix totalWorkMinutes/late/early/OT on rows computed under the
+     * OLD (unfiltered) logic — those historical rows kept counting pending_review/rejected
+     * sessions until something re-triggers their recompute. This is that trigger, run explicitly
+     * and deliberately rather than silently. NOT transactional as a whole — each date commits
+     * independently via recomputeForDate(LocalDate), so one bad day can't roll back the rest.
+     * Skips (never touches) any summary with a non-null adjustmentReason, same as every other
+     * recompute path — an HR-adjusted row's numbers are never silently rewritten.
+     */
+    public BackfillResult backfillDateRange(LocalDate from, LocalDate to) {
+        int daysProcessed = 0;
+        int daysFailed = 0;
+        for (LocalDate date = from; !date.isAfter(to); date = date.plusDays(1)) {
+            try {
+                recomputeForDate(date);
+                daysProcessed++;
+            } catch (Exception e) {
+                daysFailed++;
+                log.error("Backfill failed for date={}: {}", date, e.getMessage(), e);
+            }
+        }
+        log.info("Attendance backfill complete: from={} to={} daysProcessed={} daysFailed={}",
+                from, to, daysProcessed, daysFailed);
+        return new BackfillResult(daysProcessed, daysFailed);
+    }
+
+    public record BackfillResult(int daysProcessed, int daysFailed) {
+    }
+
+    /**
+     * HR/Admin-facing entry point for POST .../attendance/recompute — properly scoped to the
+     * calling tenant (and, for a site-restricted caller, to their allowed site(s)). Found via
+     * audit (2026-07-31): the endpoint previously called the tenant-agnostic recomputeForDate(
+     * LocalDate) above directly, so any HR/Admin (or site-scoped Supervisor with attendance:list)
+     * in ANY tenant could trigger a recompute that silently touched every OTHER tenant's
+     * attendance data for that date — a real cross-tenant data-isolation violation, not just a
+     * permission-check gap, since recompute() itself had no tenant filter in its query.
+     */
+    @Transactional
+    public void triggerRecompute(UUID tenantId, UUID requestedSiteId, LocalDate targetDate,
+                                  UUID callerUserId, boolean callerIsPlatformAdmin) {
+        if (!callerIsPlatformAdmin) {
+            Set<String> perms = userRoleRepository.findPermissionNamesByUserIdAndTenantId(callerUserId, tenantId);
+            if (!perms.contains("attendance:list")) {
+                throw new AccessDeniedException("You do not have permission to trigger attendance recompute");
+            }
+        }
+
+        UUID effectiveSiteId;
+        try {
+            effectiveSiteId = resolveSiteFilter(callerUserId, tenantId, requestedSiteId, callerIsPlatformAdmin);
+        } catch (NoSitesAllowed e) {
+            log.info("Recompute no-op: caller has no allowed sites tenantId={} date={}", tenantId, targetDate);
+            return;
+        }
+
+        OffsetDateTime from = targetDate.minusDays(1).atStartOfDay().atOffset(ZoneOffset.UTC);
+        OffsetDateTime to   = targetDate.plusDays(2).atStartOfDay().atOffset(ZoneOffset.UTC);
+        List<CheckinRecord> candidates = checkinRepository
+                .findCheckinsBetweenForTenant(tenantId, effectiveSiteId, from, to);
+        recomputeGroups(candidates, targetDate);
+    }
+
+    /** Shared by recomputeForDate (all-tenant, job-only) and triggerRecompute (tenant-scoped,
+     *  API-facing) — groups candidate sessions by tenant+employee+site and recomputes each group
+     *  whose LOCAL (site-timezone) check-in date actually equals targetDate. */
+    private void recomputeGroups(List<CheckinRecord> candidates, LocalDate targetDate) {
         if (candidates.isEmpty()) {
-            log.info("No check-ins found in UTC window {} to {} for target date {}", from, to, targetDate);
+            log.info("No check-ins found for target date {}", targetDate);
             return;
         }
 
@@ -181,12 +259,29 @@ public class AttendanceSummaryService {
         OffsetDateTime startOfDay = date.atStartOfDay(zone).toOffsetDateTime();
         OffsetDateTime endOfDay   = date.plusDays(1).atStartOfDay(zone).toOffsetDateTime();
 
-        List<CheckinRecord> sessions = checkinRepository
+        List<CheckinRecord> allSessions = checkinRepository
                 .findSessionsForDateRange(tenantId, employeeId, siteId, startOfDay, endOfDay);
 
-        if (sessions.isEmpty()) {
+        // Nothing ever recorded for this employee/site/date — no summary row needed at all
+        // (distinct from "sessions exist but all excluded below", handled after filtering).
+        if (allSessions.isEmpty()) {
             return;
         }
+
+        // Only 'valid' sessions count toward every computed field below (work minutes, late,
+        // early-leave, OT, missing-checkout). A 'pending_review' session (unconfirmed — GPS/face
+        // escalation) or 'rejected' session (HR-confirmed invalid, e.g. buddy check-in) must NOT
+        // affect pay-relevant numbers — this directly matches the promise already made to the
+        // employee at checkout time (CheckinService: "This won't affect your pay until
+        // reviewed"). Found via audit (2026-07-31, see docs/api/attendance-management-api.md) —
+        // previously ALL sessions counted regardless of status, contradicting that promise.
+        boolean hasPendingReviewSession = allSessions.stream()
+                .anyMatch(c -> "pending_review".equals(c.getStatus()));
+        boolean hasRejectedSession = allSessions.stream()
+                .anyMatch(c -> "rejected".equals(c.getStatus()));
+        List<CheckinRecord> sessions = allSessions.stream()
+                .filter(c -> "valid".equals(c.getStatus()))
+                .collect(Collectors.toList());
 
         int totalWorkMinutes = sessions.stream()
                 .mapToInt(c -> c.getWorkMinutes() != null ? c.getWorkMinutes() : 0)
@@ -271,17 +366,31 @@ public class AttendanceSummaryService {
         // A session open on today's date is still in progress, not yet "missing".
         boolean missingCheckout = hasOpenSession && date.isBefore(LocalDate.now(zone));
 
-        AttendanceSummary summary = summaryRepository
+        AttendanceSummary existing = summaryRepository
                 .findByTenantIdAndEmployeeIdAndSiteIdAndAttendanceDateAndDeletedAtIsNull(
                         tenantId, employeeId, siteId, date)
-                .orElse(AttendanceSummary.builder()
-                        .tenantId(tenantId)
-                        .employeeId(employeeId)
-                        .siteId(siteId)
-                        .shiftId(shiftId)
-                        .assignmentId(assignmentId)
-                        .attendanceDate(date)
-                        .build());
+                .orElse(null);
+
+        // HR has manually adjusted this day (POST .../adjust) — do not let an automatic
+        // recompute trigger (a late offline-sync upload landing on this date, the nightly job
+        // re-touching it, or another event) silently overwrite their decision with no warning.
+        // HR must explicitly re-adjust (or clear adjustmentReason) to accept new source data.
+        // Found via audit (2026-07-31): this previously had no protection at all.
+        if (existing != null && existing.getAdjustmentReason() != null) {
+            log.info("Skipping auto-recompute for HR-adjusted summary: tenantId={} employeeId={} "
+                            + "siteId={} date={} reason={}",
+                    tenantId, employeeId, siteId, date, existing.getAdjustmentReason());
+            return;
+        }
+
+        AttendanceSummary summary = existing != null ? existing : AttendanceSummary.builder()
+                .tenantId(tenantId)
+                .employeeId(employeeId)
+                .siteId(siteId)
+                .shiftId(shiftId)
+                .assignmentId(assignmentId)
+                .attendanceDate(date)
+                .build();
 
         summary.setFirstCheckinAt(firstCheckinAt);
         summary.setLastCheckoutAt(lastCheckoutAt);
@@ -294,6 +403,8 @@ public class AttendanceSummaryService {
         summary.setEarlyLeaveMinutes(earlyLeaveMinutes);
         summary.setOtMinutes(otMinutes);
         summary.setMissingCheckout(missingCheckout);
+        summary.setHasPendingReviewSession(hasPendingReviewSession);
+        summary.setHasRejectedSession(hasRejectedSession);
 
         summaryRepository.save(summary);
         log.info("Attendance summary upserted: tenantId={} employeeId={} siteId={} date={} status={} " +
@@ -425,6 +536,8 @@ public class AttendanceSummaryService {
         int totalEarlyLeaveMinutes = rows.stream().mapToInt(AttendanceSummary::getEarlyLeaveMinutes).sum();
         int totalOtMinutes       = rows.stream().mapToInt(AttendanceSummary::getOtMinutes).sum();
         int missingCheckoutDays  = (int) rows.stream().filter(AttendanceSummary::isMissingCheckout).count();
+        int daysWithPendingReview = (int) rows.stream().filter(AttendanceSummary::isHasPendingReviewSession).count();
+        int daysWithRejectedSession = (int) rows.stream().filter(AttendanceSummary::isHasRejectedSession).count();
 
         String employeeName = (employee.getFirstName() + " " + employee.getLastName()).trim();
         Set<UUID> siteIds = rows.stream().map(AttendanceSummary::getSiteId).collect(Collectors.toSet());
@@ -449,6 +562,8 @@ public class AttendanceSummaryService {
                 .totalEarlyLeaveMinutes(totalEarlyLeaveMinutes)
                 .totalOtMinutes(totalOtMinutes)
                 .missingCheckoutDays(missingCheckoutDays)
+                .daysWithPendingReview(daysWithPendingReview)
+                .daysWithRejectedSession(daysWithRejectedSession)
                 .dailySummaries(daily)
                 .build();
     }
@@ -476,57 +591,41 @@ public class AttendanceSummaryService {
         LocalDate from = LocalDate.of(year, month, 1);
         LocalDate to   = from.plusMonths(1);
 
-        Specification<AttendanceSummary> spec =
-                AttendanceSummarySpecification.build(tenantId, employeeId, effectiveSiteFilter, null, from, to);
+        // Grouped and paginated at the DB level (aggregateMonthly) instead of loading every
+        // daily row for the whole tenant/month into Java and grouping/paging in memory — a real
+        // scaling concern found in an audit (2026-07-31), see docs/api/attendance-management-api.md.
+        PageRequest pageable = PageRequest.of(page, size);
+        Page<AttendanceMonthlyAggregateProjection> rawPage = summaryRepository.aggregateMonthly(
+                tenantId, employeeId, effectiveSiteFilter, from, to, pageable);
 
-        List<AttendanceSummary> rows = summaryRepository.findAll(spec);
-
-        // Batch-load names to avoid N+1 queries
-        Set<UUID> empIds  = rows.stream().map(AttendanceSummary::getEmployeeId).collect(Collectors.toSet());
-        Set<UUID> siteIds = rows.stream().map(AttendanceSummary::getSiteId).collect(Collectors.toSet());
+        Set<UUID> empIds  = rawPage.stream().map(AttendanceMonthlyAggregateProjection::getEmployeeId).collect(Collectors.toSet());
+        Set<UUID> siteIds = rawPage.stream().map(AttendanceMonthlyAggregateProjection::getSiteId).collect(Collectors.toSet());
         Map<UUID, String> empNames  = buildEmployeeNameMap(tenantId, empIds);
         Map<UUID, String> siteNames = buildSiteNameMap(tenantId, siteIds);
 
-        // Group by employeeId+siteId, preserving insertion order for stable pagination
-        Map<String, List<AttendanceSummary>> grouped = new LinkedHashMap<>();
-        for (AttendanceSummary row : rows) {
-            String key = row.getEmployeeId() + ":" + row.getSiteId();
-            grouped.computeIfAbsent(key, k -> new ArrayList<>()).add(row);
-        }
-
-        List<AttendanceHrMonthlyResponse> aggregated = grouped.values().stream()
-                .map(group -> {
-                    AttendanceSummary first = group.get(0);
-                    return AttendanceHrMonthlyResponse.builder()
-                            .tenantId(tenantId)
-                            .employeeId(first.getEmployeeId())
-                            .employeeName(empNames.get(first.getEmployeeId()))
-                            .siteId(first.getSiteId())
-                            .siteName(siteNames.get(first.getSiteId()))
-                            .year(year)
-                            .month(month)
-                            .presentDays(group.size())
-                            .totalWorkMinutes(group.stream().mapToInt(AttendanceSummary::getTotalWorkMinutes).sum())
-                            .lateDays((int) group.stream().filter(AttendanceSummary::isLate).count())
-                            .totalLateMinutes(group.stream().mapToInt(AttendanceSummary::getLateMinutes).sum())
-                            .earlyLeaveDays((int) group.stream().filter(AttendanceSummary::isEarlyLeave).count())
-                            .totalEarlyLeaveMinutes(group.stream().mapToInt(AttendanceSummary::getEarlyLeaveMinutes).sum())
-                            .totalOtMinutes(group.stream().mapToInt(AttendanceSummary::getOtMinutes).sum())
-                            .missingCheckoutDays((int) group.stream().filter(AttendanceSummary::isMissingCheckout).count())
-                            .build();
-                })
-                .collect(Collectors.toList());
-
-        int total = aggregated.size();
-        int fromIdx = Math.min(page * size, total);
-        int toIdx   = Math.min(fromIdx + size, total);
-        List<AttendanceHrMonthlyResponse> pageContent = aggregated.subList(fromIdx, toIdx);
-
-        PageRequest pageable = PageRequest.of(page, size);
-        Page<AttendanceHrMonthlyResponse> resultPage = new PageImpl<>(pageContent, pageable, total);
+        Page<AttendanceHrMonthlyResponse> resultPage = rawPage.map(row ->
+                AttendanceHrMonthlyResponse.builder()
+                        .tenantId(tenantId)
+                        .employeeId(row.getEmployeeId())
+                        .employeeName(empNames.get(row.getEmployeeId()))
+                        .siteId(row.getSiteId())
+                        .siteName(siteNames.get(row.getSiteId()))
+                        .year(year)
+                        .month(month)
+                        .presentDays(row.getPresentDays().intValue())
+                        .totalWorkMinutes(row.getTotalWorkMinutes().intValue())
+                        .lateDays(row.getLateDays().intValue())
+                        .totalLateMinutes(row.getTotalLateMinutes().intValue())
+                        .earlyLeaveDays(row.getEarlyLeaveDays().intValue())
+                        .totalEarlyLeaveMinutes(row.getTotalEarlyLeaveMinutes().intValue())
+                        .totalOtMinutes(row.getTotalOtMinutes().intValue())
+                        .missingCheckoutDays(row.getMissingCheckoutDays().intValue())
+                        .daysWithPendingReview(row.getDaysWithPendingReview().intValue())
+                        .daysWithRejectedSession(row.getDaysWithRejectedSession().intValue())
+                        .build());
 
         log.info("HR monthly list: tenantId={} employeeId={} siteId={} {}/{} groups={}",
-                tenantId, employeeId, siteId, year, month, total);
+                tenantId, employeeId, siteId, year, month, resultPage.getTotalElements());
 
         return PageResponse.from(resultPage);
     }
@@ -573,6 +672,70 @@ public class AttendanceSummaryService {
         return toResponse(summary, empName, siteName);
     }
 
+    // ── Unlock + recompute (Web team audit, 2026-07-31): an HR-adjusted summary is protected
+    // from automatic recompute forever (see the adjustmentReason != null skip above) — but once
+    // new source data legitimately arrives (e.g. a late-approved checkin), HR needs a deliberate
+    // way to release that protection and re-run the normal aggregation, with a recorded reason
+    // and an audit trail (not just silently clearing the field). ────────────────────────────────
+
+    @Transactional
+    public AttendanceSummaryResponse unlockAndRecompute(UUID tenantId, UUID summaryId, String reason,
+                                                         UUID callerUserId, boolean callerIsPlatformAdmin) {
+        if (!callerIsPlatformAdmin) {
+            Set<String> perms = userRoleRepository
+                    .findPermissionNamesByUserIdAndTenantId(callerUserId, tenantId);
+            if (!perms.contains("attendance:list")) {
+                throw new AccessDeniedException("You do not have permission to unlock attendance summaries");
+            }
+        }
+
+        AttendanceSummary summary = summaryRepository
+                .findByIdAndTenantIdAndDeletedAtIsNull(summaryId, tenantId)
+                .orElseThrow(() -> new ResourceNotFoundException("Attendance summary not found: " + summaryId));
+
+        if (!siteScopeService.isSiteAllowed(callerUserId, tenantId, summary.getSiteId(), callerIsPlatformAdmin)) {
+            throw new AccessDeniedException("You do not have permission to unlock attendance for this site");
+        }
+
+        // Captured into locals, not read off `summary` later — recompute() below fetches and
+        // mutates the SAME managed entity instance (same Hibernate persistence-context identity),
+        // so `summary`'s fields reflect the post-recompute values by the time the audit log call
+        // happens if read directly off the entity.
+        String previousAdjustmentReason = summary.getAdjustmentReason();
+        int previousTotalWorkMinutes = summary.getTotalWorkMinutes();
+
+        Site site = siteRepository
+                .findByIdAndTenantIdAndDeletedAtIsNull(summary.getSiteId(), tenantId)
+                .orElse(null);
+        String timezone = site != null ? site.getTimezone() : "UTC";
+
+        summary.setAdjustmentReason(null);
+        summaryRepository.save(summary);
+
+        recompute(tenantId, summary.getEmployeeId(), summary.getSiteId(), summary.getAttendanceDate(),
+                timezone, summary.getShiftId(), summary.getAssignmentId());
+
+        AttendanceSummary recomputed = summaryRepository
+                .findByIdAndTenantIdAndDeletedAtIsNull(summaryId, tenantId)
+                .orElseThrow(() -> new ResourceNotFoundException("Attendance summary not found: " + summaryId));
+
+        auditLogService.record(
+                tenantId, callerUserId, null,
+                "AttendanceSummary", summaryId.toString(), "attendance_summary_unlock_and_recompute",
+                Map.of("adjustmentReason", previousAdjustmentReason == null ? "" : previousAdjustmentReason,
+                       "totalWorkMinutes", previousTotalWorkMinutes),
+                Map.of("reason", reason,
+                       "totalWorkMinutes", recomputed.getTotalWorkMinutes()),
+                null, null, null);
+
+        log.info("HR unlocked and recomputed attendance summary: summaryId={} by={} reason={} " +
+                "previousAdjustmentReason={}", summaryId, callerUserId, reason, previousAdjustmentReason);
+
+        String empName  = resolveEmployeeName(tenantId, recomputed.getEmployeeId());
+        String siteName = resolveSiteName(tenantId, recomputed.getSiteId());
+        return toResponse(recomputed, empName, siteName);
+    }
+
     // ── Mapper ─────────────────────────────────────────────────────────────────
 
     private AttendanceSummaryResponse toResponse(AttendanceSummary a, String employeeName, String siteName) {
@@ -597,6 +760,8 @@ public class AttendanceSummaryService {
                 .earlyLeaveMinutes(a.getEarlyLeaveMinutes())
                 .otMinutes(a.getOtMinutes())
                 .missingCheckout(a.isMissingCheckout())
+                .hasPendingReviewSession(a.isHasPendingReviewSession())
+                .hasRejectedSession(a.isHasRejectedSession())
                 .createdAt(a.getCreatedAt())
                 .updatedAt(a.getUpdatedAt())
                 .adjustmentReason(a.getAdjustmentReason())
