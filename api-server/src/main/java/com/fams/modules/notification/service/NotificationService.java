@@ -104,6 +104,16 @@ public class NotificationService {
    * {"checkId": ..., "siteId": ..., "expiresAt": ...} for RANDOM_CHECK_SENT) — found missing via
    * FE audit (2026-07-31): callers had no way to attach machine-readable data alongside the
    * human-readable title/body, forcing clients to fall back to opening a generic list screen.
+   * As of 2026-08-01 this is also forwarded into the FCM push data payload (see
+   * FcmClient.sendToToken's data-map overload) — reachable even while the app is fully closed,
+   * not just once it opens and syncs GET /notifications.
+   *
+   * In-app and push are independently gated — found via FE audit (2026-08-01): this method
+   * previously `return`ed as soon as in-app was disabled, before push was ever checked, so
+   * disabling in-app notifications for an eventType silently ALSO killed push for that eventType
+   * even if the user's push preference was separately ON. Matches the schema, which already has
+   * two independent booleans (in_app_enabled, push_enabled) per user+eventType — the bug was
+   * purely in this method's control flow, not a schema limitation.
    *
    * @param metadata structured payload, or null for notification types that don't need one
    */
@@ -114,34 +124,50 @@ public class NotificationService {
     log.info(
         "Creating notification tenantId={} userId={} eventType={}", tenantId, userId, eventType);
 
-    if (!userNotificationSettingService.isInAppEnabled(userId, eventType)) {
-      log.info(
-          "In-app notifications disabled for userId={} eventType={} — skipping insert",
-          userId,
-          eventType);
-      return null;
+    boolean inAppEnabled = userNotificationSettingService.isInAppEnabled(userId, eventType);
+    boolean pushEnabled = userNotificationSettingService.isPushEnabled(userId, eventType);
+
+    Notification saved = null;
+    if (inAppEnabled) {
+      Notification notification =
+          Notification.builder()
+              .tenantId(tenantId)
+              .userId(userId)
+              .eventType(eventType)
+              .title(title)
+              .body(body)
+              .metadata(metadata)
+              .isRead(false)
+              .build();
+      saved = notificationRepository.save(notification);
+      log.debug("Notification created id={}", saved.getId());
+    } else {
+      log.info("In-app notifications disabled for userId={} eventType={} — skipping insert "
+              + "(push evaluated independently, see below)", userId, eventType);
     }
 
-    Notification notification =
-        Notification.builder()
-            .tenantId(tenantId)
-            .userId(userId)
-            .eventType(eventType)
-            .title(title)
-            .body(body)
-            .metadata(metadata)
-            .isRead(false)
-            .build();
-
-    Notification saved = notificationRepository.save(notification);
-    log.debug("Notification created id={}", saved.getId());
-
-    // Send FCM push if push is enabled for this user + event type
-    if (userNotificationSettingService.isPushEnabled(userId, eventType)) {
-      userDeviceService.sendPush(saved.getId(), userId, title, body);
+    if (pushEnabled) {
+      Map<String, String> pushData = toPushDataPayload(eventType, metadata);
+      // notificationId may be null here (in-app disabled, push-only path) — the delivery log
+      // FK already tolerates that, see UserDeviceService.sendPush's Javadoc.
+      userDeviceService.sendPush(saved != null ? saved.getId() : null, userId, title, body, pushData);
     }
 
-    return toResponse(saved);
+    return saved != null ? toResponse(saved) : null;
+  }
+
+  /** FCM data payloads are always String→String — stringify eventType + every metadata value,
+   *  dropping null entries (FCM rejects null data values). eventType is always included even if
+   *  the caller's metadata map didn't carry it, so the app never has to guess which event fired. */
+  private Map<String, String> toPushDataPayload(String eventType, Map<String, Object> metadata) {
+    Map<String, String> data = new java.util.LinkedHashMap<>();
+    data.put("eventType", eventType);
+    if (metadata != null) {
+      metadata.forEach((k, v) -> {
+        if (v != null) data.put(k, String.valueOf(v));
+      });
+    }
+    return data;
   }
 
   /**

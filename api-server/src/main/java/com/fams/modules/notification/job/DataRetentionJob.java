@@ -33,6 +33,15 @@ public class DataRetentionJob {
     @Value("${app.data-retention.notification-days:90}")
     private int notificationDays;
 
+    // No pre-existing legal/consent-linked number was found anywhere in the codebase for
+    // biometric photos specifically (checked FaceProfile entity, consent fields, docs) — 30 days
+    // chosen as a reasonable default matching the existing delivery-log-days retention already
+    // used in this same job, NOT a confirmed compliance/legal requirement. Flag to product/legal
+    // before relying on this for real compliance — override via env var if a different number is
+    // decided. See docs/api/random-check-config-review.md for the open item this closes.
+    @Value("${app.data-retention.biometric-photo-days:30}")
+    private int biometricPhotoDays;
+
     public DataRetentionJob(
             NotificationDeliveryLogRepository deliveryLogRepository,
             NotificationRepository notificationRepository,
@@ -54,6 +63,7 @@ public class DataRetentionJob {
             purgeDeliveryLogs();
             purgeReadNotifications();
             purgeRevokedFaceEmbeddings();
+            purgeOldBiometricPhotos();
             jobMonitor.recordSuccess(JOB_NAME);
             log.info("DataRetentionJob completed");
         } catch (Exception e) {
@@ -89,5 +99,18 @@ public class DataRetentionJob {
             }
         }
         log.info("DataRetentionJob — deleted {}/{} face embedding(s)", success, profiles.size());
+    }
+
+    /** Checkin/random-check selfies + liveness challenge frames only — deliberately excludes
+     *  enrollment photos, which need DB-aware handling (skip anything still referenced by a
+     *  pending review) rather than a pure age sweep. See ai-service's POST /checkins/cleanup. */
+    private void purgeOldBiometricPhotos() {
+        try {
+            var result = aiServiceClient.cleanupOldCheckinPhotos(biometricPhotoDays);
+            log.info("DataRetentionJob — biometric photo sweep (older than {} days): {}",
+                    biometricPhotoDays, result);
+        } catch (Exception e) {
+            log.error("DataRetentionJob — biometric photo sweep failed: {}", e.getMessage());
+        }
     }
 }

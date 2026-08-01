@@ -232,17 +232,93 @@ Xác nhận qua code: `Assignment.role` bị khoá cứng ở **3 tầng độc 
 - `RandomCheckConfigController` (Javadoc endpoint `PUT .../applicable-roles`): sửa tương tự, đổi `role_at_site` (tên field không tồn tại, chỉ là cách gọi trong doc) thành đúng tên field thật `Assignment.role`.
 - **Việc Web đang làm (giữ cứng 2 lựa chọn trong UI) là đúng, giữ nguyên, không cần đổi gì.**
 
-## 12. Điểm còn lại — cần bạn quyết định (chưa làm)
+## 12. [Đã sửa 01/08/2026] Audit 10 user story vòng đời scheduled-check — 2 lỗi thực sự phát hiện
+
+Bạn đưa ra 10 tính năng bao trùm toàn bộ vòng đời 1 lượt kiểm tra ngẫu nhiên: sinh check đầu ca, snapshot config, hàng đợi dispatch trễ ("Bull/BullMQ job"), huỷ check khi assignment/site không còn hợp lệ, gửi thông báo, App hiển thị check đang chờ, 3 mode phản hồi, và từ chối phản hồi trễ. Đối chiếu với code thực tế: **8/10 đã đúng và đã được xác nhận/sửa ở các đợt trước** (mục 1-11 phía trên) — không lặp lại ở đây. Audit sâu riêng 2 điểm còn nghi vấn phát hiện **2 lỗi thực sự**, đã sửa cả 2.
+
+### 12.1 [Đã sửa] Huỷ check khi assignment không còn hợp lệ — thiếu 1 trong 3 đường dẫn
+
+**User story liên quan**: *"Là một HR/Admin hoặc hệ thống, tôi muốn hủy check khi assignment/site không còn hợp lệ để tránh gửi kiểm tra sai."*
+
+Có 3 cách 1 assignment "không còn hợp lệ": (a) HR chủ động huỷ assignment, (b) nhân viên bị cho nghỉ việc, (c) site bị xoá. Kiểm tra cả 3:
+- **(a) HR huỷ assignment — đã đúng từ trước, không phải lỗi**: `AssignmentService.cancelAssignment` gọi `ScheduledCheckCancelService.cancelPendingByAssignment` ngay khi huỷ.
+- **(b) Nhân viên bị cho nghỉ việc (`terminated`) — lỗi thật, đã xác nhận**: bản vá trước (mục 2) chỉ chặn việc **sinh check MỚI** cho nhân viên đã nghỉ việc (query sinh lịch join `employees.status='active'`) — nhưng **không đụng tới các check ĐÃ sinh sẵn từ đầu ca hôm đó**. Kịch bản thật: nhân viên bị cho nghỉ lúc 14h, đã có 2 lượt kiểm tra `pending`/`sent` sinh từ sáng → các dòng này bị bỏ quên, tự nhiên hết hạn qua `NoResponseViolationJob` → tạo violation `no_response` cho 1 người đã nghỉ việc. `EmployeeService.changeEmployeeStatus` trước đây không hề gọi tới `ScheduledCheckCancelService`.
+- **(c) Site bị xoá — không phải lỗi, không có khoảng hở**: `SiteService.deleteSite` bắt buộc site phải hết assignment active trước khi xoá được — mà đường duy nhất huỷ assignment (a) đã tự dọn check rồi, nên tới lúc site xoá được thì không còn check nào sống sót để mồ côi.
+
+**Đã sửa**: `EmployeeService.changeEmployeeStatus`, nhánh `terminated`, giờ tìm mọi assignment đang `active` của nhân viên đó và gọi `scheduledCheckCancelService.cancelPendingByAssignment(...)` cho từng cái — làm đúng những gì `cancelAssignment` (a) đã làm, chỉ khác nguồn kích hoạt. Không đổi trạng thái assignment (giữ nguyên `active`) — chỉ huỷ các lượt kiểm tra chưa xử lý, tách biệt khỏi quyết định "có nên tự động kết thúc assignment khi nghỉ việc" (một quyết định nghiệp vụ khác, chưa được yêu cầu).
+
+**Đã test sống**: sinh check cho hôm nay → xác nhận nhân viên có 2 check `pending` → gọi API đổi trạng thái nhân viên sang `terminated` → xác nhận cả 2 check chuyển thành `cancelled` (không phải bị bỏ quên tới khi hết hạn), log ghi rõ `"Auto-cancelled 2 scheduled check(s) due to employee termination"`.
+
+### 12.2 [Đã sửa] Hàng đợi dispatch trễ — xác nhận không dùng Bull/BullMQ (khác công nghệ), phát hiện thêm lỗ hổng phục hồi sau restart
+
+**User story liên quan**: *"Là một hệ thống, tôi muốn tạo delayed job cho scheduled_check để gửi thông báo đúng giờ"* (mô tả gốc: "Tạo Bull/BullMQ job gửi check").
+
+**Làm rõ công nghệ**: Bull/BullMQ là thư viện hàng đợi job của **Node.js**, không tồn tại trong dự án này (đã xác nhận: không có `package.json` nào chứa `bullmq` trong toàn bộ repo, kể cả `ai-service`). Backend này là Java/Spring — cơ chế tương đương đã có sẵn từ trước: `RandomCheckDispatchQueue` (Redis Sorted Set, key `fams:randomcheck:dispatch`, score = thời điểm gửi) + `RandomCheckDispatchJob` (`@Scheduled`, quét mỗi 60 giây, lấy các check đã tới giờ và gửi thông báo) — đúng chức năng "delayed job" như Bull/BullMQ cung cấp, chỉ khác nền tảng ngôn ngữ.
+
+**Lỗ hổng phát hiện qua audit sâu — đã sửa**: hàng đợi Redis này **không có cơ chế phục hồi** — chỉ được ghi 1 lần lúc sinh check (`ScheduledCheckGeneratorService`), không có gì đọc lại từ bảng `scheduled_checks` để dựng lại hàng đợi. Hậu quả cụ thể:
+- **Restart app** (deploy, crash-recovery) → Redis ZSET không mất dữ liệu (Redis vẫn sống), nhưng **những check được sinh trong lúc app đang khởi động lại** hoặc **check đã có trong hàng đợi từ trước khi Redis chính nó bị restart** sẽ không còn ai gửi thông báo — tới hạn `expiresAt` mà nhân viên chưa từng nhận được thông báo, tự động thành `no_response`, tạo violation oan cho người chưa từng biết mình bị kiểm tra.
+- Cấu hình Redis hiện tại (`docker-compose.yml`) dùng `--maxmemory-policy allkeys-lru` — dưới áp lực bộ nhớ, Redis có thể **tự động đuổi (evict)** các key ít dùng, bao gồm cả hàng đợi dispatch, với hệ quả tương tự.
+
+**Đã sửa**: `RandomCheckQueueReconciliationRunner` (chạy 1 lần mỗi khi app khởi động) — đọc toàn bộ check đang `pending` (chưa gửi) từ DB, nạp lại vào hàng đợi Redis. An toàn để chạy lại nhiều lần (Redis `ZADD` trên 1 member đã tồn tại chỉ cập nhật lại score, không tạo trùng).
+
+**Đã test sống**: khởi động lại `fams-api` → log xác nhận `"re-enqueued 10 pending check(s) into the Redis dispatch queue on startup"`.
+
+**Chưa làm, mức độ thấp hơn**: chưa xử lý trường hợp hiếm hơn — app crash đúng lúc giữa bước ghi `status='sent'` vào DB và bước gửi thông báo thực tế (check đã ở trạng thái `sent` nhưng chưa thực sự thông báo) — không nằm trong reconciliation hiện tại (chỉ xử lý `pending`) vì re-queue 1 check `sent` có rủi ro gửi thông báo trùng. Xác suất xảy ra rất thấp (cửa sổ crash chỉ vài mili-giây giữa 2 thao tác), chưa cần ưu tiên.
+
+## 13. [Đã sửa 01/08/2026] 4 điểm điều chỉnh trước production (theo yêu cầu Web/App)
+
+Team Web/App gửi 4 yêu cầu điều chỉnh cần làm **trước khi lên production**, xếp theo P0/P1. Đã xác minh độc lập trên code thật trước khi sửa — cả 4 xác nhận đúng là vấn đề thật, đã sửa cả 4, test sống qua API/DB thật (kể cả gọi thật tới Firebase để xác nhận payload hợp lệ — token giả bị Firebase từ chối đúng lý do "token không hợp lệ", chứ không phải lỗi định dạng payload).
+
+### 13.1 [P0 — đã sửa] `/my-pending` rò rỉ lịch kiểm tra tương lai
+
+**Vấn đề**: `GET /scheduled-checks/my-pending` trả về **toàn bộ** check `pending` của nhân viên, không giới hạn theo thời gian — nhân viên gọi API ngay sau khi job đêm sinh lịch (01:00) có thể đọc được chính xác giờ của MỌI lần kiểm tra còn lại trong ngày, kể cả những lần cách hàng giờ. App có ẩn trên UI, nhưng dữ liệu vẫn nằm trong response — ai xem qua network traffic (rất dễ với app mobile) đều thấy được, phá vỡ hoàn toàn mục đích "ngẫu nhiên" (đối chiếu Deputy/QuickBooks Time: không hệ thống chấm công thực tế nào để nhân viên biết trước giờ kiểm tra đột xuất).
+
+**Đã sửa**: bổ sung điều kiện `scheduledAt <= now + 60 giây` (cấu hình được qua `fams.randomcheck.my-pending.pending-lookahead-seconds`, mặc định 60 giây — đúng bằng chu kỳ quét của dispatch job, nghĩa là nhân viên không bao giờ biết trước quá khoảng thời gian mà dispatch job vốn dĩ đã sắp gửi thông báo rồi). Áp dụng cho **cả** luồng mặc định lẫn khi gọi tường minh `?status=pending` (chặn luôn đường vòng qua query param).
+
+**Đã test sống**: check còn cách xa (nhiều giờ) → không xuất hiện trong response (`data: []`); cùng check đó đổi `scheduledAt` còn 30 giây → xuất hiện ngay. Check `sent` (đã thực sự gửi) không bị ảnh hưởng — luôn hiển thị bình thường.
+
+### 13.2 [P1 — đã sửa] Bổ sung `eventType`/`checkId`/`siteId`/`expiresAt` vào FCM data payload
+
+**Vấn đề**: thông báo `RANDOM_CHECK_SENT` trước đây chỉ có `title`/`body` (`FcmClient` chỉ gọi `Message.builder().setNotification(...)`, không có `.setData(...)`) — field `metadata` đã bổ sung ở đợt trước chỉ nằm trong bảng `notifications` (đọc được qua `GET /notifications`), không có trong chính gói push FCM. Hậu quả: khi app bị tắt hoàn toàn (không chỉ background), hệ điều hành tự hiện thông báo mà app không hề chạy để đọc `metadata` — bấm vào chỉ mở được app ở màn hình mặc định, không deep-link được.
+
+**Đã sửa**: `FcmClient.sendToToken` có thêm overload nhận `Map<String,String> data`, gọi `Message.Builder.putAllData(...)` (FCM yêu cầu data luôn là String→String). `NotificationService.createNotification` giờ tự động chuyển `metadata` (Map<String,Object>) thành data payload, luôn kèm thêm `eventType` (dù caller có tự truyền hay không) để App luôn biết chắc sự kiện gì đã xảy ra ngay từ gói push, không cần đoán qua `title`.
+
+**Đã test sống**: đăng ký 1 device token giả, kích hoạt manual check → xác nhận `notification_delivery_logs` ghi nhận lượt gửi thật **tới Firebase** (không phải giả lập nội bộ), Firebase từ chối đúng vì token giả không hợp lệ (`INVALID_ARGUMENT: The registration token is not a valid FCM registration token`) — chứng minh payload (bao gồm phần data mới) được xây dựng đúng định dạng và gửi thành công tới hạ tầng Firebase thật.
+
+**Giới hạn**: mới áp dụng cho notification loại `RANDOM_CHECK_SENT` (do `RandomCheckDispatchService` là caller duy nhất truyền `metadata`) — các loại thông báo khác trong hệ thống vẫn chỉ có `title`/`body` như cũ trừ khi caller tương ứng cũng truyền `metadata`.
+
+### 13.3 [P1 — đã sửa] Tách cài đặt in-app và push — lỗi "tắt inbox làm mất luôn push"
+
+**Vấn đề nghiêm trọng đã xác nhận**: `NotificationService.createNotification` kiểm tra `isInAppEnabled` **trước**, và `return` ngay nếu tắt — khiến bước kiểm tra `isPushEnabled` (nằm phía sau) **không bao giờ được chạy tới**. Hậu quả: 1 nhân viên tắt "hiện trong inbox app" (in-app) cho loại thông báo nào đó sẽ **đồng thời mất luôn push** cho loại đó, dù bật push riêng — ngược với kỳ vọng thông thường (nhiều app cho phép "không hiện trong inbox nhưng vẫn báo khẩn qua push", ví dụ thông báo bảo mật/OTP). Schema DB đã có sẵn 2 cột độc lập (`in_app_enabled`, `push_enabled`) từ trước — lỗi chỉ nằm ở luồng code, không phải thiếu thiết kế DB.
+
+**Đã sửa**: tách kiểm tra 2 điều kiện độc lập hoàn toàn — tạo dòng `Notification` (in-app) chỉ khi `inAppEnabled`, gửi push chỉ khi `pushEnabled`, không còn phụ thuộc lẫn nhau. Trường hợp in-app tắt nhưng push bật: không tạo dòng in-app (đúng ý người dùng — không muốn thấy trong inbox), nhưng push vẫn gửi bình thường.
+
+**Đã test sống**: tắt `inAppEnabled` (giữ `pushEnabled=true`) cho `RANDOM_CHECK_SENT` → kích hoạt manual check → xác nhận **không** có dòng `notifications` mới được tạo, nhưng `notification_delivery_logs` **vẫn** ghi nhận 1 lượt gửi push mới (gửi thật tới Firebase, bị từ chối vì token giả — đúng như mục 13.2).
+
+### 13.4 [Đã xác định + bổ sung] Thời hạn lưu và job xoá ảnh sinh trắc học
+
+**Xác nhận trước khi sửa**: `fams-ai` lưu ảnh vô thời hạn ở 3 thư mục (`enrollments/`, `checkins/`, `liveness_challenges/`) — không có job dọn dẹp theo tuổi file ở bất kỳ đâu trong repo (Java lẫn Python). Không có con số retention nào được quyết định từ trước trong code/tài liệu (`face-id-management-api.md` ghi rõ đây là "quy trình tổ chức, chưa quyết định" — không có sẵn để tôi tự suy ra).
+
+**Quyết định retention (cần bạn xác nhận lại, chưa phải con số pháp lý chính thức)**: chọn tạm **30 ngày** làm mặc định — tham khảo cùng con số đã dùng cho `delivery-log-days` trong chính hệ thống này (nhất quán nội bộ), và tương đồng khoảng retention phổ biến cho dữ liệu camera an ninh/chấm công ở nhiều tổ chức. **Đây là lựa chọn kỹ thuật tạm thời, không phải tư vấn pháp lý** — cấu hình được qua biến môi trường `DATA_RETENTION_BIOMETRIC_PHOTO_DAYS`, đổi được bất kỳ lúc nào không cần sửa code.
+
+**Đã bổ sung**: job `DataRetentionJob` (chạy sẵn hàng tuần, Chủ Nhật 3h sáng — cùng lịch với việc dọn log/notification cũ) có thêm bước quét `checkins/` (ảnh chấm công + random-check) và `liveness_challenges/` (khung hình liveness), xoá file có tuổi > 30 ngày (theo `mtime`). Endpoint mới `POST /checkins/cleanup` bên `fams-ai`.
+
+**Cố ý CHƯA xử lý `enrollments/`** (ảnh đăng ký Face ID ban đầu) trong đợt này — khác với 2 thư mục trên, 1 ảnh đại diện đang chờ HR duyệt (`pending_photo_path`) có thể tồn tại lâu hơn 30 ngày nếu HR chậm duyệt; xoá theo tuổi thuần tuý sẽ làm hỏng màn "Xem ảnh trước khi duyệt" mà HR không biết. Retention cho `enrollments/` cần logic nhận biết DB (bỏ qua ảnh còn đang được `pending_embedding`/`pending_photo_path` tham chiếu) — phức tạp hơn, để lại thành việc riêng (xem mục 14).
+
+**Đã test sống**: tạo file test .jpg với `mtime` 40 ngày trước + 1 file mới trong cả 2 thư mục `checkins/`, `liveness_challenges/` → gọi `POST /checkins/cleanup?older_than_days=30` → xác nhận đúng: file cũ bị xoá, file mới còn nguyên.
+
+## 14. Điểm còn lại — cần bạn quyết định (chưa làm)
 
 | # | Vấn đề | Ghi chú |
 |---|---|---|
 | 1 | Ca làm việc qua đêm (`allowOvernight=true`) chưa được tính giao khung giờ với config (mục 4.2) — vẫn dùng thẳng khung config như trước | P2 — cần nếu tenant có nhiều ca đêm và muốn kiểm tra ngẫu nhiên áp dụng chính xác cho ca đêm |
 | 2 | Thống kê số nhân viên chưa đăng ký Face ID theo site (Web P2, mục "Thống kê Face ID theo site") — hiện chưa có aggregate endpoint theo site/assignment | P2 — cải tiến trải nghiệm, không ảnh hưởng tính đúng vì hệ thống đã fail-safe với người chưa enrolled (mục 3) |
 | 3 | `processedAt` (thời điểm AI xử lý xong) và `processingStatus="failed"` riêng biệt cho lỗi hạ tầng AI (App P0, phần giản lược ở mục 10.4) | Cần thêm cột DB + truyền `errorCode` vào `check_responses` — báo tôi nếu App thực sự cần phân biệt "AI lỗi" với "đang chờ" |
-| 4 | FCM push data payload (App P1, phần giới hạn ở mục 10.5) — hiện chỉ có metadata trong `GET /notifications`, chưa có trong gói push thô | Cần sửa `FcmClient` + mọi caller `sendPush` — phạm vi rộng hơn, báo tôi nếu cần deep-link khi app đang tắt hoàn toàn |
-| 5 | Retention ảnh selfie theo policy biometric (mục 11.1) — hiện lưu vô thời hạn trên `fams-ai` | P2 — cần job dọn ảnh cũ theo N ngày, báo tôi nếu cần ưu tiên |
+| 4 | Reconciliation (mục 12.2) chưa xử lý check ở trạng thái `sent` bị kẹt giữa lúc app crash | P2 — xác suất cực thấp, chưa cần ưu tiên |
+| 5 | Retention cho `enrollments/` (ảnh đăng ký Face ID ban đầu) — cần logic nhận biết DB, chưa làm trong mục 13.4 | Báo tôi nếu cần ưu tiên — phức tạp hơn 2 thư mục đã xử lý vì có trạng thái "đang chờ duyệt" |
+| 6 | Con số retention 30 ngày (mục 13.4) là lựa chọn kỹ thuật tạm, chưa qua xác nhận pháp lý/chính sách chính thức | Cần bạn xác nhận lại với bộ phận pháp lý/tuân thủ nếu có, đổi qua biến môi trường không cần sửa code |
 
-## 13. API tham chiếu
+## 15. API tham chiếu
 
 | Endpoint | Method | Thay đổi |
 |---|---|---|
@@ -265,8 +341,14 @@ Xác nhận qua code: `Assignment.role` bị khoá cứng ở **3 tầng độc 
 | `/scheduled-checks/{checkId}/photo` | GET | **Mới** — HR xem ảnh selfie bằng chứng — mục 11.1 |
 | `CheckResponseDto` (nested trong detail/respond) | — | Field mới `hasPhotoEvidence` — mục 11.1 |
 | `ai-service: /checkins/{source_id}/photo` | GET | **Mới**, nội bộ (X-Internal-Secret) — mục 11.1 |
+| `PATCH /employees/{employeeId}/status` (`terminated`) | PATCH | Hành vi thay đổi — giờ tự huỷ mọi scheduled check `pending`/`sent` của nhân viên, không đổi request/response — mục 12.1 |
+| `/scheduled-checks/my-pending` | GET | Hành vi thay đổi — check `pending` chỉ hiện khi `scheduledAt` còn ≤ 60 giây nữa (cấu hình `fams.randomcheck.my-pending.pending-lookahead-seconds`), áp dụng cả mặc định lẫn `?status=pending`; check `sent` không đổi — mục 13.1 |
+| FCM push (mọi `sendPush`) | — | Gói push giờ kèm `data` payload (`eventType` luôn có; `checkId`/`siteId`/`expiresAt`/... theo `metadata` của caller) bên cạnh `title`/`body` — hiện chỉ `RANDOM_CHECK_SENT` truyền đủ metadata — mục 13.2 |
+| Tạo notification (mọi luồng qua `NotificationService.createNotification`) | — | Hành vi thay đổi — `inAppEnabled`/`pushEnabled` giờ xét độc lập, tắt in-app không còn chặn push — mục 13.3 |
+| `ai-service: /checkins/cleanup` | POST | **Mới**, nội bộ (X-Internal-Secret) — job dọn ảnh checkin/random-check + liveness cũ hơn N ngày, gọi hàng tuần bởi `DataRetentionJob` — mục 13.4 |
 
 Migration `V80__random_check_failure_tracking_and_manual_reason.sql` — thêm `attendance_summaries.has_random_check_failure`, `random_check_configs.failure_escalation_threshold`, `scheduled_checks.manual_reason`/`triggered_by`.
 Migration `V81__notification_metadata_and_check_list_hydration.sql` — thêm `notifications.metadata` (JSONB, nullable).
 Migration `V82__check_response_photo_evidence_flag.sql` — thêm `check_responses.photo_submitted`.
+Mục 12 (huỷ check khi nghỉ việc, reconciliation hàng đợi Redis), mục 13 (my-pending time-bound, FCM data payload, in-app/push độc lập, biometric photo retention) không có migration — thuần sửa logic Java/Python + 1 cột config mới trong `application.yml` (`app.data-retention.biometric-photo-days`).
 Migration V33-V79 trước đó không đổi.

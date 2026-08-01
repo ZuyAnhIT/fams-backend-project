@@ -34,11 +34,24 @@ public interface ScheduledCheckRepository extends JpaRepository<ScheduledCheck, 
            "AND s.deletedAt IS NULL ORDER BY s.scheduledAt")
     List<ScheduledCheck> findByTenantAndDate(@Param("tenantId") UUID tenantId, @Param("date") LocalDate date);
 
+    /**
+     * Deliberately bounded by scheduledAt <= :cutoff — a 'pending' (not yet dispatched) check
+     * carries its full future scheduledAt, and the whole point of "random" is that the employee
+     * doesn't get to see the schedule in advance. Found via FE security audit (2026-08-01): this
+     * endpoint previously had no time bound at all, so an employee could call it right after the
+     * daily generation job ran and read off every check time planned for the rest of the day —
+     * network-inspectable even though the app itself only displayed imminent ones client-side.
+     * Callers should pass a tight cutoff (e.g. now + dispatch poll interval) so a check only
+     * becomes visible once it's genuinely about to fire, not meaningfully earlier than dispatch
+     * would have surfaced it anyway.
+     */
     @Query("SELECT s FROM ScheduledCheck s WHERE s.tenantId = :tenantId " +
            "AND s.employeeId = :employeeId AND s.status = 'pending' " +
+           "AND s.scheduledAt <= :cutoff " +
            "AND s.deletedAt IS NULL ORDER BY s.scheduledAt")
-    List<ScheduledCheck> findPendingForEmployee(@Param("tenantId") UUID tenantId,
-                                                @Param("employeeId") UUID employeeId);
+    List<ScheduledCheck> findPendingForEmployeeDueSoon(@Param("tenantId") UUID tenantId,
+                                                       @Param("employeeId") UUID employeeId,
+                                                       @Param("cutoff") java.time.OffsetDateTime cutoff);
 
     @Query("SELECT s FROM ScheduledCheck s WHERE s.assignmentId = :assignmentId " +
            "AND s.checkDate = :date AND s.deletedAt IS NULL ORDER BY s.checkIndex")
@@ -94,6 +107,16 @@ public interface ScheduledCheckRepository extends JpaRepository<ScheduledCheck, 
     @Query("SELECT s FROM ScheduledCheck s WHERE s.status = 'sent' " +
            "AND s.expiresAt < :now AND s.deletedAt IS NULL")
     List<ScheduledCheck> findExpiredSentChecks(@Param("now") java.time.OffsetDateTime now);
+
+    /** Every 'pending' (not yet dispatched) check, regardless of tenant — used only by
+     *  RandomCheckQueueReconciliationRunner on app startup to re-populate the Redis dispatch
+     *  queue (fams:randomcheck:dispatch), since that ZSET has no other source of truth and isn't
+     *  reconstructed from anywhere else. Found via audit (2026-08-01): an app restart, or a Redis
+     *  key eviction under memory pressure (maxmemory-policy=allkeys-lru), silently dropped
+     *  already-generated checks out of the dispatch queue with no self-healing — they'd never
+     *  get their "sent" notification, just eventually time out as no_response. */
+    @Query("SELECT s FROM ScheduledCheck s WHERE s.status = 'pending' AND s.deletedAt IS NULL")
+    List<ScheduledCheck> findAllPendingForQueueReconciliation();
 
     /** Returns all 'sent' checks whose expires_at is in the past for a single tenant. */
     @Query("SELECT s FROM ScheduledCheck s WHERE s.tenantId = :tenantId AND s.status = 'sent' " +
