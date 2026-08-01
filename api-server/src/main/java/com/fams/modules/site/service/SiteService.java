@@ -2,6 +2,8 @@ package com.fams.modules.site.service;
 
 import com.fams.modules.assignment.service.AssignmentService;
 import com.fams.modules.geofence.service.GeofenceService;
+import com.fams.modules.randomcheck.entity.RandomCheckConfig;
+import com.fams.modules.randomcheck.repository.RandomCheckConfigRepository;
 import com.fams.modules.rbac.repository.UserRoleRepository;
 import com.fams.modules.rbac.service.SiteScopeService;
 import com.fams.modules.shift.service.ShiftService;
@@ -46,6 +48,7 @@ public class SiteService {
     private final ShiftService shiftService;
     private final AssignmentService assignmentService;
     private final PlanLimitEnforcementService planLimitEnforcementService;
+    private final RandomCheckConfigRepository randomCheckConfigRepository;
 
     public SiteService(SiteRepository siteRepository,
                        TenantRepository tenantRepository,
@@ -54,7 +57,8 @@ public class SiteService {
                        GeofenceService geofenceService,
                        ShiftService shiftService,
                        AssignmentService assignmentService,
-                       PlanLimitEnforcementService planLimitEnforcementService) {
+                       PlanLimitEnforcementService planLimitEnforcementService,
+                       RandomCheckConfigRepository randomCheckConfigRepository) {
         this.siteRepository = siteRepository;
         this.tenantRepository = tenantRepository;
         this.userRoleRepository = userRoleRepository;
@@ -63,6 +67,7 @@ public class SiteService {
         this.shiftService = shiftService;
         this.assignmentService = assignmentService;
         this.planLimitEnforcementService = planLimitEnforcementService;
+        this.randomCheckConfigRepository = randomCheckConfigRepository;
     }
 
     @Transactional
@@ -314,6 +319,18 @@ public class SiteService {
 
         site.setDeletedAt(java.time.OffsetDateTime.now());
         siteRepository.save(site);
+
+        // Found via audit (2026-07-31): a site-level random-check override config was left
+        // orphaned (referencing a deleted site, never cleaned up) — dead data with no cleanup
+        // path, and if the site's deleted_at were ever cleared by direct DB action, the stale
+        // config would silently reactivate. Soft-delete it alongside the site.
+        randomCheckConfigRepository.findBySite(tenantId, siteId).ifPresent(config -> {
+            config.setDeletedAt(java.time.OffsetDateTime.now());
+            randomCheckConfigRepository.save(config);
+            log.info("Site-override random check config soft-deleted alongside site: configId={} siteId={}",
+                    config.getId(), siteId);
+        });
+
         log.info("Site deleted: id={} tenantId={} by={}", siteId, tenantId, callerUserId);
     }
 

@@ -47,6 +47,12 @@ public class RandomCheckConfig {
     @Column(name = "response_window_seconds", nullable = false)
     private int responseWindowSeconds;
 
+    // Informational escalation point only — crossing this many failed/no_response random checks
+    // in a calendar month for one employee+site surfaces "exceeds threshold" on the HR monthly
+    // report (ReportService). Never auto-triggers a payroll change; HR decides via /adjust.
+    @Column(name = "failure_escalation_threshold", nullable = false)
+    private int failureEscalationThreshold;
+
     @Column(name = "is_active", nullable = false)
     private boolean isActive;
 
@@ -69,6 +75,7 @@ public class RandomCheckConfig {
         if (updatedAt == null) updatedAt = now;
         if (checkMode == null) checkMode = "location_only";
         if (applicableRoles == null) applicableRoles = "";
+        if (failureEscalationThreshold <= 0) failureEscalationThreshold = 3;
         isActive = true;
     }
 

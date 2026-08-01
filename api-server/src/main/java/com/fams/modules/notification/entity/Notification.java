@@ -2,8 +2,11 @@ package com.fams.modules.notification.entity;
 
 import jakarta.persistence.*;
 import lombok.*;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.time.OffsetDateTime;
+import java.util.Map;
 import java.util.UUID;
 
 @Getter
@@ -33,6 +36,12 @@ public class Notification {
 
   @Column(columnDefinition = "TEXT")
   private String body;
+
+  /** Structured, machine-readable payload for deep-linking (e.g. {"checkId": "...", "siteId": "...",
+   *  "expiresAt": "..."} for RANDOM_CHECK_SENT) — null for notification types that don't need it. */
+  @JdbcTypeCode(SqlTypes.JSON)
+  @Column(columnDefinition = "jsonb")
+  private Map<String, Object> metadata;
 
   @Column(name = "is_read", nullable = false)
   private boolean isRead;

@@ -227,6 +227,23 @@ public class AiServiceClient {
         }
     }
 
+    /** Mirrors getPendingReviewPhoto — the selfie submitted for a checkin/checkout or random-check
+     *  response, saved unconditionally by worker.py's save_checkin_photo() keyed by whatever Java
+     *  passed as the async face-verify job's source_id (CheckinRecord id or CheckResponse id).
+     *  Permission/site-scope must already be enforced by the caller before invoking this. */
+    public byte[] getCheckinPhoto(UUID tenantId, UUID sourceId) {
+        try {
+            return restClient.get()
+                    .uri("/checkins/{sourceId}/photo?tenant_id={tenantId}", sourceId, tenantId)
+                    .header(HEADER_SECRET, secret)
+                    .retrieve()
+                    .body(byte[].class);
+        } catch (HttpClientErrorException e) {
+            log.warn("fams-ai checkin photo fetch failed sourceId={} status={}", sourceId, e.getStatusCode());
+            throw new AiServiceException(e.getResponseBodyAsString(), e.getStatusCode().value());
+        }
+    }
+
     public void enrollFromChallenge(UUID tenantId, UUID employeeId, UUID challengeId) {
         MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
         body.add("tenant_id", tenantId.toString());

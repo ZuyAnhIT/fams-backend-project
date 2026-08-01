@@ -43,6 +43,10 @@ public class RandomCheckConfigResponse {
     @Schema(description = "Seconds the employee has to respond", example = "300")
     private int responseWindowSeconds;
 
+    @Schema(description = "Failed/no_response checks in a month that surfaces \"exceeds threshold\" on the "
+            + "HR monthly attendance report", example = "3")
+    private int failureEscalationThreshold;
+
     @Schema(description = "Whether the config is active", example = "true")
     private boolean isActive;
 
@@ -54,4 +58,9 @@ public class RandomCheckConfigResponse {
 
     @Schema(description = "Last update timestamp")
     private OffsetDateTime updatedAt;
+
+    @Schema(description = "Only set by GET .../sites/{siteId}/effective — which config actually "
+            + "applies to this site: 'site_override' or 'tenant_default'. Null on every other endpoint.",
+            example = "tenant_default")
+    private String resolvedFrom;
 }

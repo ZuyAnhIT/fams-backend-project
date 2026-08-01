@@ -111,6 +111,43 @@ public class RandomCheckConfigController {
     }
 
     @Operation(
+        summary = "Get the effective (resolved) random check configuration for a site",
+        description = "Returns whichever config actually applies to this site right now — the site override "
+                      + "if one exists and is active, otherwise the tenant default — the exact same resolution "
+                      + "order the daily generator and manual-check dispatch use. Unlike GET /sites/{siteId}, "
+                      + "this never 404s just because there's no site-specific override (it falls through to "
+                      + "the tenant default); it only 404s if NEITHER exists. The response's resolvedFrom field "
+                      + "says which one applied: 'site_override' or 'tenant_default'. " +
+                      "Requires randomchecks:configure permission."
+    )
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "200",
+            description = "Effective configuration returned",
+            content = @Content(schema = @Schema(implementation = RandomCheckConfigResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "401",
+            description = "Unauthorized"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "403",
+            description = "Missing randomchecks:configure permission"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "404",
+            description = "Site not found, or neither a site override nor a tenant default configuration exists")
+    })
+    @PreAuthorize("hasAuthority('randomchecks:configure')")
+    @GetMapping("/sites/{siteId}/effective")
+    public ResponseEntity<ApiResponse<RandomCheckConfigResponse>> getEffectiveConfig(
+            @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
+            @Parameter(description = "Site UUID") @PathVariable UUID siteId,
+            @AuthenticationPrincipal FamsUserDetails userDetails) {
+        log.info("Get effective random check config tenantId={} siteId={} userId={}", tenantId, siteId, userDetails.getUserId());
+        RandomCheckConfigResponse response = configService.getEffectiveConfig(
+                tenantId, siteId, userDetails.getUserId(), userDetails.isPlatformAdmin());
+        return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    @Operation(
         summary = "Create tenant-default random check configuration",
         description = "Creates the company-wide default random check policy for the tenant. " +
                       "Only one tenant-default config may exist; returns 409 if one already exists. " +
@@ -277,7 +314,9 @@ public class RandomCheckConfigController {
     @Operation(
         summary = "Update the applicable roles for a configuration",
         description = "Replaces the list of site roles that are subject to random checks. " +
-                      "Only employees whose role_at_site matches one of the listed roles will receive checks. " +
+                      "Only employees whose Assignment.role matches one of the listed roles will receive checks — " +
+                      "currently only 'worker' and 'supervisor' are ever possible values for Assignment.role, " +
+                      "so those are the only meaningful entries here. " +
                       "Pass an empty list to apply checks to all roles regardless of their site role. " +
                       "Does not affect any other configuration fields. " +
                       "Requires randomchecks:configure permission."

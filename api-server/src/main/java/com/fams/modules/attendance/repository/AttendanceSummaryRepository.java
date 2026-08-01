@@ -56,7 +56,8 @@ public interface AttendanceSummaryRepository
                    COALESCE(SUM(ot_minutes), 0) AS totalOtMinutes,
                    COALESCE(SUM(CASE WHEN missing_checkout THEN 1 ELSE 0 END), 0) AS missingCheckoutDays,
                    COALESCE(SUM(CASE WHEN has_pending_review_session THEN 1 ELSE 0 END), 0) AS daysWithPendingReview,
-                   COALESCE(SUM(CASE WHEN has_rejected_session THEN 1 ELSE 0 END), 0) AS daysWithRejectedSession
+                   COALESCE(SUM(CASE WHEN has_rejected_session THEN 1 ELSE 0 END), 0) AS daysWithRejectedSession,
+                   COALESCE(SUM(CASE WHEN has_random_check_failure THEN 1 ELSE 0 END), 0) AS daysWithRandomCheckFailure
             FROM attendance_summaries
             WHERE tenant_id = :tenantId AND deleted_at IS NULL
               AND attendance_date >= :from AND attendance_date < :to

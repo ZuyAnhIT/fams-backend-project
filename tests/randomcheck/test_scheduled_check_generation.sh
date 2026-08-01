@@ -45,7 +45,7 @@ echo "Admin token obtained."
 TS=$(date +%s)
 t_resp=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/tenants" \
     -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"name\":\"SchedCheck Corp ${TS}\",\"slug\":\"schedcheck-${TS}\"}")
+    -d "{\"name\":\"SchedCheck Corp ${TS}\",\"slug\":\"schedcheck-${TS}\",\"ownerEmail\":\"admin@fams.com\"}")
 if [ "$(echo "$t_resp" | tail -n 1)" -ne 201 ]; then echo "SETUP FAILED: tenant"; exit 1; fi
 TENANT_ID=$(echo "$t_resp" | head -n -1 | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 echo "Tenant: $TENANT_ID"
@@ -312,7 +312,7 @@ echo "--- Test 12: No config → no checks generated ---"
 # Create a fresh tenant with no config
 t2_resp=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/tenants" \
     -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"name\":\"NoConfig ${TS}\",\"slug\":\"no-config-${TS}\"}")
+    -d "{\"name\":\"NoConfig ${TS}\",\"slug\":\"no-config-${TS}\",\"ownerEmail\":\"admin@fams.com\"}")
 T2_ID=$(echo "$t2_resp" | head -n -1 | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 gen4_resp=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/tenants/$T2_ID/scheduled-checks/generate" \

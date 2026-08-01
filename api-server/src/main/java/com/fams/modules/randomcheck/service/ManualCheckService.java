@@ -113,12 +113,14 @@ public class ManualCheckService {
                 .scheduledAt(now)
                 .expiresAt(expiresAt)
                 .status("sent")  // immediately dispatched — no Redis queue needed
+                .manualReason(request.getReason())
+                .triggeredBy(triggeredBy)
                 .build();
 
         scheduledCheckRepository.save(check);
 
-        log.info("Manual check triggered: checkId={} employeeId={} siteId={} mode={} by={}",
-                check.getId(), employeeId, siteId, checkMode, triggeredBy);
+        log.info("Manual check triggered: checkId={} employeeId={} siteId={} mode={} reason={} by={}",
+                check.getId(), employeeId, siteId, checkMode, request.getReason(), triggeredBy);
 
         randomCheckDispatchService.sendNotification(check);
 

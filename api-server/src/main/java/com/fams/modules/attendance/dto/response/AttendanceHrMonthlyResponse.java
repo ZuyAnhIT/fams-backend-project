@@ -64,4 +64,14 @@ public class AttendanceHrMonthlyResponse {
     @Schema(description = "Days with at least one HR-rejected session this month (excluded from all totals above)",
             example = "0")
     private int daysWithRejectedSession;
+
+    @Schema(description = "Days with at least one failed/no_response random (spot) check this month — "
+            + "informational only, does not affect totals above. See exceedsRandomCheckFailureThreshold.",
+            example = "0")
+    private int daysWithRandomCheckFailure;
+
+    @Schema(description = "True if daysWithRandomCheckFailure meets or exceeds the tenant's configured "
+            + "failureEscalationThreshold (RandomCheckConfig) — a suggested signal for HR to review this "
+            + "employee+site before finalizing payroll, not an automatic action.", example = "false")
+    private boolean exceedsRandomCheckFailureThreshold;
 }

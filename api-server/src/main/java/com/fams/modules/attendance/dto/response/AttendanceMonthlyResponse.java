@@ -55,6 +55,10 @@ public class AttendanceMonthlyResponse {
     @Schema(description = "Days with at least one HR-rejected session (excluded from all totals above)", example = "0")
     private int daysWithRejectedSession;
 
+    @Schema(description = "Days with at least one failed/no_response random (spot) check this month — "
+            + "informational only, does not affect totals above.", example = "0")
+    private int daysWithRandomCheckFailure;
+
     @Schema(description = "Daily attendance summaries for the month, sorted by date ascending")
     private List<AttendanceSummaryResponse> dailySummaries;
 }

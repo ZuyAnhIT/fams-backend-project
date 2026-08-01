@@ -13,6 +13,21 @@ public interface ScheduledCheckRepository extends JpaRepository<ScheduledCheck, 
 
     boolean existsByAssignmentIdAndCheckDateAndDeletedAtIsNull(UUID assignmentId, LocalDate checkDate);
 
+    /** Used by AttendanceSummaryService.recompute() to set hasRandomCheckFailure — true if this
+     *  employee/site/date had >=1 random check that ended in no_response, or was responded to
+     *  with outcome='fail' (location/face/liveness). Read-only signal, never touches pay fields. */
+    @Query(value = "SELECT EXISTS (" +
+                  "SELECT 1 FROM scheduled_checks sc " +
+                  "LEFT JOIN check_responses cr ON cr.scheduled_check_id = sc.id " +
+                  "WHERE sc.tenant_id = :tenantId AND sc.employee_id = :employeeId " +
+                  "AND sc.site_id = :siteId AND sc.check_date = :date AND sc.deleted_at IS NULL " +
+                  "AND (sc.status = 'no_response' OR cr.outcome = 'fail'))",
+           nativeQuery = true)
+    boolean existsFailedOrNoResponseCheck(@Param("tenantId") UUID tenantId,
+                                          @Param("employeeId") UUID employeeId,
+                                          @Param("siteId") UUID siteId,
+                                          @Param("date") LocalDate date);
+
     boolean existsByAssignmentIdAndCheckDateAndCheckIndex(UUID assignmentId, LocalDate checkDate, int checkIndex);
 
     @Query("SELECT s FROM ScheduledCheck s WHERE s.tenantId = :tenantId AND s.checkDate = :date " +

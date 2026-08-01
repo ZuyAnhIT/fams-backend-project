@@ -20,4 +20,5 @@ public interface AttendanceMonthlyAggregateProjection {
     Long getMissingCheckoutDays();
     Long getDaysWithPendingReview();
     Long getDaysWithRejectedSession();
+    Long getDaysWithRandomCheckFailure();
 }

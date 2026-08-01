@@ -50,7 +50,7 @@ TS=$(date +%s)
 
 t_resp=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/tenants" \
     -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"name\":\"Detail Corp ${TS}\",\"slug\":\"detail-${TS}\"}")
+    -d "{\"name\":\"Detail Corp ${TS}\",\"slug\":\"detail-${TS}\",\"ownerEmail\":\"admin@fams.com\"}")
 if [ "$(echo "$t_resp" | tail -n 1)" -ne 201 ]; then echo "SETUP FAILED: tenant"; exit 1; fi
 TENANT_ID=$(echo "$t_resp" | head -n -1 | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 
@@ -104,7 +104,7 @@ if [ "$(echo "$cfg_resp" | tail -n 1)" -ne 201 ]; then echo "SETUP FAILED: confi
 ch_resp=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/tenants/$TENANT_ID/scheduled-checks/manual" \
     -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"siteId\":\"$SITE_ID\",\"employeeId\":\"$EMP_ID\"}")
+    -d "{\"siteId\":\"$SITE_ID\",\"employeeId\":\"$EMP_ID\",\"reason\":\"test manual check\"}")
 if [ "$(echo "$ch_resp" | tail -n 1)" -ne 201 ]; then echo "SETUP FAILED: manual check"; exit 1; fi
 CHECK_ID=$(echo "$ch_resp" | head -n -1 | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 
@@ -161,7 +161,7 @@ echo ""
 echo "--- Test 8: 404 when check belongs to different tenant ---"
 t2_resp=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/tenants" \
     -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"name\":\"Other Corp ${TS}\",\"slug\":\"other-${TS}\"}")
+    -d "{\"name\":\"Other Corp ${TS}\",\"slug\":\"other-${TS}\",\"ownerEmail\":\"admin@fams.com\"}")
 T2_ID=$(echo "$t2_resp" | head -n -1 | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 run_test "Cross-tenant check returns 404" 404 \
     -H "Authorization: Bearer $ADMIN_TOKEN" \
@@ -183,7 +183,7 @@ curl -s -o /dev/null -X POST "$BASE_URL/api/v1/invitations/accept" \
 noauth_login=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d "{\"email\":\"$noauth_email\",\"password\":\"Employee@1234\"}")
+    -d "{\"identifier\":\"$noauth_email\",\"password\":\"Employee@1234\"}")
 NOAUTH_TOKEN=$(echo "$noauth_login" | head -n -1 | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4)
 run_test "No permission returns 403" 403 \
     -H "Authorization: Bearer $NOAUTH_TOKEN" "$DETAIL_URL"

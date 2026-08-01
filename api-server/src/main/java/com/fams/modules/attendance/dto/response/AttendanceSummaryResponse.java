@@ -87,6 +87,12 @@ public class AttendanceSummaryResponse {
             + "e.g. buddy check-in) — excluded from every computed field above.", example = "false")
     private boolean hasRejectedSession;
 
+    @Schema(description = "True if at least one random check (spot check) for this employee/site/date ended in "
+            + "no_response or a failed location/face/liveness verification. Informational only — does NOT "
+            + "affect totalWorkMinutes/OT/etc above; HR should review via the violations list and adjust "
+            + "manually if warranted.", example = "false")
+    private boolean hasRandomCheckFailure;
+
     @Schema(description = "Record creation timestamp")
     private OffsetDateTime createdAt;
 

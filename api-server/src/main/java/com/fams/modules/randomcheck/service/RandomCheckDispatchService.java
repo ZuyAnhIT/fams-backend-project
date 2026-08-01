@@ -11,6 +11,8 @@ import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -79,13 +81,21 @@ public class RandomCheckDispatchService {
         String body = "Bạn có một yêu cầu kiểm tra ngẫu nhiên. "
                 + "Vui lòng phản hồi trong vòng " + windowSeconds + " giây.";
 
+        // Structured payload so the app can deep-link straight to this check instead of falling
+        // back to opening a generic list — found missing via FE audit (2026-07-31).
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("checkId", check.getId().toString());
+        metadata.put("siteId", check.getSiteId().toString());
+        metadata.put("expiresAt", check.getExpiresAt().toString());
+
         try {
             notificationService.createNotification(
                     check.getTenantId(),
                     employee.getUserId(),
                     RandomCheckEventTypes.RANDOM_CHECK_SENT,
                     "Kiểm tra ngẫu nhiên",
-                    body);
+                    body,
+                    metadata);
             log.info("Random check notification sent to userId={} for checkId={}",
                     employee.getUserId(), check.getId());
         } catch (Exception e) {

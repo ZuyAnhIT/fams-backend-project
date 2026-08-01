@@ -24,8 +24,14 @@ public class ScheduledCheckResponse {
     @Schema(description = "Employee UUID")
     private UUID employeeId;
 
+    @Schema(description = "Employee full name — hydrated for list display, avoids N+1 directory lookups")
+    private String employeeName;
+
     @Schema(description = "Site UUID")
     private UUID siteId;
+
+    @Schema(description = "Site name — hydrated for list display, avoids N+1 directory lookups")
+    private String siteName;
 
     @Schema(description = "Shift UUID")
     private UUID shiftId;
@@ -53,4 +59,17 @@ public class ScheduledCheckResponse {
 
     @Schema(description = "Creation timestamp")
     private OffsetDateTime createdAt;
+
+    @Schema(description = "Only set for manually (HR-)triggered checks — the required reason given for "
+            + "targeting this specific employee, bypassing the config's applicableRoles filter")
+    private String manualReason;
+
+    @Schema(description = "Only set for manually (HR-)triggered checks — the user who triggered it")
+    private java.util.UUID triggeredBy;
+
+    @Schema(description = "Result of the employee's response — 'pass'/'fail', null if not yet responded")
+    private String outcome;
+
+    @Schema(description = "Comma-separated failure reasons (e.g. 'location_mismatch,face_fail'), null if passed or not yet responded")
+    private String failureReason;
 }

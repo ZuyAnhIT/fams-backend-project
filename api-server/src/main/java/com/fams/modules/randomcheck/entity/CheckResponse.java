@@ -65,6 +65,12 @@ public class CheckResponse {
     @Column(name = "failure_reason")
     private String failureReason;
 
+    // True iff a photo was actually forwarded to the async AI verify job at submit() time —
+    // the reliable signal that fams-ai has a selfie on disk at checkins/{tenantId}/{this.id}.jpg,
+    // retrievable via GET .../scheduled-checks/{checkId}/photo. See V82 migration.
+    @Column(name = "photo_submitted", nullable = false)
+    private boolean photoSubmitted;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
 

@@ -58,6 +58,11 @@ public class MonthlyAttendanceReportResponse {
             example = "0")
     private int totalRowsWithRejectedSession;
 
+    @Schema(description = "Number of employee+site rows with at least one failed/no_response random (spot) "
+            + "check this month — informational, does not affect totals above; resolve before exporting.",
+            example = "0")
+    private int totalRowsWithRandomCheckFailure;
+
     @Schema(description = "Paginated per-employee monthly attendance aggregates")
     private PageResponse<AttendanceHrMonthlyResponse> records;
 }

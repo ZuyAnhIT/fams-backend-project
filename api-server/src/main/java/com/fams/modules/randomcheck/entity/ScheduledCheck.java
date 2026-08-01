@@ -59,6 +59,15 @@ public class ScheduledCheck {
     @Column(name = "status", nullable = false, length = 20)
     private String status;
 
+    // Only set for manually (HR-)triggered checks — manual checks intentionally bypass the
+    // applicableRoles population filter (targeting one specific employee), so a required reason
+    // + who-triggered gives an audit trail for that override. Null for auto-generated checks.
+    @Column(name = "manual_reason", columnDefinition = "TEXT")
+    private String manualReason;
+
+    @Column(name = "triggered_by")
+    private UUID triggeredBy;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
 

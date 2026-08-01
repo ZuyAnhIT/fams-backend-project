@@ -52,14 +52,14 @@ TS=$(date +%s)
 # Tenant A — used for the main test data
 t_resp=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/tenants" \
     -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"name\":\"ListCheck Corp ${TS}\",\"slug\":\"listcheck-${TS}\"}")
+    -d "{\"name\":\"ListCheck Corp ${TS}\",\"slug\":\"listcheck-${TS}\",\"ownerEmail\":\"admin@fams.com\"}")
 if [ "$(echo "$t_resp" | tail -n 1)" -ne 201 ]; then echo "SETUP FAILED: tenant A"; exit 1; fi
 TENANT_ID=$(echo "$t_resp" | head -n -1 | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 
 # Tenant B — used to verify cross-tenant isolation (summary returns 0)
 t2_resp=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/tenants" \
     -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"name\":\"ListCheck Corp B ${TS}\",\"slug\":\"listcheckb-${TS}\"}")
+    -d "{\"name\":\"ListCheck Corp B ${TS}\",\"slug\":\"listcheckb-${TS}\",\"ownerEmail\":\"admin@fams.com\"}")
 if [ "$(echo "$t2_resp" | tail -n 1)" -ne 201 ]; then echo "SETUP FAILED: tenant B"; exit 1; fi
 TENANT_B_ID=$(echo "$t2_resp" | head -n -1 | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 
@@ -119,14 +119,14 @@ if [ "$(echo "$cfg_resp" | tail -n 1)" -ne 201 ]; then echo "SETUP FAILED: confi
 ch1_resp=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/tenants/$TENANT_ID/scheduled-checks/manual" \
     -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"siteId\":\"$SITE_A_ID\",\"employeeId\":\"$EMP_ID\"}")
+    -d "{\"siteId\":\"$SITE_A_ID\",\"employeeId\":\"$EMP_ID\",\"reason\":\"test manual check\"}")
 if [ "$(echo "$ch1_resp" | tail -n 1)" -ne 201 ]; then echo "SETUP FAILED: manual check 1 ($(echo "$ch1_resp" | tail -n 1))"; exit 1; fi
 CHECK1_ID=$(echo "$ch1_resp" | head -n -1 | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 
 ch2_resp=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/tenants/$TENANT_ID/scheduled-checks/manual" \
     -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"siteId\":\"$SITE_A_ID\",\"employeeId\":\"$EMP_ID\"}")
+    -d "{\"siteId\":\"$SITE_A_ID\",\"employeeId\":\"$EMP_ID\",\"reason\":\"test manual check\"}")
 if [ "$(echo "$ch2_resp" | tail -n 1)" -ne 201 ]; then echo "SETUP FAILED: manual check 2"; exit 1; fi
 CHECK2_ID=$(echo "$ch2_resp" | head -n -1 | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 
@@ -313,7 +313,7 @@ curl -s -o /dev/null -X POST "$BASE_URL/api/v1/invitations/accept" \
 noauth_login=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d "{\"email\":\"$noauth_email\",\"password\":\"Employee@1234\"}")
+    -d "{\"identifier\":\"$noauth_email\",\"password\":\"Employee@1234\"}")
 NOAUTH_TOKEN=$(echo "$noauth_login" | head -n -1 | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4)
 
 run_test "No permission returns 403" 403 \

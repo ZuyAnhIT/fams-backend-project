@@ -1,6 +1,7 @@
 package com.fams.modules.randomcheck.service;
 
 import com.fams.modules.checkin.repository.CheckinRepository;
+import com.fams.modules.employee.repository.FaceProfileRepository;
 import com.fams.modules.geofence.entity.Geofence;
 import com.fams.modules.geofence.repository.GeofenceRepository;
 import com.fams.modules.randomcheck.dto.request.SubmitCheckResponseRequest;
@@ -34,19 +35,22 @@ public class CheckResponseService {
     private final CheckinRepository checkinRepository;
     private final ViolationRepository violationRepository;
     private final FaceVerifyJobPublisher faceVerifyJobPublisher;
+    private final FaceProfileRepository faceProfileRepository;
 
     public CheckResponseService(ScheduledCheckRepository scheduledCheckRepository,
                                 CheckResponseRepository checkResponseRepository,
                                 GeofenceRepository geofenceRepository,
                                 CheckinRepository checkinRepository,
                                 ViolationRepository violationRepository,
-                                FaceVerifyJobPublisher faceVerifyJobPublisher) {
+                                FaceVerifyJobPublisher faceVerifyJobPublisher,
+                                FaceProfileRepository faceProfileRepository) {
         this.scheduledCheckRepository = scheduledCheckRepository;
         this.checkResponseRepository = checkResponseRepository;
         this.geofenceRepository = geofenceRepository;
         this.checkinRepository = checkinRepository;
         this.violationRepository = violationRepository;
         this.faceVerifyJobPublisher = faceVerifyJobPublisher;
+        this.faceProfileRepository = faceProfileRepository;
     }
 
     /**
@@ -110,14 +114,28 @@ public class CheckResponseService {
         boolean faceRequired = "location_face".equals(checkMode) || "location_face_liveness".equals(checkMode);
         boolean livenessRequired = "location_face_liveness".equals(checkMode);
 
+        // No enrolled (status='enrolled') FaceProfile → a face-mode check can never be passed,
+        // no matter what photo is submitted. Fail immediately instead of round-tripping to the
+        // async AI verification job for a request that's guaranteed to fail — matches the
+        // documented behavior on CreateRandomCheckConfigRequest.checkMode (found via audit
+        // 2026-07-31: this was documented but never actually implemented).
+        boolean noEnrolledProfile = false;
+        boolean hasPhoto = request.getEmployeePhotoBase64() != null
+                && !request.getEmployeePhotoBase64().isBlank();
         if (faceRequired) {
-            boolean hasPhoto = request.getEmployeePhotoBase64() != null
-                    && !request.getEmployeePhotoBase64().isBlank();
-            if (!hasPhoto) {
+            noEnrolledProfile = faceProfileRepository.findByEmployeeIdAndTenantId(employeeId, tenantId)
+                    .map(p -> !"enrolled".equals(p.getStatus()))
+                    .orElse(true);
+            if (noEnrolledProfile) {
+                faceVerified = false;
+            } else if (!hasPhoto) {
                 faceVerified = false;  // no photo submitted → immediate fail
+                // else null: async verification will set it via callback
             }
-            // else null: async verification will set it via callback
         }
+        // Photo only actually reaches fams-ai's disk (checkins/{tenantId}/{responseId}.jpg) when
+        // it's forwarded to the async job below — must match that condition exactly, see V82.
+        boolean photoSubmitted = faceRequired && !noEnrolledProfile && hasPhoto;
 
         // Collect immediate failures only
         List<String> failures = new ArrayList<>();
@@ -142,6 +160,7 @@ public class CheckResponseService {
                 .livenessVerified(livenessVerified)
                 .outcome(outcome)
                 .failureReason(failureReason)
+                .photoSubmitted(photoSubmitted)
                 .build();
 
         checkResponseRepository.save(response);
@@ -156,12 +175,14 @@ public class CheckResponseService {
         }
         if (Boolean.FALSE.equals(faceVerified)) {
             createViolation(check, response.getId(), "face_fail",
-                    "Face verification failed during random check (no photo submitted)");
+                    noEnrolledProfile
+                            ? "Face verification failed during random check (employee has no enrolled Face ID)"
+                            : "Face verification failed during random check (no photo submitted)");
         }
 
-        // Task 103/104: publish async face verify job if photo provided
-        if (faceRequired && request.getEmployeePhotoBase64() != null
-                && !request.getEmployeePhotoBase64().isBlank()) {
+        // Task 103/104: publish async face verify job if photo provided — skipped entirely when
+        // there's no enrolled profile to match against, already failed above.
+        if (photoSubmitted) {
             try {
                 faceVerifyJobPublisher.publish(tenantId, employeeId, response.getId(),
                         "check_response", request.getEmployeePhotoBase64(), livenessRequired);
@@ -180,6 +201,13 @@ public class CheckResponseService {
     /**
      * Called by the face-result callback when async AI verification completes.
      * Updates face_verified, face_verify_score, outcome, and creates violations.
+     *
+     * Found via audit (2026-07-31): livenessVerified was persisted on the response but never
+     * inspected here — a check configured for location_face_liveness passed on face-match alone,
+     * so an employee holding up a photo of themselves (defeating the whole point of requiring
+     * liveness) was recorded as outcome=pass. Now mirrors the faceVerified branch: liveness
+     * failure independently fails the check and produces its own violation_type='liveness_fail'
+     * (already a valid value in the violations CHECK constraint, previously unreachable).
      */
     @Transactional
     public void applyFaceResult(UUID responseId, Boolean faceVerified,
@@ -189,22 +217,33 @@ public class CheckResponseService {
             response.setLivenessVerified(livenessVerified);
             response.setFaceVerifyScore(faceVerifyScore);
 
+            Optional<ScheduledCheck> checkOpt = scheduledCheckRepository.findById(response.getScheduledCheckId());
+            boolean livenessRequired = checkOpt
+                    .map(c -> "location_face_liveness".equals(extractCheckMode(c.getConfigSnapshot())))
+                    .orElse(false);
+
             if (Boolean.FALSE.equals(faceVerified)) {
                 response.setOutcome("fail");
                 String fr = response.getFailureReason();
                 response.setFailureReason(fr != null ? fr + ",face_fail" : "face_fail");
+            } else if (livenessRequired && Boolean.FALSE.equals(livenessVerified)) {
+                response.setOutcome("fail");
+                String fr = response.getFailureReason();
+                response.setFailureReason(fr != null ? fr + ",liveness_fail" : "liveness_fail");
             }
 
             checkResponseRepository.save(response);
 
             if (Boolean.FALSE.equals(faceVerified)) {
-                scheduledCheckRepository.findById(response.getScheduledCheckId())
-                        .ifPresent(check -> createViolation(check, responseId, "face_fail",
-                                "Face verification failed during random check"));
+                checkOpt.ifPresent(check -> createViolation(check, responseId, "face_fail",
+                        "Face verification failed during random check"));
+            } else if (livenessRequired && Boolean.FALSE.equals(livenessVerified)) {
+                checkOpt.ifPresent(check -> createViolation(check, responseId, "liveness_fail",
+                        "Liveness verification failed during random check (possible spoofed photo)"));
             }
 
-            log.info("Face result applied to check_response: id={} faceVerified={} score={}",
-                    responseId, faceVerified, faceVerifyScore);
+            log.info("Face result applied to check_response: id={} faceVerified={} liveness={} score={}",
+                    responseId, faceVerified, livenessVerified, faceVerifyScore);
         });
     }
 
@@ -271,6 +310,7 @@ public class CheckResponseService {
                 .faceVerifyScore(r.getFaceVerifyScore())
                 .outcome(r.getOutcome())
                 .failureReason(r.getFailureReason())
+                .hasPhotoEvidence(r.isPhotoSubmitted())
                 .createdAt(r.getCreatedAt())
                 .build();
     }
