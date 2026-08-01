@@ -13,8 +13,10 @@ import com.fams.modules.employee.entity.FaceProfile;
 import com.fams.modules.employee.repository.EmployeeRepository;
 import com.fams.modules.employee.repository.FaceProfileRepository;
 import com.fams.modules.employee.service.FaceIdService;
+import com.fams.modules.assignment.entity.Assignment;
 import com.fams.modules.assignment.repository.AssignmentRepository;
 import com.fams.modules.employee.specification.EmployeeSpecification;
+import com.fams.modules.randomcheck.service.ScheduledCheckCancelService;
 import com.fams.modules.rbac.dto.response.UserRoleResponse;
 import com.fams.modules.rbac.entity.UserRole;
 import com.fams.modules.rbac.repository.UserRoleRepository;
@@ -65,6 +67,7 @@ public class EmployeeService {
     private final com.fams.modules.workspace.repository.WorkspaceRepository workspaceRepository;
     private final com.fams.modules.assignment.service.AssignmentService assignmentService;
     private final FaceIdService faceIdService;
+    private final ScheduledCheckCancelService scheduledCheckCancelService;
 
     public EmployeeService(EmployeeRepository employeeRepository,
                            UserRoleRepository userRoleRepository,
@@ -77,7 +80,8 @@ public class EmployeeService {
                            com.fams.modules.workspace.repository.WorkspaceMemberRepository workspaceMemberRepository,
                            com.fams.modules.workspace.repository.WorkspaceRepository workspaceRepository,
                            com.fams.modules.assignment.service.AssignmentService assignmentService,
-                           FaceIdService faceIdService) {
+                           FaceIdService faceIdService,
+                           ScheduledCheckCancelService scheduledCheckCancelService) {
         this.employeeRepository = employeeRepository;
         this.userRoleRepository = userRoleRepository;
         this.tenantRepository = tenantRepository;
@@ -90,6 +94,7 @@ public class EmployeeService {
         this.workspaceRepository = workspaceRepository;
         this.assignmentService = assignmentService;
         this.faceIdService = faceIdService;
+        this.scheduledCheckCancelService = scheduledCheckCancelService;
     }
 
     @Transactional
@@ -298,6 +303,31 @@ public class EmployeeService {
                 faceIdService.autoRevokeOnTermination(tenantId, employeeId);
             } catch (Exception e) {
                 log.warn("Failed to auto-revoke Face ID on termination: employeeId={} error={}",
+                        employeeId, e.getMessage());
+            }
+
+            // Found via audit (2026-08-01): terminating an employee stopped NEW random checks
+            // from being generated for them (the generator's employees.status='active' join), but
+            // any check ALREADY generated earlier that same day (before termination) was left
+            // untouched — it would silently sit until NoResponseViolationJob timed it out as
+            // no_response and raised a violation for someone no longer employed. Mirrors exactly
+            // what AssignmentService.cancelAssignment already does for an HR-initiated cancel —
+            // termination is just another way an assignment becomes invalid.
+            try {
+                List<Assignment> activeAssignments = assignmentRepository
+                        .findByTenantIdAndEmployeeIdAndDeletedAtIsNullOrderByStartDateDesc(tenantId, employeeId)
+                        .stream()
+                        .filter(a -> "active".equals(a.getStatus()))
+                        .collect(Collectors.toList());
+                for (Assignment a : activeAssignments) {
+                    int cancelled = scheduledCheckCancelService.cancelPendingByAssignment(a.getId());
+                    if (cancelled > 0) {
+                        log.info("Auto-cancelled {} scheduled check(s) due to employee termination: "
+                                + "employeeId={} assignmentId={}", cancelled, employeeId, a.getId());
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("Failed to auto-cancel pending random checks on termination: employeeId={} error={}",
                         employeeId, e.getMessage());
             }
         }

@@ -8,6 +8,8 @@ import com.google.firebase.messaging.Notification;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+import java.util.Map;
+
 @Slf4j
 @Component
 public class FcmClient {
@@ -24,19 +26,37 @@ public class FcmClient {
    * @return SendResult with success flag, FCM messageId (on success), attempt count, last error
    */
   public SendResult sendToToken(String deviceToken, String title, String body) {
+    return sendToToken(deviceToken, title, body, null);
+  }
+
+  /**
+   * Same as the 3-arg overload, plus an optional FCM "data" payload — delivered to the device
+   * even while the app is fully closed/killed (unlike the notification title/body, which the OS
+   * renders directly and the app never sees until the user taps it). Needed so App can deep-link
+   * straight to the right screen/entity without first opening a generic list. FCM data payloads
+   * are always String→String (SDK requirement — see FirebaseMessaging docs), so callers must
+   * pre-stringify any non-string values (UUIDs, timestamps, etc.) before calling this.
+   *
+   * @param data structured payload (e.g. {"eventType": "RANDOM_CHECK_SENT", "checkId": "...",
+   *             "siteId": "...", "expiresAt": "..."}), or null/empty for a plain notification
+   */
+  public SendResult sendToToken(String deviceToken, String title, String body, Map<String, String> data) {
     if (FirebaseApp.getApps().isEmpty()) {
       log.debug("FCM not initialized — skipping push to token ending in ...{}",
           deviceToken.length() > 8 ? deviceToken.substring(deviceToken.length() - 8) : deviceToken);
       return new SendResult(false, null, 0, "FCM_NOT_INITIALIZED");
     }
 
-    Message message = Message.builder()
+    Message.Builder messageBuilder = Message.builder()
         .setToken(deviceToken)
         .setNotification(Notification.builder()
             .setTitle(title)
             .setBody(body)
-            .build())
-        .build();
+            .build());
+    if (data != null && !data.isEmpty()) {
+      messageBuilder.putAllData(data);
+    }
+    Message message = messageBuilder.build();
 
     String lastError = null;
     for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {

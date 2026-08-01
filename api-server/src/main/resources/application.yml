@@ -119,6 +119,10 @@ app:
   data-retention:
     delivery-log-days: ${DATA_RETENTION_DELIVERY_LOG_DAYS:30}
     notification-days: ${DATA_RETENTION_NOTIFICATION_DAYS:90}
+    # Checkin/random-check selfies + liveness challenge frames only (NOT enrollment photos, see
+    # DataRetentionJob.purgeOldBiometricPhotos) — 30-day default is NOT a confirmed legal/consent
+    # requirement, just a reasonable starting point; override if product/legal decide otherwise.
+    biometric-photo-days: ${DATA_RETENTION_BIOMETRIC_PHOTO_DAYS:30}
   cors:
     # Only needed for browser clients that call this API cross-origin (Expo web dev
     # server, and LAN-IP origins when testing the Expo web build from another device

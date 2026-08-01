@@ -62,6 +62,14 @@ public class ScheduledCheckController {
 
     private static final String PERM_CONFIGURE = "randomchecks:configure";
 
+    // How far in advance a 'pending' (not-yet-dispatched) check becomes visible to the employee
+    // via GET /my-pending — deliberately tight, matched to the dispatch job's own poll interval,
+    // so employees can never read the day's random-check schedule off the API in advance. See
+    // ScheduledCheckRepository.findPendingForEmployeeDueSoon.
+    @org.springframework.beans.factory.annotation.Value(
+            "${fams.randomcheck.my-pending.pending-lookahead-seconds:60}")
+    private long pendingLookaheadSeconds;
+
     private final ScheduledCheckGeneratorService generatorService;
     private final ScheduledCheckRepository scheduledCheckRepository;
     private final CheckResponseRepository checkResponseRepository;
@@ -264,18 +272,32 @@ public class ScheduledCheckController {
                         "Employee record not found for this user in tenant " + tenantId));
 
         OffsetDateTime now = OffsetDateTime.now();
+        // A 'pending' check must never be visible to the employee meaningfully earlier than
+        // dispatch would have surfaced it anyway — bounded to the dispatch job's own poll
+        // interval (default 60s) so "pending, due soon" carries no more advance notice than the
+        // ~60s latency already inherent in how dispatch works. See findPendingForEmployeeDueSoon.
+        OffsetDateTime pendingCutoff = now.plusSeconds(pendingLookaheadSeconds);
 
         List<ScheduledCheck> checks;
         if (status != null && !status.isBlank()) {
-            // Caller wants a specific status — run through the generic filter
-            checks = scheduledCheckRepository
-                    .findByTenantWithFilters(tenantId, null, employeeId, status,
-                            LocalDate.of(1970, 1, 1), LocalDate.of(2099, 12, 31),
-                            PageRequest.of(0, 1000, Sort.by(Sort.Direction.ASC, "expiresAt")))
-                    .getContent();
+            if ("pending".equals(status)) {
+                // Same time-bound as the default view — an explicit ?status=pending request
+                // must not be a backdoor around the cutoff below.
+                checks = scheduledCheckRepository
+                        .findPendingForEmployeeDueSoon(tenantId, employeeId, pendingCutoff);
+            } else {
+                // Any other explicit status (sent, responded, no_response, cancelled) carries no
+                // "reveal the future schedule" risk — already happened or already dispatched.
+                checks = scheduledCheckRepository
+                        .findByTenantWithFilters(tenantId, null, employeeId, status,
+                                LocalDate.of(1970, 1, 1), LocalDate.of(2099, 12, 31),
+                                PageRequest.of(0, 1000, Sort.by(Sort.Direction.ASC, "expiresAt")))
+                        .getContent();
+            }
         } else {
-            // Default: pending + sent
-            checks = scheduledCheckRepository.findPendingForEmployee(tenantId, employeeId);
+            // Default: pending-due-soon + sent
+            checks = scheduledCheckRepository
+                    .findPendingForEmployeeDueSoon(tenantId, employeeId, pendingCutoff);
             List<ScheduledCheck> sent = scheduledCheckRepository
                     .findByTenantWithFilters(tenantId, null, employeeId, "sent",
                             LocalDate.of(1970, 1, 1), LocalDate.of(2099, 12, 31),

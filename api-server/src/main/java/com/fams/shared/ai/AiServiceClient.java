@@ -142,6 +142,23 @@ public class AiServiceClient {
         log.info("fams-ai deleted embedding faceProfileId={}", faceProfileId);
     }
 
+    /** Age-based retention sweep of checkin/random-check selfies + liveness challenge frames on
+     *  fams-ai's disk — see ai-service/app/routers/checkin_photo.py's POST /checkins/cleanup for
+     *  exactly what's swept (and, just as importantly, what's deliberately NOT swept). System-wide,
+     *  no tenant scoping — called weekly by DataRetentionJob. */
+    public Map<String, Object> cleanupOldCheckinPhotos(int olderThanDays) {
+        try {
+            return restClient.post()
+                    .uri("/checkins/cleanup?older_than_days={days}", olderThanDays)
+                    .header(HEADER_SECRET, secret)
+                    .retrieve()
+                    .body(Map.class);
+        } catch (HttpClientErrorException e) {
+            log.warn("fams-ai checkin photo cleanup failed status={}", e.getStatusCode());
+            throw new AiServiceException(e.getResponseBodyAsString(), e.getStatusCode().value());
+        }
+    }
+
     public FaceStatusDto getFaceStatus(UUID tenantId, UUID employeeId) {
         try {
             return restClient.get()

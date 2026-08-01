@@ -15,6 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -84,6 +85,17 @@ public class UserDeviceService {
    * @return number of devices that received a successful push
    */
   public int sendPush(UUID notificationId, UUID userId, String title, String body) {
+    return sendPush(notificationId, userId, title, body, null);
+  }
+
+  /**
+   * Same as the 4-arg overload, plus an optional FCM data payload — see FcmClient.sendToToken's
+   * data-map overload. Needed so an event like RANDOM_CHECK_SENT can carry checkId/siteId/
+   * expiresAt straight to the device even while the app is fully closed, instead of only being
+   * retrievable once the app opens and syncs GET /notifications (which already carries this same
+   * data in Notification.metadata, but only reachable from inside a running app).
+   */
+  public int sendPush(UUID notificationId, UUID userId, String title, String body, Map<String, String> data) {
     List<UserDevice> devices = userDeviceRepository.findActiveByUserId(userId);
     if (devices.isEmpty()) {
       log.debug("No active devices for userId={} — skipping FCM push", userId);
@@ -92,7 +104,7 @@ public class UserDeviceService {
 
     int sent = 0;
     for (UserDevice device : devices) {
-      SendResult result = fcmClient.sendToToken(device.getDeviceToken(), title, body);
+      SendResult result = fcmClient.sendToToken(device.getDeviceToken(), title, body, data);
 
       String status = result.success() ? "SUCCESS" : "FAILED";
       deliveryLogRepository.save(NotificationDeliveryLog.builder()

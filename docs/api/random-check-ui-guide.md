@@ -23,6 +23,16 @@ Toàn bộ đã test sống qua API thật. Chi tiết kỹ thuật đầy đủ
 
 Chi tiết kỹ thuật đầy đủ xem `random-check-config-review.md` mục 11. Riêng ca qua đêm và thống kê Face ID theo site vẫn là giới hạn P2 đã biết, không đổi.
 
+## 0.d Bản vá lần 4 (01/08/2026) — 3 điểm ưu tiên trước production (Web + App)
+
+| # | Team yêu cầu gì | Backend đã làm gì | FE/App cần làm gì |
+|---|---|---|---|
+| 1 (P0, App) | `GET /my-pending` không nên trả check `pending` có `scheduledAt` xa trong tương lai — App có ẩn trên UI nhưng API vẫn lộ qua network | Đã giới hạn: check `pending` chỉ trả về khi còn ≤ 60 giây nữa mới tới giờ (cả mặc định lẫn `?status=pending`) | **Không cần đổi gì phía App** — response giờ tự nhỏ lại đúng ý UI hiện tại; nếu App có logic tự lọc thêm theo `scheduledAt` phía client thì có thể bỏ, backend đã đảm bảo |
+| 2 (P1, App) | Gói push FCM chỉ có `title`/`body` — khi app bị tắt hoàn toàn không deep-link được, chỉ mở được danh sách chung | Đã bổ sung `data` payload thật trong gói FCM (không chỉ trong `GET /notifications` như bản vá lần 2 mục 4.6) — luôn có `eventType`, kèm `checkId`/`siteId`/`expiresAt` cho `RANDOM_CHECK_SENT` | **Cập nhật khuyến nghị**: đọc `remoteMessage.data` (Android) / `userInfo` (iOS) ngay cả khi app đang tắt hoàn toàn để deep-link thẳng vào check, không cần chờ app mở mới đồng bộ `GET /notifications` nữa — gỡ bỏ giới hạn đã ghi ở mục 4.6 |
+| 3 (P1, Web+App) | Tắt "hiện trong inbox app" (in-app) đang làm mất luôn push cho loại thông báo đó — lỗi logic backend, không phải thiết kế | Đã sửa: 2 cờ `inAppEnabled`/`pushEnabled` (màn cài đặt thông báo) giờ xét độc lập hoàn toàn | Không cần đổi UI cài đặt — 2 toggle đã tách sẵn từ trước, chỉ là backend trước đây không tôn trọng đúng; giờ hoạt động đúng như tên gọi của từng toggle |
+
+Chi tiết kỹ thuật đầy đủ (kể cả quyết định retention ảnh sinh trắc học, không phải việc FE cần biết) xem `random-check-config-review.md` mục 13.
+
 ## 0. Trả lời câu hỏi: 5 tính năng bạn nêu đã có trên giao diện chưa?
 
 **Chưa — đây là các API backend đã có sẵn (và vừa được kiểm tra/sửa lỗi), nhưng chưa có màn hình Web/App nào gọi tới chúng.** Cả 5 tính năng dưới đây đều thuộc **Web (Company Portal)**, dành cho Company Admin/HR — không có phần nào thuộc App (nhân viên chỉ là đối tượng BỊ kiểm tra, không cấu hình).
@@ -241,6 +251,8 @@ Các endpoint này **không bắt buộc** phải có UI riêng ngay — có th�
 
 `GET /scheduled-checks/my-pending` — không cần quyền đặc biệt, tự lọc theo nhân viên đang đăng nhập (JWT). Trả về danh sách check `pending`/`sent`, kèm `secondsRemaining` (đếm ngược, âm nếu đã hết hạn — App nên tự ẩn/không cho phản hồi nếu âm, dù server cũng chặn).
 
+**[MỚI, 01/08/2026, bản vá lần 4]** Check `pending` (chưa thực sự được gửi) chỉ xuất hiện trong response khi còn ≤ 60 giây nữa mới tới `scheduledAt` — trước đó server cố tình **không trả về**, kể cả khi lịch đã được sinh sẵn từ đầu ngày. Đây là chặn rò rỉ bảo mật (mục 0.d #1), không phải bug: App **không nên** cache/hiển thị "lịch kiểm tra hôm nay" dựa trên response này — mỗi lần gọi chỉ thấy đúng những gì sắp/đang xảy ra ngay lúc đó. Check `sent` (đã thực sự gửi) không bị giới hạn này, vẫn trả về như cũ.
+
 **UI đề xuất**: banner/notification nổi bật khi có check `sent` đang chờ (giống "cuộc gọi đến"), đếm ngược trực quan (progress bar hoặc số giây) dựa trên `secondsRemaining`.
 
 ### 4.2 Phản hồi 1 lượt kiểm tra
@@ -314,7 +326,7 @@ Thông báo `RANDOM_CHECK_SENT` (lấy qua `GET /notifications`) giờ có thêm
 ```
 App nên đọc `metadata.checkId` để mở thẳng đúng màn phản hồi của lượt kiểm tra đó, thay vì mở danh sách chung rồi để nhân viên tự tìm.
 
-**Giới hạn đã biết, chưa làm**: `metadata` này chỉ có trong dữ liệu thông báo lấy qua `GET /notifications` (tức là khi App đã mở và đồng bộ danh sách) — **chưa có trong payload thô của gói push FCM** (phần data gửi kèm lúc app đang tắt hoàn toàn). Nếu App cần xử lý bấm thẳng vào push notification lúc app chưa mở, vẫn cần dùng cơ chế fallback "mở danh sách chung" đã có sẵn (theo đúng báo cáo App đã ghi) cho tới khi có thêm việc mở rộng FCM data payload ở 1 đợt riêng.
+**[ĐÃ GỠ 01/08/2026, bản vá lần 4]** Giới hạn "chưa có trong payload thô của gói push FCM" đã được giải quyết — xem mục 0.d #2. Gói push FCM giờ tự mang `data: { eventType, checkId, siteId, expiresAt }` (không chỉ khi App đã mở và gọi `GET /notifications`), nên App có thể đọc thẳng từ `remoteMessage.data`/`userInfo` để deep-link **ngay cả khi app đang tắt hoàn toàn**, không cần fallback "mở danh sách chung" nữa cho trường hợp này.
 
 ## 5. Business rules quan trọng — không hiện trên UI nhưng FE cần biết để giải thích hành vi hệ thống
 
