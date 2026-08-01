@@ -84,6 +84,13 @@ public class AttendanceSummary {
     @Column(name = "has_rejected_session", nullable = false)
     private boolean hasRejectedSession;
 
+    // True if >=1 random check (scheduled_checks) for this employee/site/date ended in
+    // status='no_response' or a check_response with outcome='fail'. Informational flag only —
+    // never mutates totalWorkMinutes/OT/etc — HR decides via /adjust. See V80 migration and
+    // docs/api/random-check-config-review.md §1.
+    @Column(name = "has_random_check_failure", nullable = false)
+    private boolean hasRandomCheckFailure;
+
     @Column(name = "adjustment_reason", columnDefinition = "TEXT")
     private String adjustmentReason;
 

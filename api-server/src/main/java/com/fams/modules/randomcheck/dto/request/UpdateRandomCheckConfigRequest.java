@@ -38,7 +38,10 @@ public class UpdateRandomCheckConfigRequest {
     )
     private String checkMode;
 
-    @Schema(description = "Role names at site that are subject to random checks", example = "[\"supervisor\", \"employee\"]")
+    @Schema(description = "Role names at site that are subject to random checks — matched against "
+            + "Assignment.role, currently only 'worker' or 'supervisor' (enforced by @Pattern + a DB CHECK "
+            + "constraint); any other value here can never match a real assignment.",
+            example = "[\"worker\", \"supervisor\"]")
     private List<@NotBlank String> applicableRoles;
 
     @Schema(description = "Seconds the employee has to respond before a violation is raised", example = "300")
@@ -47,4 +50,9 @@ public class UpdateRandomCheckConfigRequest {
 
     @Schema(description = "Whether this configuration is active", example = "true")
     private Boolean isActive;
+
+    @Schema(description = "Number of failed/no_response checks in a calendar month that surfaces "
+            + "\"exceeds threshold\" on the HR monthly attendance report", example = "3")
+    @Min(value = 1, message = "failure_escalation_threshold must be at least 1")
+    private Integer failureEscalationThreshold;
 }

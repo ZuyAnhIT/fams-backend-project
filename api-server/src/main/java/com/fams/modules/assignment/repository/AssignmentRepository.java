@@ -67,8 +67,16 @@ public interface AssignmentRepository extends JpaRepository<Assignment, UUID>,
             @Param("today") LocalDate today,
             @Param("dayBit") int dayBit);
 
-    @Query(value = "SELECT * FROM assignments a WHERE a.tenant_id = :tenantId AND a.status = 'active' " +
+    // Joins employees so a terminated/inactive (or soft-deleted) employee's assignment row —
+    // which stays status='active' unless someone separately cancels it, see AssignmentService —
+    // is never treated as "currently active" by callers of these two queries (random-check daily
+    // generation, and ReportService's daily "absent employees" computation). Found via audit
+    // (2026-07-31): without this join, a terminated employee kept receiving scheduled random
+    // checks indefinitely, and was wrongly counted as "absent" on the daily attendance report.
+    @Query(value = "SELECT a.* FROM assignments a JOIN employees e ON e.id = a.employee_id " +
+           "WHERE a.tenant_id = :tenantId AND a.status = 'active' " +
            "AND a.deleted_at IS NULL AND a.shift_id IS NOT NULL " +
+           "AND e.status = 'active' AND e.deleted_at IS NULL " +
            "AND a.start_date <= :date AND (a.end_date IS NULL OR a.end_date >= :date) " +
            "AND (a.days_of_week IS NULL OR (a.days_of_week & :dayBit) <> 0)", nativeQuery = true)
     List<Assignment> findActiveAssignmentsWithShiftForDate(
@@ -76,8 +84,10 @@ public interface AssignmentRepository extends JpaRepository<Assignment, UUID>,
             @Param("date") LocalDate date,
             @Param("dayBit") int dayBit);
 
-    @Query(value = "SELECT * FROM assignments a WHERE a.status = 'active' AND a.deleted_at IS NULL " +
+    @Query(value = "SELECT a.* FROM assignments a JOIN employees e ON e.id = a.employee_id " +
+           "WHERE a.status = 'active' AND a.deleted_at IS NULL " +
            "AND a.shift_id IS NOT NULL " +
+           "AND e.status = 'active' AND e.deleted_at IS NULL " +
            "AND a.start_date <= :date AND (a.end_date IS NULL OR a.end_date >= :date) " +
            "AND (a.days_of_week IS NULL OR (a.days_of_week & :dayBit) <> 0)", nativeQuery = true)
     List<Assignment> findAllActiveAssignmentsWithShiftForDate(

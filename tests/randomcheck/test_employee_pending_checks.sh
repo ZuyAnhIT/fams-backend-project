@@ -64,7 +64,7 @@ TS=$(date +%s)
 # Create tenant
 t_resp=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/tenants" \
     -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"name\":\"PendingCheck Corp ${TS}\",\"slug\":\"pendingchk-${TS}\"}")
+    -d "{\"name\":\"PendingCheck Corp ${TS}\",\"slug\":\"pendingchk-${TS}\",\"ownerEmail\":\"admin@fams.com\"}")
 if [ "$(echo "$t_resp" | tail -n 1)" -ne 201 ]; then echo "SETUP FAILED: tenant"; exit 1; fi
 TENANT_ID=$(echo "$t_resp" | head -n -1 | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 
@@ -106,7 +106,7 @@ if [ -z "$EMP_ID" ]; then echo "SETUP FAILED: could not find employee after acce
 emp_login=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d "{\"email\":\"$EMP_EMAIL\",\"password\":\"Employee@1234\"}")
+    -d "{\"identifier\":\"$EMP_EMAIL\",\"password\":\"Employee@1234\"}")
 if [ "$(echo "$emp_login" | tail -n 1)" -ne 200 ]; then echo "SETUP FAILED: employee login"; exit 1; fi
 EMP_TOKEN=$(echo "$emp_login" | head -n -1 | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4)
 
@@ -136,7 +136,7 @@ if [ "$(echo "$cfg_resp" | tail -n 1)" -ne 201 ]; then echo "SETUP FAILED: confi
 ch_resp=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/tenants/$TENANT_ID/scheduled-checks/manual" \
     -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"siteId\":\"$SITE_ID\",\"employeeId\":\"$EMP_ID\"}")
+    -d "{\"siteId\":\"$SITE_ID\",\"employeeId\":\"$EMP_ID\",\"reason\":\"test manual check\"}")
 if [ "$(echo "$ch_resp" | tail -n 1)" -ne 201 ]; then echo "SETUP FAILED: manual check ($(echo "$ch_resp" | tail -n 1))"; exit 1; fi
 CHECK_ID=$(echo "$ch_resp" | head -n -1 | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 
@@ -153,7 +153,7 @@ curl -s -o /dev/null -X POST "$BASE_URL/api/v1/invitations/accept" \
 emp2_login=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d "{\"email\":\"$EMP2_EMAIL\",\"password\":\"Employee@1234\"}")
+    -d "{\"identifier\":\"$EMP2_EMAIL\",\"password\":\"Employee@1234\"}")
 EMP2_TOKEN=$(echo "$emp2_login" | head -n -1 | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4)
 
 MY_PENDING_URL="$BASE_URL/api/v1/tenants/$TENANT_ID/scheduled-checks/my-pending"

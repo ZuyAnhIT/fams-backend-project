@@ -46,7 +46,7 @@ echo "--- Setup: Create tenant ---"
 TS=$(date +%s)
 t_resp=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/tenants" \
     -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"name\":\"RandCheck Corp ${TS}\",\"slug\":\"randcheck-corp-${TS}\"}")
+    -d "{\"name\":\"RandCheck Corp ${TS}\",\"slug\":\"randcheck-corp-${TS}\",\"ownerEmail\":\"admin@fams.com\"}")
 t_status=$(echo "$t_resp" | tail -n 1)
 if [ "$t_status" -ne 201 ]; then echo "SETUP FAILED: create tenant (HTTP $t_status)"; exit 1; fi
 TENANT_ID=$(echo "$t_resp" | head -n -1 | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)

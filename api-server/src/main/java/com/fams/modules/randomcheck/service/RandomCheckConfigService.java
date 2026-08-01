@@ -21,6 +21,7 @@ import java.time.LocalTime;
 import java.time.OffsetDateTime;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -70,6 +71,8 @@ public class RandomCheckConfigService {
                 .checkMode(req.getCheckMode())
                 .applicableRoles(toRolesString(req.getApplicableRoles()))
                 .responseWindowSeconds(req.getResponseWindowSeconds())
+                .failureEscalationThreshold(
+                        req.getFailureEscalationThreshold() != null ? req.getFailureEscalationThreshold() : 0)
                 .isActive(true)
                 .createdBy(callerId)
                 .build();
@@ -106,6 +109,8 @@ public class RandomCheckConfigService {
                 .checkMode(req.getCheckMode())
                 .applicableRoles(toRolesString(req.getApplicableRoles()))
                 .responseWindowSeconds(req.getResponseWindowSeconds())
+                .failureEscalationThreshold(
+                        req.getFailureEscalationThreshold() != null ? req.getFailureEscalationThreshold() : 0)
                 .isActive(true)
                 .createdBy(callerId)
                 .build();
@@ -129,6 +134,36 @@ public class RandomCheckConfigService {
                 .map(this::toResponse)
                 .orElseThrow(() -> new ResourceNotFoundException(
                         "No random check configuration found for site: " + siteId));
+    }
+
+    /**
+     * Returns whichever config would actually be applied to this site right now — site override
+     * if one exists (and is active), else the tenant default — the exact same resolution order
+     * used by ScheduledCheckGeneratorService/ManualCheckService at dispatch time. Added because
+     * previously a caller had to GET the site override (handling its 404), then separately GET
+     * the tenant default, and replicate this fallback client-side to answer "what config applies
+     * here" — now a third place to keep in sync with the two dispatch services that already
+     * implement this same lookup.
+     */
+    @Transactional(readOnly = true)
+    public RandomCheckConfigResponse getEffectiveConfig(UUID tenantId, UUID siteId,
+                                                        UUID callerId, boolean callerIsPlatformAdmin) {
+        checkPermission(callerId, tenantId, callerIsPlatformAdmin);
+        assertSiteInScope(callerId, tenantId, siteId, callerIsPlatformAdmin);
+
+        siteRepository.findByIdAndTenantIdAndDeletedAtIsNull(siteId, tenantId)
+                .orElseThrow(() -> new ResourceNotFoundException("Site not found: " + siteId));
+
+        Optional<RandomCheckConfig> override = configRepository.findBySite(tenantId, siteId);
+        if (override.isPresent()) {
+            return toResponse(override.get(), "site_override");
+        }
+
+        RandomCheckConfig tenantDefault = configRepository.findTenantDefault(tenantId)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "No random check configuration applies to this site — no site override "
+                                + "and no tenant default configured"));
+        return toResponse(tenantDefault, "tenant_default");
     }
 
     @Transactional(readOnly = true)
@@ -187,6 +222,7 @@ public class RandomCheckConfigService {
         if (req.getApplicableRoles() != null) config.setApplicableRoles(toRolesString(req.getApplicableRoles()));
         if (req.getResponseWindowSeconds() != null) config.setResponseWindowSeconds(req.getResponseWindowSeconds());
         if (req.getIsActive() != null) config.setActive(req.getIsActive());
+        if (req.getFailureEscalationThreshold() != null) config.setFailureEscalationThreshold(req.getFailureEscalationThreshold());
 
         config = configRepository.save(config);
         log.info("Updated random check config id={} tenantId={} updatedBy={}", configId, tenantId, callerId);
@@ -284,6 +320,10 @@ public class RandomCheckConfigService {
     }
 
     private RandomCheckConfigResponse toResponse(RandomCheckConfig c) {
+        return toResponse(c, null);
+    }
+
+    private RandomCheckConfigResponse toResponse(RandomCheckConfig c, String resolvedFrom) {
         List<String> roles = (c.getApplicableRoles() == null || c.getApplicableRoles().isBlank())
                 ? List.of()
                 : Arrays.asList(c.getApplicableRoles().split(","));
@@ -298,10 +338,12 @@ public class RandomCheckConfigService {
                 .checkMode(c.getCheckMode())
                 .applicableRoles(roles)
                 .responseWindowSeconds(c.getResponseWindowSeconds())
+                .failureEscalationThreshold(c.getFailureEscalationThreshold())
                 .isActive(c.isActive())
                 .createdBy(c.getCreatedBy())
                 .createdAt(c.getCreatedAt())
                 .updatedAt(c.getUpdatedAt())
+                .resolvedFrom(resolvedFrom)
                 .build();
     }
 }

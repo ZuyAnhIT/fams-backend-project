@@ -67,6 +67,7 @@ public class ReportService {
     private final EmployeeRepository employeeRepository;
     private final FaceProfileRepository faceProfileRepository;
     private final com.fams.modules.rbac.service.SiteScopeService siteScopeService;
+    private final com.fams.modules.randomcheck.repository.RandomCheckConfigRepository randomCheckConfigRepository;
 
     public ReportService(AttendanceSummaryRepository summaryRepository,
                          AssignmentRepository assignmentRepository,
@@ -76,7 +77,8 @@ public class ReportService {
                          UserRoleRepository userRoleRepository,
                          EmployeeRepository employeeRepository,
                          FaceProfileRepository faceProfileRepository,
-                         com.fams.modules.rbac.service.SiteScopeService siteScopeService) {
+                         com.fams.modules.rbac.service.SiteScopeService siteScopeService,
+                         com.fams.modules.randomcheck.repository.RandomCheckConfigRepository randomCheckConfigRepository) {
         this.summaryRepository = summaryRepository;
         this.assignmentRepository = assignmentRepository;
         this.violationRepository = violationRepository;
@@ -86,6 +88,7 @@ public class ReportService {
         this.employeeRepository = employeeRepository;
         this.faceProfileRepository = faceProfileRepository;
         this.siteScopeService = siteScopeService;
+        this.randomCheckConfigRepository = randomCheckConfigRepository;
     }
 
     @Transactional(readOnly = true)
@@ -191,6 +194,7 @@ public class ReportService {
         int totalOtMinutes        = aggregated.stream().mapToInt(AttendanceHrMonthlyResponse::getTotalOtMinutes).sum();
         int totalRowsWithPendingReview = (int) aggregated.stream().filter(r -> r.getDaysWithPendingReview() > 0).count();
         int totalRowsWithRejectedSession = (int) aggregated.stream().filter(r -> r.getDaysWithRejectedSession() > 0).count();
+        int totalRowsWithRandomCheckFailure = (int) aggregated.stream().filter(r -> r.getDaysWithRandomCheckFailure() > 0).count();
 
         int total    = aggregated.size();
         int fromIdx  = Math.min(page * size, total);
@@ -201,9 +205,9 @@ public class ReportService {
                 PageResponse.from(new PageImpl<>(pageContent, pageable, total));
 
         log.info("Monthly attendance report: tenantId={} {}/{} siteId={} employees={} presentDays={} " +
-                "rowsWithPendingReview={} rowsWithRejected={}",
+                "rowsWithPendingReview={} rowsWithRejected={} rowsWithRandomCheckFailure={}",
                 tenantId, year, month, siteId, totalEmployees, totalPresentDays,
-                totalRowsWithPendingReview, totalRowsWithRejectedSession);
+                totalRowsWithPendingReview, totalRowsWithRejectedSession, totalRowsWithRandomCheckFailure);
 
         return MonthlyAttendanceReportResponse.builder()
                 .year(year)
@@ -220,6 +224,7 @@ public class ReportService {
                 .totalOtMinutes(totalOtMinutes)
                 .totalRowsWithPendingReview(totalRowsWithPendingReview)
                 .totalRowsWithRejectedSession(totalRowsWithRejectedSession)
+                .totalRowsWithRandomCheckFailure(totalRowsWithRandomCheckFailure)
                 .records(recordPage)
                 .build();
     }
@@ -257,18 +262,25 @@ public class ReportService {
         // until resolved; exporting them into a payroll file without an explicit, informed
         // override defeats that. Caller must pass confirmDespiteWarnings=true to proceed anyway
         // (e.g. because the pending items are known to be irrelevant to this specific run).
+        // hasRandomCheckFailure rows are included in this same readiness guard — it's an
+        // informational signal (never mutates pay fields, see V80 migration), but "informational"
+        // still means HR should look before finalizing payroll, same rationale as pending/rejected.
         long rowsWithPendingReview = aggregated.stream().filter(r -> r.getDaysWithPendingReview() > 0).count();
         long rowsWithRejected = aggregated.stream().filter(r -> r.getDaysWithRejectedSession() > 0).count();
-        if (!confirmDespiteWarnings && (rowsWithPendingReview > 0 || rowsWithRejected > 0)) {
+        long rowsWithRandomCheckFailure = aggregated.stream().filter(r -> r.getDaysWithRandomCheckFailure() > 0).count();
+        if (!confirmDespiteWarnings && (rowsWithPendingReview > 0 || rowsWithRejected > 0 || rowsWithRandomCheckFailure > 0)) {
             throw new com.fams.shared.exception.BusinessException(
                     "ATTENDANCE_NOT_READY",
-                    String.format("Có %d nhân viên còn chấm công chờ duyệt và %d nhân viên có chấm công bị từ chối "
-                                    + "trong tháng này — số liệu có thể chưa chính xác. Xác nhận để xuất file dù vậy?",
-                            rowsWithPendingReview, rowsWithRejected),
+                    String.format("Có %d nhân viên còn chấm công chờ duyệt, %d nhân viên có chấm công bị từ chối, "
+                                    + "và %d nhân viên có kiểm tra ngẫu nhiên thất bại/không phản hồi trong tháng này "
+                                    + "— số liệu có thể chưa chính xác. Xác nhận để xuất file dù vậy?",
+                            rowsWithPendingReview, rowsWithRejected, rowsWithRandomCheckFailure),
                     org.springframework.http.HttpStatus.CONFLICT,
-                    String.format("Export blocked: %d rows with pending review, %d rows with rejected sessions "
-                                    + "in scope tenantId=%s %d/%d siteId=%s. Pass confirmDespiteWarnings=true to override.",
-                            rowsWithPendingReview, rowsWithRejected, tenantId, year, month, siteId));
+                    String.format("Export blocked: %d rows with pending review, %d rows with rejected sessions, "
+                                    + "%d rows with random-check failure in scope tenantId=%s %d/%d siteId=%s. "
+                                    + "Pass confirmDespiteWarnings=true to override.",
+                            rowsWithPendingReview, rowsWithRejected, rowsWithRandomCheckFailure,
+                            tenantId, year, month, siteId));
         }
 
         Set<UUID> empIds = aggregated.stream().map(AttendanceHrMonthlyResponse::getEmployeeId).collect(Collectors.toSet());
@@ -287,6 +299,8 @@ public class ReportService {
             metaRow.createCell(4).setCellValue(rowsWithPendingReview);
             metaRow.createCell(5).setCellValue("Rows with rejected sessions");
             metaRow.createCell(6).setCellValue(rowsWithRejected);
+            metaRow.createCell(7).setCellValue("Rows with random-check failure");
+            metaRow.createCell(8).setCellValue(rowsWithRandomCheckFailure);
 
             String[] headers = {
                 "Employee Code", "Employee Name", "Site Name", "Year", "Month",
@@ -294,7 +308,8 @@ public class ReportService {
                 "Late Days", "Late Minutes",
                 "Early Leave Days", "Early Leave Minutes",
                 "OT Minutes", "Missing Checkout Days",
-                "Days With Pending Review", "Days With Rejected Session"
+                "Days With Pending Review", "Days With Rejected Session",
+                "Days With Random-Check Failure", "Exceeds Failure Threshold"
             };
             Row headerRow = sheet.createRow(1);
             for (int i = 0; i < headers.length; i++) {
@@ -319,6 +334,8 @@ public class ReportService {
                 row.createCell(12).setCellValue(rec.getMissingCheckoutDays());
                 row.createCell(13).setCellValue(rec.getDaysWithPendingReview());
                 row.createCell(14).setCellValue(rec.getDaysWithRejectedSession());
+                row.createCell(15).setCellValue(rec.getDaysWithRandomCheckFailure());
+                row.createCell(16).setCellValue(rec.isExceedsRandomCheckFailureThreshold());
             }
 
             for (int i = 0; i < headers.length; i++) {
@@ -327,8 +344,10 @@ public class ReportService {
 
             ByteArrayOutputStream out = new ByteArrayOutputStream();
             workbook.write(out);
-            log.info("Attendance export: tenantId={} {}/{} siteId={} rows={} pendingReviewRows={} rejectedRows={} by={}",
-                    tenantId, year, month, siteId, aggregated.size(), rowsWithPendingReview, rowsWithRejected, callerUserId);
+            log.info("Attendance export: tenantId={} {}/{} siteId={} rows={} pendingReviewRows={} rejectedRows={} " +
+                    "randomCheckFailureRows={} by={}",
+                    tenantId, year, month, siteId, aggregated.size(), rowsWithPendingReview, rowsWithRejected,
+                    rowsWithRandomCheckFailure, callerUserId);
             return out.toByteArray();
         } catch (IOException e) {
             throw new RuntimeException("Failed to generate Excel export", e);
@@ -359,6 +378,9 @@ public class ReportService {
         Map<UUID, String> siteNames = siteIds.isEmpty() ? Map.of()
                 : siteRepository.findAllByTenantIdAndIdInAndDeletedAtIsNull(tenantId, siteIds).stream()
                         .collect(Collectors.toMap(Site::getId, Site::getName));
+        int failureThreshold = randomCheckConfigRepository.findTenantDefault(tenantId)
+                .map(com.fams.modules.randomcheck.entity.RandomCheckConfig::getFailureEscalationThreshold)
+                .orElse(Integer.MAX_VALUE);
 
         return rows.stream()
                 .map(row -> AttendanceHrMonthlyResponse.builder()
@@ -379,6 +401,9 @@ public class ReportService {
                         .missingCheckoutDays(row.getMissingCheckoutDays().intValue())
                         .daysWithPendingReview(row.getDaysWithPendingReview().intValue())
                         .daysWithRejectedSession(row.getDaysWithRejectedSession().intValue())
+                        .daysWithRandomCheckFailure(row.getDaysWithRandomCheckFailure().intValue())
+                        .exceedsRandomCheckFailureThreshold(
+                                row.getDaysWithRandomCheckFailure().intValue() >= failureThreshold)
                         .build())
                 .collect(Collectors.toList());
     }

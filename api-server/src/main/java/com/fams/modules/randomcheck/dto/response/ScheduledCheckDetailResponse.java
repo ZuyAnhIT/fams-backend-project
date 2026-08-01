@@ -56,4 +56,11 @@ public class ScheduledCheckDetailResponse {
 
     @Schema(description = "Employee response, present only when status is 'responded'")
     private CheckResponseDto response;
+
+    @Schema(description = "Only set for manually (HR-)triggered checks — the required reason given for "
+            + "targeting this specific employee, bypassing the config's applicableRoles filter")
+    private String manualReason;
+
+    @Schema(description = "Only set for manually (HR-)triggered checks — the user who triggered it")
+    private UUID triggeredBy;
 }

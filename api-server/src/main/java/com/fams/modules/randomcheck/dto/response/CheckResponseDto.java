@@ -23,5 +23,6 @@ public class CheckResponseDto {
     private Double faceVerifyScore;
     private String outcome;
     private String failureReason;
+    private boolean hasPhotoEvidence;
     private OffsetDateTime createdAt;
 }

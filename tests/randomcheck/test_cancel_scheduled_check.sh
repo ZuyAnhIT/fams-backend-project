@@ -56,7 +56,7 @@ TS=$(date +%s)
 # Tenant
 t_resp=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/tenants" \
     -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"name\":\"Cancel Corp ${TS}\",\"slug\":\"cancel-${TS}\"}")
+    -d "{\"name\":\"Cancel Corp ${TS}\",\"slug\":\"cancel-${TS}\",\"ownerEmail\":\"admin@fams.com\"}")
 if [ "$(echo "$t_resp" | tail -n 1)" -ne 201 ]; then echo "SETUP FAILED: tenant"; exit 1; fi
 TENANT_ID=$(echo "$t_resp" | head -n -1 | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 
@@ -220,7 +220,7 @@ curl -s -o /dev/null -X POST "$BASE_URL/api/v1/invitations/accept" \
 ulogin_resp=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d "{\"email\":\"$UNAUTH_EMAIL\",\"password\":\"Employee@1234\"}")
+    -d "{\"identifier\":\"$UNAUTH_EMAIL\",\"password\":\"Employee@1234\"}")
 USER_TOKEN=$(echo "$ulogin_resp" | head -n -1 | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4)
 run_test "No permission returns 403" 403 \
     -X POST "$BASE_CHECKS/$CHECK_ID2/cancel" \

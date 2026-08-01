@@ -135,6 +135,24 @@ public class ScheduledCheckGeneratorService {
                 .orElse("UTC");
         ZoneId zone = safeZone(timezone);
 
+        // Bound the configured window by the assignment's actual shift hours — found via audit
+        // (2026-07-31): allowedStartTime/allowedEndTime previously came ONLY from the config,
+        // fully independent of the employee's real working hours, so a config window could
+        // silently schedule checks outside the shift (e.g. a day-window config against a night
+        // shift). This query already filters to assignments WITH a shift_id, so a lookup miss
+        // here means the shift was deleted after the assignment was created — treat as no shift.
+        Shift shift = shiftRepository.findById(assignment.getShiftId()).orElse(null);
+        Optional<LocalTime[]> windowOpt = resolveEffectiveWindow(config, shift);
+        if (windowOpt.isEmpty()) {
+            log.info("Configured random-check window [{}, {}] does not overlap assignment's shift "
+                            + "hours [{}, {}] — skipping assignment={} shiftId={}",
+                    config.getAllowedStartTime(), config.getAllowedEndTime(),
+                    shift != null ? shift.getStartTime() : null, shift != null ? shift.getEndTime() : null,
+                    assignment.getId(), assignment.getShiftId());
+            return 0;
+        }
+        LocalTime[] window = windowOpt.get();
+
         // Enforce monthly random check quota
         int remaining = planLimitEnforcementService.getRemainingRandomChecks(assignment.getTenantId());
         if (remaining <= 0) {
@@ -144,10 +162,10 @@ public class ScheduledCheckGeneratorService {
         }
         int checksToGenerate = Math.min(config.getChecksPerShift(), remaining);
 
-        // Generate N random check times within the allowed window
+        // Generate N random check times within the effective (config ∩ shift) window
         List<OffsetDateTime> checkTimes = generateCheckTimes(
                 date, zone,
-                config.getAllowedStartTime(), config.getAllowedEndTime(),
+                window[0], window[1],
                 checksToGenerate, config.getMinIntervalMinutes());
 
         String snapshot = buildSnapshot(config);
@@ -218,6 +236,30 @@ public class ScheduledCheckGeneratorService {
             times.add(odt);
         }
         return times;
+    }
+
+    /**
+     * Intersects the config's configured window with the assignment's actual shift hours.
+     * Returns empty if the two windows don't overlap at all (nothing to schedule).
+     *
+     * Overnight shifts (crossing midnight) are deliberately NOT intersected here — the config
+     * window is same-day (LocalTime only, no overnight flag), and correctly wrapping a same-day
+     * window against a shift that spans midnight needs handling this method doesn't attempt;
+     * falling back to the configured window as-is (prior behavior) is safer than risking an
+     * incorrect intersection.
+     */
+    Optional<LocalTime[]> resolveEffectiveWindow(RandomCheckConfig config, Shift shift) {
+        LocalTime configStart = config.getAllowedStartTime();
+        LocalTime configEnd = config.getAllowedEndTime();
+        if (shift == null || shift.isAllowOvernight()) {
+            return Optional.of(new LocalTime[]{configStart, configEnd});
+        }
+        LocalTime start = configStart.isAfter(shift.getStartTime()) ? configStart : shift.getStartTime();
+        LocalTime end = configEnd.isBefore(shift.getEndTime()) ? configEnd : shift.getEndTime();
+        if (!start.isBefore(end)) {
+            return Optional.empty();
+        }
+        return Optional.of(new LocalTime[]{start, end});
     }
 
     private String buildSnapshot(RandomCheckConfig c) {

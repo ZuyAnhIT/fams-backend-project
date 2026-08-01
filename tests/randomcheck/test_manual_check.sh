@@ -50,9 +50,17 @@ TS=$(date +%s)
 
 t_resp=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/tenants" \
     -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"name\":\"Manual Corp ${TS}\",\"slug\":\"manual-${TS}\"}")
+    -d "{\"name\":\"Manual Corp ${TS}\",\"slug\":\"manual-${TS}\",\"ownerEmail\":\"admin@fams.com\"}")
 if [ "$(echo "$t_resp" | tail -n 1)" -ne 201 ]; then echo "SETUP FAILED: tenant"; exit 1; fi
 TENANT_ID=$(echo "$t_resp" | head -n -1 | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+
+# Trial plan (auto-assigned on tenant creation) caps sites at 1 — this script creates several
+# sites in the SAME tenant across its test cases, so upgrade to "pro" right away.
+PRO_PLAN_ID=$(docker exec fams-postgres psql -U fams_user -d fams_db -t -c \
+    "SELECT id FROM plans WHERE name='pro' AND deleted_at IS NULL;" | tr -d ' \n')
+curl -s -o /dev/null -X PATCH "$BASE_URL/api/v1/tenants/$TENANT_ID/subscription" \
+    -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" \
+    -d "{\"planId\":\"$PRO_PLAN_ID\"}"
 
 s_resp=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/tenants/$TENANT_ID/sites" \
     -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" \
@@ -110,7 +118,7 @@ echo "--- Test 1: Manual trigger returns 201 ---"
 trig_resp=$(curl -s -w "\n%{http_code}" \
     -X POST "$MANUAL_URL" \
     -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"siteId\":\"$SITE_ID\",\"employeeId\":\"$EMP_ID\"}")
+    -d "{\"siteId\":\"$SITE_ID\",\"employeeId\":\"$EMP_ID\",\"reason\":\"test manual check\"}")
 trig_status=$(echo "$trig_resp" | tail -n 1)
 trig_body=$(echo "$trig_resp" | head -n -1)
 if [ "$trig_status" -eq 201 ]; then
@@ -187,7 +195,7 @@ echo "--- Test 7: Second manual trigger on same day gets a distinct check_index 
 trig2_resp=$(curl -s -w "\n%{http_code}" \
     -X POST "$MANUAL_URL" \
     -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"siteId\":\"$SITE_ID\",\"employeeId\":\"$EMP_ID\"}")
+    -d "{\"siteId\":\"$SITE_ID\",\"employeeId\":\"$EMP_ID\",\"reason\":\"test manual check\"}")
 trig2_status=$(echo "$trig2_resp" | tail -n 1)
 CHECK_ID2=$(echo "$trig2_resp" | head -n -1 | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 check_idx2=$(docker exec fams-postgres psql -U fams_user -d fams_db -t -c \
@@ -206,7 +214,7 @@ echo "--- Test 8: checkMode override in request is reflected in config_snapshot 
 trig3_resp=$(curl -s -w "\n%{http_code}" \
     -X POST "$MANUAL_URL" \
     -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"siteId\":\"$SITE_ID\",\"employeeId\":\"$EMP_ID\",\"checkMode\":\"location_face\"}")
+    -d "{\"siteId\":\"$SITE_ID\",\"employeeId\":\"$EMP_ID\",\"reason\":\"test manual check\",\"checkMode\":\"location_face\"}")
 trig3_status=$(echo "$trig3_resp" | tail -n 1)
 CHECK_ID3=$(echo "$trig3_resp" | head -n -1 | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 snapshot_mode=$(docker exec fams-postgres psql -U fams_user -d fams_db -t -c \
@@ -226,7 +234,7 @@ echo "--- Test 9: Invalid checkMode returns 400 ---"
 run_test "Invalid checkMode returns 400" 400 \
     -X POST "$MANUAL_URL" \
     -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"siteId\":\"$SITE_ID\",\"employeeId\":\"$EMP_ID\",\"checkMode\":\"invalid_mode\"}"
+    -d "{\"siteId\":\"$SITE_ID\",\"employeeId\":\"$EMP_ID\",\"reason\":\"test manual check\",\"checkMode\":\"invalid_mode\"}"
 
 # ── Test 10: Employee not assigned to site returns 400 ────────────────────────
 echo ""
@@ -239,7 +247,7 @@ SITE2_ID=$(echo "$s2_resp" | head -n -1 | grep -o '"id":"[^"]*"' | head -1 | cut
 run_test "Employee not assigned to site returns 400" 400 \
     -X POST "$MANUAL_URL" \
     -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"siteId\":\"$SITE2_ID\",\"employeeId\":\"$EMP_ID\"}"
+    -d "{\"siteId\":\"$SITE2_ID\",\"employeeId\":\"$EMP_ID\",\"reason\":\"test manual check\"}"
 
 # ── Test 11: Missing config returns 400 ────────────────────────────────────────
 echo ""
@@ -247,7 +255,7 @@ echo "--- Test 11: No config for tenant returns 400 ---"
 # Create a second tenant with a site+employee+assignment but NO config
 t2_resp=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/tenants" \
     -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"name\":\"NoCfg Corp ${TS}\",\"slug\":\"nocfg-${TS}\"}")
+    -d "{\"name\":\"NoCfg Corp ${TS}\",\"slug\":\"nocfg-${TS}\",\"ownerEmail\":\"admin@fams.com\"}")
 T2_ID=$(echo "$t2_resp" | head -n -1 | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 s2nc_resp=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/tenants/$T2_ID/sites" \
     -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" \
@@ -276,7 +284,7 @@ curl -s -o /dev/null -X POST "$BASE_URL/api/v1/tenants/$T2_ID/sites/$SITE_NC/ass
 run_test "No config returns 400" 400 \
     -X POST "$BASE_URL/api/v1/tenants/$T2_ID/scheduled-checks/manual" \
     -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"siteId\":\"$SITE_NC\",\"employeeId\":\"$EMP_NC\"}"
+    -d "{\"siteId\":\"$SITE_NC\",\"employeeId\":\"$EMP_NC\",\"reason\":\"test manual check\"}"
 
 # ── Test 12: Non-existent site returns 404 ─────────────────────────────────────
 echo ""
@@ -285,7 +293,7 @@ FAKE_SITE="00000000-0000-0000-0000-000000000001"
 run_test "Non-existent site returns 404" 404 \
     -X POST "$MANUAL_URL" \
     -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"siteId\":\"$FAKE_SITE\",\"employeeId\":\"$EMP_ID\"}"
+    -d "{\"siteId\":\"$FAKE_SITE\",\"employeeId\":\"$EMP_ID\",\"reason\":\"test manual check\"}"
 
 # ── Test 13: Missing siteId returns 400 ───────────────────────────────────────
 echo ""
@@ -301,7 +309,7 @@ echo "--- Test 14: No auth token returns 401 ---"
 run_test "No token returns 401" 401 \
     -X POST "$MANUAL_URL" \
     -H "Content-Type: application/json" \
-    -d "{\"siteId\":\"$SITE_ID\",\"employeeId\":\"$EMP_ID\"}"
+    -d "{\"siteId\":\"$SITE_ID\",\"employeeId\":\"$EMP_ID\",\"reason\":\"test manual check\"}"
 
 # ── Test 15: Employee without randomchecks:configure gets 403 ─────────────────
 echo ""
@@ -318,19 +326,19 @@ curl -s -o /dev/null -X POST "$BASE_URL/api/v1/invitations/accept" \
     -d "{\"token\":\"$UINV\",\"password\":\"Employee@1234\"}"
 ulogin=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d "{\"email\":\"$UNAUTH_EMAIL\",\"password\":\"Employee@1234\"}")
+    -d "{\"identifier\":\"$UNAUTH_EMAIL\",\"password\":\"Employee@1234\"}")
 USER_TOKEN=$(echo "$ulogin" | head -n -1 | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4)
 run_test "No permission returns 403" 403 \
     -X POST "$MANUAL_URL" \
     -H "Content-Type: application/json" -H "Authorization: Bearer $USER_TOKEN" \
-    -d "{\"siteId\":\"$SITE_ID\",\"employeeId\":\"$EMP_ID\"}"
+    -d "{\"siteId\":\"$SITE_ID\",\"employeeId\":\"$EMP_ID\",\"reason\":\"test manual check\"}"
 
 # ── Test 16: Employee can respond to manual check ─────────────────────────────
 echo ""
 echo "--- Test 16: Employee can respond to the manually triggered check ---"
 EMP_LOGIN=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d "{\"email\":\"$EMP_EMAIL\",\"password\":\"Employee@1234\"}")
+    -d "{\"identifier\":\"$EMP_EMAIL\",\"password\":\"Employee@1234\"}")
 EMP_TOKEN=$(echo "$EMP_LOGIN" | head -n -1 | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4)
 
 respond_resp=$(curl -s -w "\n%{http_code}" \

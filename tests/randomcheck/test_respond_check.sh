@@ -88,7 +88,7 @@ TS=$(date +%s)
 # Tenant
 t_resp=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/tenants" \
     -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"name\":\"GPS Respond Corp ${TS}\",\"slug\":\"gps-respond-${TS}\"}")
+    -d "{\"name\":\"GPS Respond Corp ${TS}\",\"slug\":\"gps-respond-${TS}\",\"ownerEmail\":\"admin@fams.com\"}")
 if [ "$(echo "$t_resp" | tail -n 1)" -ne 201 ]; then echo "SETUP FAILED: tenant"; exit 1; fi
 TENANT_ID=$(json_val "id" "$(echo "$t_resp" | head -n -1)")
 
@@ -121,7 +121,7 @@ curl -s -o /dev/null -X POST "$BASE_URL/api/v1/invitations/accept" \
 
 EMP_TOKEN_RAW=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d "{\"email\":\"$EMP_EMAIL\",\"password\":\"Employee@1234\"}")
+    -d "{\"identifier\":\"$EMP_EMAIL\",\"password\":\"Employee@1234\"}")
 if [ "$(echo "$EMP_TOKEN_RAW" | tail -n 1)" -ne 200 ]; then echo "SETUP FAILED: employee login"; exit 1; fi
 EMP_TOKEN=$(echo "$EMP_TOKEN_RAW" | head -n -1 | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4)
 
@@ -188,7 +188,7 @@ dispatch_check() {
     ch=$(curl -s -w "\n%{http_code}" \
         -X POST "$BASE_CHECKS/manual" \
         -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" \
-        -d "{\"siteId\":\"$SITE_ID\",\"employeeId\":\"$EMP_ID\"}")
+        -d "{\"siteId\":\"$SITE_ID\",\"employeeId\":\"$EMP_ID\",\"reason\":\"test manual check\"}")
     local status
     status=$(echo "$ch" | tail -n 1)
     if [ "$status" -ne 201 ]; then
@@ -280,7 +280,7 @@ echo "--- Test 4: Site without geofence → response accepted, outcome=pass ---"
 TS2=$((TS + 1))
 t2_resp=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/tenants" \
     -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"name\":\"NoGeo Corp ${TS2}\",\"slug\":\"nogeo-${TS2}\"}")
+    -d "{\"name\":\"NoGeo Corp ${TS2}\",\"slug\":\"nogeo-${TS2}\",\"ownerEmail\":\"admin@fams.com\"}")
 if [ "$(echo "$t2_resp" | tail -n 1)" -ne 201 ]; then echo "SETUP FAILED: no-geo tenant"; exit 1; fi
 TENANT2_ID=$(json_val "id" "$(echo "$t2_resp" | head -n -1)")
 
@@ -308,7 +308,7 @@ curl -s -o /dev/null -X POST "$BASE_URL/api/v1/invitations/accept" \
     -d "{\"token\":\"$INV2_NG_TOKEN\",\"password\":\"Employee@1234\"}"
 EMP2_NG_LOGIN=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d "{\"email\":\"$EMP2_EMAIL\",\"password\":\"Employee@1234\"}")
+    -d "{\"identifier\":\"$EMP2_EMAIL\",\"password\":\"Employee@1234\"}")
 EMP2_NG_TOKEN=$(echo "$EMP2_NG_LOGIN" | head -n -1 | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4)
 emp2_list=$(curl -s -H "Authorization: Bearer $ADMIN_TOKEN" \
     "$BASE_URL/api/v1/tenants/$TENANT2_ID/employees?search=$EMP2_EMAIL&size=5")
@@ -339,7 +339,7 @@ BASE_CHECKS2="$BASE_URL/api/v1/tenants/$TENANT2_ID/scheduled-checks"
 CHECK3_RAW=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_CHECKS2/manual" \
     -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"siteId\":\"$SITE2_ID\",\"employeeId\":\"$EMP2_ID\"}")
+    -d "{\"siteId\":\"$SITE2_ID\",\"employeeId\":\"$EMP2_ID\",\"reason\":\"test manual check\"}")
 if [ "$(echo "$CHECK3_RAW" | tail -n 1)" -ne 201 ]; then
     echo "SKIP Test 4: manual check for no-geo site failed ($(echo "$CHECK3_RAW" | tail -n 1))"
 else
@@ -404,7 +404,7 @@ curl -s -o /dev/null -X POST "$BASE_URL/api/v1/invitations/accept" \
     -d "{\"token\":\"$INV2_TOKEN\",\"password\":\"Employee@1234\"}"
 emp2_login=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d "{\"email\":\"$EMP2_EMAIL\",\"password\":\"Employee@1234\"}")
+    -d "{\"identifier\":\"$EMP2_EMAIL\",\"password\":\"Employee@1234\"}")
 EMP2_TOKEN=$(echo "$emp2_login" | head -n -1 | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4)
 
 CHECK7=$(dispatch_check)   # This check is assigned to EMP (employee 1)

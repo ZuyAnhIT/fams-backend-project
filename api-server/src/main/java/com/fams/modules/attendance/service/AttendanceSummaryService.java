@@ -12,6 +12,8 @@ import com.fams.modules.checkin.entity.CheckinRecord;
 import com.fams.modules.checkin.repository.CheckinRepository;
 import com.fams.modules.employee.entity.Employee;
 import com.fams.modules.employee.repository.EmployeeRepository;
+import com.fams.modules.randomcheck.repository.RandomCheckConfigRepository;
+import com.fams.modules.randomcheck.repository.ScheduledCheckRepository;
 import com.fams.modules.rbac.repository.UserRoleRepository;
 import com.fams.modules.rbac.service.SiteScopeService;
 import com.fams.modules.site.entity.Site;
@@ -54,6 +56,8 @@ public class AttendanceSummaryService {
     private final UserRoleRepository userRoleRepository;
     private final SiteScopeService siteScopeService;
     private final AuditLogService auditLogService;
+    private final ScheduledCheckRepository scheduledCheckRepository;
+    private final RandomCheckConfigRepository randomCheckConfigRepository;
 
     public AttendanceSummaryService(AttendanceSummaryRepository summaryRepository,
                                     CheckinRepository checkinRepository,
@@ -61,7 +65,9 @@ public class AttendanceSummaryService {
                                     EmployeeRepository employeeRepository,
                                     UserRoleRepository userRoleRepository,
                                     SiteScopeService siteScopeService,
-                                    AuditLogService auditLogService) {
+                                    AuditLogService auditLogService,
+                                    ScheduledCheckRepository scheduledCheckRepository,
+                                    RandomCheckConfigRepository randomCheckConfigRepository) {
         this.summaryRepository = summaryRepository;
         this.checkinRepository = checkinRepository;
         this.siteRepository = siteRepository;
@@ -69,6 +75,19 @@ public class AttendanceSummaryService {
         this.userRoleRepository = userRoleRepository;
         this.siteScopeService = siteScopeService;
         this.auditLogService = auditLogService;
+        this.scheduledCheckRepository = scheduledCheckRepository;
+        this.randomCheckConfigRepository = randomCheckConfigRepository;
+    }
+
+    /** Tenant-default's failureEscalationThreshold, used to compute exceedsRandomCheckFailureThreshold
+     *  on the HR monthly report. Deliberately uses the TENANT DEFAULT only (not each row's own site
+     *  override) — resolving per-row would mean a per-site config lookup for every row in the page,
+     *  and the escalation signal is informational, not a hard gate, so this simplification is fine.
+     *  Falls back to "never exceeds" (Integer.MAX_VALUE) if the tenant has no default config at all. */
+    private int resolveFailureEscalationThreshold(UUID tenantId) {
+        return randomCheckConfigRepository.findTenantDefault(tenantId)
+                .map(c -> c.getFailureEscalationThreshold())
+                .orElse(Integer.MAX_VALUE);
     }
 
     /** Marker thrown internally by resolveSiteFilter to signal "no sites allowed at all" —
@@ -405,6 +424,8 @@ public class AttendanceSummaryService {
         summary.setMissingCheckout(missingCheckout);
         summary.setHasPendingReviewSession(hasPendingReviewSession);
         summary.setHasRejectedSession(hasRejectedSession);
+        summary.setHasRandomCheckFailure(
+                scheduledCheckRepository.existsFailedOrNoResponseCheck(tenantId, employeeId, siteId, date));
 
         summaryRepository.save(summary);
         log.info("Attendance summary upserted: tenantId={} employeeId={} siteId={} date={} status={} " +
@@ -538,6 +559,7 @@ public class AttendanceSummaryService {
         int missingCheckoutDays  = (int) rows.stream().filter(AttendanceSummary::isMissingCheckout).count();
         int daysWithPendingReview = (int) rows.stream().filter(AttendanceSummary::isHasPendingReviewSession).count();
         int daysWithRejectedSession = (int) rows.stream().filter(AttendanceSummary::isHasRejectedSession).count();
+        int daysWithRandomCheckFailure = (int) rows.stream().filter(AttendanceSummary::isHasRandomCheckFailure).count();
 
         String employeeName = (employee.getFirstName() + " " + employee.getLastName()).trim();
         Set<UUID> siteIds = rows.stream().map(AttendanceSummary::getSiteId).collect(Collectors.toSet());
@@ -564,6 +586,7 @@ public class AttendanceSummaryService {
                 .missingCheckoutDays(missingCheckoutDays)
                 .daysWithPendingReview(daysWithPendingReview)
                 .daysWithRejectedSession(daysWithRejectedSession)
+                .daysWithRandomCheckFailure(daysWithRandomCheckFailure)
                 .dailySummaries(daily)
                 .build();
     }
@@ -602,9 +625,11 @@ public class AttendanceSummaryService {
         Set<UUID> siteIds = rawPage.stream().map(AttendanceMonthlyAggregateProjection::getSiteId).collect(Collectors.toSet());
         Map<UUID, String> empNames  = buildEmployeeNameMap(tenantId, empIds);
         Map<UUID, String> siteNames = buildSiteNameMap(tenantId, siteIds);
+        int failureThreshold = resolveFailureEscalationThreshold(tenantId);
 
-        Page<AttendanceHrMonthlyResponse> resultPage = rawPage.map(row ->
-                AttendanceHrMonthlyResponse.builder()
+        Page<AttendanceHrMonthlyResponse> resultPage = rawPage.map(row -> {
+            int daysWithRandomCheckFailure = row.getDaysWithRandomCheckFailure().intValue();
+            return AttendanceHrMonthlyResponse.builder()
                         .tenantId(tenantId)
                         .employeeId(row.getEmployeeId())
                         .employeeName(empNames.get(row.getEmployeeId()))
@@ -622,7 +647,10 @@ public class AttendanceSummaryService {
                         .missingCheckoutDays(row.getMissingCheckoutDays().intValue())
                         .daysWithPendingReview(row.getDaysWithPendingReview().intValue())
                         .daysWithRejectedSession(row.getDaysWithRejectedSession().intValue())
-                        .build());
+                        .daysWithRandomCheckFailure(daysWithRandomCheckFailure)
+                        .exceedsRandomCheckFailureThreshold(daysWithRandomCheckFailure >= failureThreshold)
+                        .build();
+        });
 
         log.info("HR monthly list: tenantId={} employeeId={} siteId={} {}/{} groups={}",
                 tenantId, employeeId, siteId, year, month, resultPage.getTotalElements());
@@ -762,6 +790,7 @@ public class AttendanceSummaryService {
                 .missingCheckout(a.isMissingCheckout())
                 .hasPendingReviewSession(a.isHasPendingReviewSession())
                 .hasRejectedSession(a.isHasRejectedSession())
+                .hasRandomCheckFailure(a.isHasRandomCheckFailure())
                 .createdAt(a.getCreatedAt())
                 .updatedAt(a.getUpdatedAt())
                 .adjustmentReason(a.getAdjustmentReason())

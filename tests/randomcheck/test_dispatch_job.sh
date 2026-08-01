@@ -58,7 +58,7 @@ echo "Admin token obtained."
 TS=$(date +%s)
 t_resp=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/tenants" \
     -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"name\":\"Dispatch Corp ${TS}\",\"slug\":\"dispatch-${TS}\"}")
+    -d "{\"name\":\"Dispatch Corp ${TS}\",\"slug\":\"dispatch-${TS}\",\"ownerEmail\":\"admin@fams.com\"}")
 if [ "$(echo "$t_resp" | tail -n 1)" -ne 201 ]; then echo "SETUP FAILED: tenant"; exit 1; fi
 TENANT_ID=$(echo "$t_resp" | head -n -1 | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 echo "Tenant: $TENANT_ID"
@@ -253,9 +253,9 @@ else
 fi
 
 echo ""
-echo "--- Test 10: Dispatch non-existent check returns 200 (graceful skip) ---"
+echo "--- Test 10: Dispatch non-existent check returns 404 ---"
 FAKE_ID="00000000-0000-0000-0000-000000000099"
-run_test "Dispatch non-existent check returns 200" 200 \
+run_test "Dispatch non-existent check returns 404" 404 \
     -X POST "$BASE_CHECKS/$FAKE_ID/dispatch" \
     -H "Authorization: Bearer $ADMIN_TOKEN"
 
@@ -298,7 +298,7 @@ curl -s -o /dev/null -X POST "$BASE_URL/api/v1/invitations/accept" \
 ulogin_resp=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d "{\"email\":\"$UNAUTH_EMAIL\",\"password\":\"Employee@1234\"}")
+    -d "{\"identifier\":\"$UNAUTH_EMAIL\",\"password\":\"Employee@1234\"}")
 USER_TOKEN=$(echo "$ulogin_resp" | head -n -1 | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4)
 if [ -n "$USER_TOKEN" ]; then
     run_test "Employee without randomchecks:configure gets 403 on dispatch" 403 \

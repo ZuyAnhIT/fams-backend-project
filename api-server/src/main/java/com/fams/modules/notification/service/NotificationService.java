@@ -15,6 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -95,6 +96,21 @@ public class NotificationService {
   @Transactional
   public NotificationResponse createNotification(
       UUID tenantId, UUID userId, String eventType, String title, String body) {
+    return createNotification(tenantId, userId, eventType, title, body, null);
+  }
+
+  /**
+   * Same as the 5-arg overload, plus an optional structured payload for deep-linking (e.g.
+   * {"checkId": ..., "siteId": ..., "expiresAt": ...} for RANDOM_CHECK_SENT) — found missing via
+   * FE audit (2026-07-31): callers had no way to attach machine-readable data alongside the
+   * human-readable title/body, forcing clients to fall back to opening a generic list screen.
+   *
+   * @param metadata structured payload, or null for notification types that don't need one
+   */
+  @Transactional
+  public NotificationResponse createNotification(
+      UUID tenantId, UUID userId, String eventType, String title, String body,
+      Map<String, Object> metadata) {
     log.info(
         "Creating notification tenantId={} userId={} eventType={}", tenantId, userId, eventType);
 
@@ -113,6 +129,7 @@ public class NotificationService {
             .eventType(eventType)
             .title(title)
             .body(body)
+            .metadata(metadata)
             .isRead(false)
             .build();
 
@@ -200,6 +217,7 @@ public class NotificationService {
         .eventType(n.getEventType())
         .title(n.getTitle())
         .body(n.getBody())
+        .metadata(n.getMetadata())
         .isRead(n.isRead())
         .readAt(n.getReadAt())
         .createdAt(n.getCreatedAt())

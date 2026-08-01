@@ -6,6 +6,7 @@ import lombok.Builder;
 import lombok.Data;
 
 import java.time.OffsetDateTime;
+import java.util.Map;
 import java.util.UUID;
 
 @Data
@@ -30,6 +31,11 @@ public class NotificationResponse {
 
   @Schema(description = "Notification body text")
   private String body;
+
+  @Schema(description = "Structured, machine-readable payload for deep-linking — e.g. "
+          + "{\"checkId\": \"...\", \"siteId\": \"...\", \"expiresAt\": \"...\"} for RANDOM_CHECK_SENT. "
+          + "Null for notification types that don't carry structured data.")
+  private Map<String, Object> metadata;
 
   @JsonProperty("isRead")
   @Schema(description = "Whether the notification has been read", example = "false")

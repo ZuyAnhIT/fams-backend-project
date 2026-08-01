@@ -47,7 +47,10 @@ public class CreateRandomCheckConfigRequest {
     )
     private String checkMode;
 
-    @Schema(description = "Role names at site that are subject to random checks", example = "[\"supervisor\", \"employee\"]")
+    @Schema(description = "Role names at site that are subject to random checks — matched against "
+            + "Assignment.role, currently only 'worker' or 'supervisor' (enforced by @Pattern + a DB CHECK "
+            + "constraint); any other value here can never match a real assignment.",
+            example = "[\"worker\", \"supervisor\"]")
     @NotNull
     private List<@NotBlank String> applicableRoles;
 
@@ -55,4 +58,10 @@ public class CreateRandomCheckConfigRequest {
     @Min(value = 30, message = "response_window_seconds must be at least 30")
     @NotNull
     private Integer responseWindowSeconds;
+
+    @Schema(description = "Number of failed/no_response checks in a calendar month that surfaces "
+            + "\"exceeds threshold\" on the HR monthly attendance report — informational escalation signal "
+            + "only, never auto-adjusts pay. Defaults to 3 if omitted.", example = "3")
+    @Min(value = 1, message = "failure_escalation_threshold must be at least 1")
+    private Integer failureEscalationThreshold;
 }

@@ -51,9 +51,17 @@ TS=$(date +%s)
 
 t_resp=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/tenants" \
     -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"name\":\"Viol Corp ${TS}\",\"slug\":\"viol-${TS}\"}")
+    -d "{\"name\":\"Viol Corp ${TS}\",\"slug\":\"viol-${TS}\",\"ownerEmail\":\"admin@fams.com\"}")
 if [ "$(echo "$t_resp" | tail -n 1)" -ne 201 ]; then echo "SETUP FAILED: tenant"; exit 1; fi
 TENANT_ID=$(echo "$t_resp" | head -n -1 | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+
+# Trial plan (auto-assigned on tenant creation) caps sites at 1 — Test 12 below creates a second
+# site in this same tenant, so upgrade to "pro" right away.
+PRO_PLAN_ID=$(docker exec fams-postgres psql -U fams_user -d fams_db -t -c \
+    "SELECT id FROM plans WHERE name='pro' AND deleted_at IS NULL;" | tr -d ' \n')
+curl -s -o /dev/null -X PATCH "$BASE_URL/api/v1/tenants/$TENANT_ID/subscription" \
+    -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" \
+    -d "{\"planId\":\"$PRO_PLAN_ID\"}"
 
 s_resp=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/tenants/$TENANT_ID/sites" \
     -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" \
@@ -70,7 +78,8 @@ geo_resp=$(curl -s -w "\n%{http_code}" \
         [106.0001, 10.0001],
         [106.0002, 10.0001],
         [106.0002, 10.0002],
-        [106.0001, 10.0002]
+        [106.0001, 10.0002],
+        [106.0001, 10.0001]
       ],
       "bufferMeters": 10
     }')
@@ -100,11 +109,21 @@ curl -s -o /dev/null -X POST "$BASE_URL/api/v1/invitations/accept" \
     -d "{\"token\":\"$INV_TOKEN\",\"password\":\"Employee@1234\"}"
 EMP_LOGIN=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d "{\"email\":\"$EMP_EMAIL\",\"password\":\"Employee@1234\"}")
+    -d "{\"identifier\":\"$EMP_EMAIL\",\"password\":\"Employee@1234\"}")
 EMP_TOKEN=$(echo "$EMP_LOGIN" | head -n -1 | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4)
 EMP_ID=$(docker exec fams-postgres psql -U fams_user -d fams_db -t -c \
     "SELECT e.id FROM employees e JOIN users u ON u.id = e.user_id WHERE u.email='$EMP_EMAIL' AND e.deleted_at IS NULL LIMIT 1;" \
     | tr -d ' \n')
+
+# Face-mode tests (7-9) need an enrolled profile — since 2026-07-31, submit() immediately fails
+# (no async AI call at all) for a check requiring face verification when the employee has no
+# status='enrolled' FaceProfile, matching the documented behavior on
+# CreateRandomCheckConfigRequest.checkMode. See docs/api/random-check-config-review.md §3.
+docker exec fams-postgres psql -U fams_user -d fams_db -c \
+    "INSERT INTO face_profiles (tenant_id, employee_id, consent_given, status, enrolled_at)
+     VALUES ('$TENANT_ID', '$EMP_ID', TRUE, 'enrolled', now());" > /dev/null
+
+AI_INTERNAL_SECRET="${AI_INTERNAL_SECRET:-fams_ai_secret_local_dev}"
 
 asgn_resp=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/tenants/$TENANT_ID/sites/$SITE_ID/assignments" \
@@ -136,6 +155,25 @@ insert_sent_check() {
            RETURNING id
          ) SELECT id FROM ins;" \
         | tr -d ' \n'
+}
+
+# Helper: insert a check_response directly in DB in the "pending async face verification" state
+# (status=responded on the parent check, outcome tentatively 'pass', face_verified=NULL) — the
+# exact state submit() leaves a location_face(_liveness) response in after a photo is accepted
+# but before the AI callback arrives. Bypasses ever calling POST .../respond so the REAL fams-ai
+# worker (running in this dev environment) never picks up a Redis job for a fake photo and races
+# with the callback this test simulates manually.
+insert_pending_response() {
+    local check_id="$1"
+    docker exec fams-postgres psql -U fams_user -d fams_db -t -c \
+        "UPDATE scheduled_checks SET status='responded' WHERE id='$check_id';
+         INSERT INTO check_responses
+           (id, tenant_id, scheduled_check_id, employee_id, responded_at,
+            latitude, longitude, location_verified, face_verified, liveness_verified, outcome)
+         VALUES (gen_random_uuid(), '$TENANT_ID', '$check_id', '$EMP_ID', now(),
+                 10.00015, 106.00015, TRUE, NULL, NULL, 'pass')
+         RETURNING id;" \
+        | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1
 }
 
 echo "Setup complete. TENANT=$TENANT_ID EMP=$EMP_ID SITE=$SITE_ID"
@@ -225,13 +263,17 @@ fi
 
 # ── Test 7: face provided in location_face mode → no face_fail ───────────────
 echo ""
-echo "--- Test 7: Face image provided in location_face mode → no face_fail ---"
+echo "--- Test 7: Face image provided (enrolled employee) in location_face mode → no face_fail ---"
+# submit() only accepts employeePhotoBase64 for the "photo submitted" branch — faceImageUrl is
+# just stored metadata (a previously-uploaded URL), never read for verification. With a photo
+# submitted and an enrolled profile, faceVerified stays null (pending async AI) until the
+# fams-ai callback arrives — simulated here via the internal callback endpoint directly.
 CHECK_FACE_OK=$(insert_sent_check "location_face")
-faceok_resp=$(curl -s -w "\n%{http_code}" \
-    -X POST "$BASE_CHECKS/$CHECK_FACE_OK/respond" \
-    -H "Content-Type: application/json" -H "Authorization: Bearer $EMP_TOKEN" \
-    -d '{"latitude":10.00015,"longitude":106.00015,"faceImageUrl":"data:image/jpeg;base64,/9j/fake"}')
-faceok_body=$(echo "$faceok_resp" | head -n -1)
+RESP_FACE_OK=$(insert_pending_response "$CHECK_FACE_OK")
+curl -s -o /dev/null -X POST "$BASE_URL/internal/ai-callback/face-result" \
+    -H "X-Internal-Secret: $AI_INTERNAL_SECRET" -H "Content-Type: application/json" \
+    -d "{\"sourceType\":\"check_response\",\"sourceId\":\"$RESP_FACE_OK\",\"faceVerified\":true,\"faceVerifyScore\":0.95}"
+faceok_body=$(curl -s -H "Authorization: Bearer $ADMIN_TOKEN" "$BASE_CHECKS/$CHECK_FACE_OK")
 faceok_outcome=$(echo "$faceok_body" | grep -o '"outcome":"[^"]*"' | cut -d'"' -f4)
 faceok_face_verified=$(echo "$faceok_body" | grep -o '"faceVerified":[a-z]*' | cut -d: -f2)
 face_no_viol=$(docker exec fams-postgres psql -U fams_user -d fams_db -t -c \
@@ -242,24 +284,29 @@ if [ "$faceok_outcome" = "pass" ] && [ "$faceok_face_verified" = "true" ] && [ "
     PASS=$((PASS + 1))
 else
     echo "FAIL: outcome=$faceok_outcome faceVerified=$faceok_face_verified violations=$face_no_viol"
+    echo "Body: $faceok_body"
     FAIL=$((FAIL + 1))
 fi
 
 # ── Test 8: liveness_fail — score below threshold in location_face_liveness ───
 echo ""
-echo "--- Test 8: Liveness score below 0.7 → liveness_fail violation ---"
+echo "--- Test 8: Liveness fails (face matched, liveness didn't) in location_face_liveness → liveness_fail ---"
+# Liveness is decided by the async AI callback's livenessVerified field, never a client-submitted
+# score — location_face_liveness mode independently fails on faceVerified=true+livenessVerified=false
+# (found via audit 2026-07-31: previously not enforced at all — see
+# docs/api/attendance-management-api.md §1... actually docs/api/random-check-config-review.md §1).
 CHECK_LIVE=$(insert_sent_check "location_face_liveness")
-live_resp=$(curl -s -w "\n%{http_code}" \
-    -X POST "$BASE_CHECKS/$CHECK_LIVE/respond" \
-    -H "Content-Type: application/json" -H "Authorization: Bearer $EMP_TOKEN" \
-    -d '{"latitude":10.00015,"longitude":106.00015,"faceImageUrl":"data:image/jpeg;base64,/9j/fake","livenessScore":0.5}')
-live_body=$(echo "$live_resp" | head -n -1)
+RESP_LIVE=$(insert_pending_response "$CHECK_LIVE")
+curl -s -o /dev/null -X POST "$BASE_URL/internal/ai-callback/face-result" \
+    -H "X-Internal-Secret: $AI_INTERNAL_SECRET" -H "Content-Type: application/json" \
+    -d "{\"sourceType\":\"check_response\",\"sourceId\":\"$RESP_LIVE\",\"faceVerified\":true,\"livenessVerified\":false,\"faceVerifyScore\":0.9}"
+live_body=$(curl -s -H "Authorization: Bearer $ADMIN_TOKEN" "$BASE_CHECKS/$CHECK_LIVE")
 live_outcome=$(echo "$live_body" | grep -o '"outcome":"[^"]*"' | cut -d'"' -f4)
 live_viol=$(docker exec fams-postgres psql -U fams_user -d fams_db -t -c \
     "SELECT COUNT(*) FROM violations WHERE scheduled_check_id='$CHECK_LIVE' AND violation_type='liveness_fail';" \
     | tr -d ' \n')
 if [ "$live_outcome" = "fail" ] && [ "$live_viol" -eq 1 ]; then
-    echo "PASS: Low liveness score → outcome=fail, liveness_fail violation created"
+    echo "PASS: Liveness failed (face matched) → outcome=fail, liveness_fail violation created"
     PASS=$((PASS + 1))
 else
     echo "FAIL: live_outcome=$live_outcome live_viol=$live_viol"
@@ -269,21 +316,22 @@ fi
 
 # ── Test 9: liveness above threshold → pass ───────────────────────────────────
 echo ""
-echo "--- Test 9: Liveness score >= 0.7 in location_face_liveness → pass ---"
+echo "--- Test 9: Face AND liveness both verified in location_face_liveness → pass ---"
 CHECK_LIVE_OK=$(insert_sent_check "location_face_liveness")
-liveok_resp=$(curl -s -w "\n%{http_code}" \
-    -X POST "$BASE_CHECKS/$CHECK_LIVE_OK/respond" \
-    -H "Content-Type: application/json" -H "Authorization: Bearer $EMP_TOKEN" \
-    -d '{"latitude":10.00015,"longitude":106.00015,"faceImageUrl":"data:image/jpeg;base64,/9j/fake","livenessScore":0.85}')
-liveok_body=$(echo "$liveok_resp" | head -n -1)
+RESP_LIVE_OK=$(insert_pending_response "$CHECK_LIVE_OK")
+curl -s -o /dev/null -X POST "$BASE_URL/internal/ai-callback/face-result" \
+    -H "X-Internal-Secret: $AI_INTERNAL_SECRET" -H "Content-Type: application/json" \
+    -d "{\"sourceType\":\"check_response\",\"sourceId\":\"$RESP_LIVE_OK\",\"faceVerified\":true,\"livenessVerified\":true,\"faceVerifyScore\":0.95}"
+liveok_body=$(curl -s -H "Authorization: Bearer $ADMIN_TOKEN" "$BASE_CHECKS/$CHECK_LIVE_OK")
 liveok_outcome=$(echo "$liveok_body" | grep -o '"outcome":"[^"]*"' | cut -d'"' -f4)
 liveok_viols=$(docker exec fams-postgres psql -U fams_user -d fams_db -t -c \
     "SELECT COUNT(*) FROM violations WHERE scheduled_check_id='$CHECK_LIVE_OK';" | tr -d ' \n')
 if [ "$liveok_outcome" = "pass" ] && [ "$liveok_viols" -eq 0 ]; then
-    echo "PASS: Liveness >= 0.7 → outcome=pass, 0 violations"
+    echo "PASS: Face + liveness both verified → outcome=pass, 0 violations"
     PASS=$((PASS + 1))
 else
     echo "FAIL: outcome=$liveok_outcome violations=$liveok_viols"
+    echo "Body: $liveok_body"
     FAIL=$((FAIL + 1))
 fi
 
@@ -339,7 +387,7 @@ s2_resp=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/tenants/$TENANT_
 SITE2_ID=$(echo "$s2_resp" | head -n -1 | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 sh2_resp=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/tenants/$TENANT_ID/sites/$SITE2_ID/shifts" \
     -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d '{"name":"Day","startTime":"08:00","endTime":"17:00"}')
+    -d '{"name":"Evening","startTime":"18:00","endTime":"23:00"}')
 SHIFT2_ID=$(echo "$sh2_resp" | head -n -1 | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 asgn2_resp=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/tenants/$TENANT_ID/sites/$SITE2_ID/assignments" \

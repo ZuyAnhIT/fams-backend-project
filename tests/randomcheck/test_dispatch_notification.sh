@@ -66,7 +66,7 @@ TS=$(date +%s)
 # Tenant
 t_resp=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/tenants" \
     -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"name\":\"Notif Check Corp ${TS}\",\"slug\":\"nc-corp-${TS}\"}")
+    -d "{\"name\":\"Notif Check Corp ${TS}\",\"slug\":\"nc-corp-${TS}\",\"ownerEmail\":\"admin@fams.com\"}")
 if [ "$(echo "$t_resp" | tail -n 1)" -ne 201 ]; then echo "SETUP FAILED: tenant"; exit 1; fi
 TENANT_ID=$(echo "$t_resp" | head -n -1 | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 
@@ -104,7 +104,7 @@ EMP_ID=$(docker exec fams-postgres psql -U fams_user -d fams_db -t -c \
 emp_login=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d "{\"email\":\"$EMP_EMAIL\",\"password\":\"Employee@1234\"}")
+    -d "{\"identifier\":\"$EMP_EMAIL\",\"password\":\"Employee@1234\"}")
 EMP_TOKEN=$(echo "$emp_login" | head -n -1 | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4)
 
 # Assignment
@@ -143,7 +143,7 @@ count_before=$(echo "$notif_before" | grep -o '"totalElements":[0-9]*' | grep -o
 trig_resp=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/tenants/$TENANT_ID/scheduled-checks/manual" \
     -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"siteId\":\"$SITE_ID\",\"employeeId\":\"$EMP_ID\"}")
+    -d "{\"siteId\":\"$SITE_ID\",\"employeeId\":\"$EMP_ID\",\"reason\":\"test manual check\"}")
 trig_status=$(echo "$trig_resp" | tail -n 1)
 trig_body=$(echo "$trig_resp" | head -n -1)
 

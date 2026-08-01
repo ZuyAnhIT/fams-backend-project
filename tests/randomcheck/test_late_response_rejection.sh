@@ -56,7 +56,7 @@ TS=$(date +%s)
 # Tenant
 t_resp=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/tenants" \
     -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"name\":\"Respond Corp ${TS}\",\"slug\":\"respond-${TS}\"}")
+    -d "{\"name\":\"Respond Corp ${TS}\",\"slug\":\"respond-${TS}\",\"ownerEmail\":\"admin@fams.com\"}")
 if [ "$(echo "$t_resp" | tail -n 1)" -ne 201 ]; then echo "SETUP FAILED: tenant"; exit 1; fi
 TENANT_ID=$(echo "$t_resp" | head -n -1 | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 
@@ -87,7 +87,7 @@ curl -s -o /dev/null -X POST "$BASE_URL/api/v1/invitations/accept" \
     -d "{\"token\":\"$INV_TOKEN\",\"password\":\"Employee@1234\"}"
 EMP_LOGIN=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d "{\"email\":\"$EMP_EMAIL\",\"password\":\"Employee@1234\"}")
+    -d "{\"identifier\":\"$EMP_EMAIL\",\"password\":\"Employee@1234\"}")
 EMP_TOKEN=$(echo "$EMP_LOGIN" | head -n -1 | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4)
 EMP_ID=$(docker exec fams-postgres psql -U fams_user -d fams_db -t -c \
     "SELECT e.id FROM employees e JOIN users u ON u.id = e.user_id WHERE u.email='$EMP_EMAIL' AND e.deleted_at IS NULL LIMIT 1;" \
@@ -303,7 +303,7 @@ curl -s -o /dev/null -X POST "$BASE_URL/api/v1/invitations/accept" \
     -d "{\"token\":\"$INV2_TOKEN\",\"password\":\"Employee@1234\"}"
 EMP2_LOGIN=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d "{\"email\":\"$EMP2_EMAIL\",\"password\":\"Employee@1234\"}")
+    -d "{\"identifier\":\"$EMP2_EMAIL\",\"password\":\"Employee@1234\"}")
 EMP2_TOKEN=$(echo "$EMP2_LOGIN" | head -n -1 | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4)
 
 CROSS_CHECK_ID=$(insert_check "- interval '2 minutes'" "+ interval '5 minutes'")

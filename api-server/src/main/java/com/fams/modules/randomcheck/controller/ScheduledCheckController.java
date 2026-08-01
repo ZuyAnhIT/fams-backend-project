@@ -21,6 +21,8 @@ import com.fams.modules.randomcheck.service.ScheduledCheckGeneratorService;
 import com.fams.modules.employee.repository.EmployeeRepository;
 import com.fams.modules.rbac.repository.UserRoleRepository;
 import com.fams.modules.rbac.service.SiteScopeService;
+import com.fams.modules.site.repository.SiteRepository;
+import com.fams.shared.ai.AiServiceClient;
 import com.fams.shared.pagination.PageResponse;
 import com.fams.shared.response.ApiResponse;
 import com.fams.shared.security.FamsUserDetails;
@@ -72,6 +74,8 @@ public class ScheduledCheckController {
     private final NoResponseViolationService noResponseViolationService;
     private final ManualCheckService manualCheckService;
     private final SiteScopeService siteScopeService;
+    private final SiteRepository siteRepository;
+    private final AiServiceClient aiServiceClient;
 
     public ScheduledCheckController(ScheduledCheckGeneratorService generatorService,
                                     ScheduledCheckRepository scheduledCheckRepository,
@@ -84,7 +88,9 @@ public class ScheduledCheckController {
                                     EmployeeRepository employeeRepository,
                                     NoResponseViolationService noResponseViolationService,
                                     ManualCheckService manualCheckService,
-                                    SiteScopeService siteScopeService) {
+                                    SiteScopeService siteScopeService,
+                                    SiteRepository siteRepository,
+                                    AiServiceClient aiServiceClient) {
         this.generatorService = generatorService;
         this.scheduledCheckRepository = scheduledCheckRepository;
         this.checkResponseRepository = checkResponseRepository;
@@ -97,6 +103,8 @@ public class ScheduledCheckController {
         this.noResponseViolationService = noResponseViolationService;
         this.manualCheckService = manualCheckService;
         this.siteScopeService = siteScopeService;
+        this.siteRepository = siteRepository;
+        this.aiServiceClient = aiServiceClient;
     }
 
     @Operation(
@@ -192,9 +200,32 @@ public class ScheduledCheckController {
         PageRequest pageable = PageRequest.of(page, size);
         LocalDate from = dateFrom != null ? dateFrom : LocalDate.of(1970, 1, 1);
         LocalDate to = dateTo != null ? dateTo : LocalDate.of(2099, 12, 31);
-        Page<ScheduledCheckResponse> resultPage = scheduledCheckRepository
-                .findByTenantWithFilters(tenantId, siteId, employeeId, status, from, to, pageable)
-                .map(this::toResponse);
+        Page<ScheduledCheck> rawPage = scheduledCheckRepository
+                .findByTenantWithFilters(tenantId, siteId, employeeId, status, from, to, pageable);
+
+        // Batch-hydrate employee/site names and outcome/failureReason for the page — found via FE
+        // audit (2026-07-31): the list previously returned bare IDs with no result, forcing the
+        // Web client to resolve names via a separate directory call and outcome via a per-row
+        // detail call (N+1). One extra query per lookup type for the whole page, not per row.
+        List<UUID> checkIds = rawPage.getContent().stream().map(ScheduledCheck::getId).collect(Collectors.toList());
+        Set<UUID> empIds = rawPage.getContent().stream().map(ScheduledCheck::getEmployeeId).collect(Collectors.toSet());
+        Set<UUID> siteIds = rawPage.getContent().stream().map(ScheduledCheck::getSiteId).collect(Collectors.toSet());
+
+        Map<UUID, String> empNames = empIds.isEmpty() ? Map.of()
+                : employeeRepository.findAllByTenantIdAndIdInAndDeletedAtIsNull(tenantId, empIds).stream()
+                        .collect(Collectors.toMap(e -> e.getId(), e -> (e.getFirstName() + " " + e.getLastName()).trim()));
+        Map<UUID, String> siteNames = siteIds.isEmpty() ? Map.of()
+                : siteRepository.findAllByTenantIdAndIdInAndDeletedAtIsNull(tenantId, siteIds).stream()
+                        .collect(Collectors.toMap(s -> s.getId(), s -> s.getName()));
+        Map<UUID, CheckResponse> responsesByCheckId = checkIds.isEmpty() ? Map.of()
+                : checkResponseRepository.findAllByScheduledCheckIdIn(checkIds).stream()
+                        .collect(Collectors.toMap(CheckResponse::getScheduledCheckId, r -> r));
+
+        Page<ScheduledCheckResponse> resultPage = rawPage.map(s -> {
+            CheckResponse resp = responsesByCheckId.get(s.getId());
+            return toResponse(s, empNames.get(s.getEmployeeId()), siteNames.get(s.getSiteId()),
+                    resp != null ? resp.getOutcome() : null, resp != null ? resp.getFailureReason() : null);
+        });
 
         return ResponseEntity.ok(ApiResponse.success(PageResponse.from(resultPage)));
     }
@@ -373,6 +404,52 @@ public class ScheduledCheckController {
     }
 
     @Operation(
+        summary = "HR: view the selfie submitted for a random check response",
+        description = "Streams the JPEG selfie fams-ai persisted for this check's response (face/liveness "
+                      + "modes only). Returns 404 if the check hasn't been responded to, no photo was ever "
+                      + "submitted (see CheckResponseDto.hasPhotoEvidence — check that first to avoid an "
+                      + "unnecessary call), or fams-ai no longer has the file. Same permission/site-scope as "
+                      + "GET /{checkId}. Found missing entirely via FE audit (2026-08-01) — fams-ai already "
+                      + "saves these photos, but nothing exposed a way to retrieve one back."
+    )
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "200", description = "JPEG image bytes"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "404",
+            description = "Check not found, not yet responded, no photo was submitted, or fams-ai has no file")
+    })
+    @PreAuthorize("hasAnyAuthority('randomchecks:list', 'randomchecks:configure')")
+    @GetMapping("/{checkId}/photo")
+    public ResponseEntity<byte[]> getResponsePhoto(
+            @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
+            @Parameter(description = "Scheduled check UUID") @PathVariable UUID checkId,
+            @AuthenticationPrincipal FamsUserDetails userDetails) {
+
+        if (!userDetails.isPlatformAdmin()) {
+            Set<String> perms = userRoleRepository.findPermissionNamesByUserIdAndTenantId(
+                    userDetails.getUserId(), tenantId);
+            if (!perms.contains("randomchecks:list") && !perms.contains(PERM_CONFIGURE)) {
+                throw new AccessDeniedException("Missing permission: randomchecks:list");
+            }
+        }
+
+        ScheduledCheck check = scheduledCheckRepository
+                .findByIdAndTenant(checkId, tenantId)
+                .orElseThrow(() -> new com.fams.shared.exception.ResourceNotFoundException(
+                        "Scheduled check not found: " + checkId));
+        assertCheckInScope(userDetails, tenantId, check);
+
+        CheckResponse response = checkResponseRepository.findByScheduledCheckId(checkId)
+                .filter(CheckResponse::isPhotoSubmitted)
+                .orElseThrow(() -> new com.fams.shared.exception.ResourceNotFoundException(
+                        "No photo evidence for check: " + checkId));
+
+        byte[] photo = aiServiceClient.getCheckinPhoto(tenantId, response.getId());
+        return ResponseEntity.ok().contentType(org.springframework.http.MediaType.IMAGE_JPEG).body(photo);
+    }
+
+    @Operation(
         summary = "Submit a response to a scheduled check",
         description = "Called by the employee to respond to a random check. " +
                       "Requires location (lat/lon). Face image and liveness score are optional, " +
@@ -409,6 +486,65 @@ public class ScheduledCheckController {
 
         CheckResponseDto dto = checkResponseService.submit(tenantId, checkId, employeeId, request);
         return ResponseEntity.ok(ApiResponse.success(dto));
+    }
+
+    @Operation(
+        summary = "Employee: poll my own check's result",
+        description = "Employee-owned, safe view of a scheduled check's result — for polling the outcome "
+                      + "after respond() when the mode requires async face/liveness verification (faceVerified "
+                      + "stays null in the immediate respond() response until the AI callback arrives). "
+                      + "Unlike GET /{checkId} (HR-only, requires randomchecks:list/:configure), this endpoint "
+                      + "requires no special permission — any authenticated tenant member may call it, but only "
+                      + "for a check that belongs to THEIR OWN employee record; any other check (including one "
+                      + "belonging to a different employee) returns 404, never 403, to avoid confirming the "
+                      + "check's existence. Never returns raw embeddings, image storage paths, or another "
+                      + "employee's data. Found missing via FE audit (2026-07-31) — the employee-facing app had "
+                      + "no way at all to learn the final async result of its own submission."
+    )
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "200",
+            description = "Result returned (may still be processingStatus=pending)"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "404",
+            description = "Check not found, or does not belong to the calling employee")
+    })
+    @GetMapping("/{checkId}/my-result")
+    public ResponseEntity<ApiResponse<com.fams.modules.randomcheck.dto.response.MyCheckResultResponse>> myResult(
+            @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
+            @Parameter(description = "Scheduled check UUID") @PathVariable UUID checkId,
+            @AuthenticationPrincipal FamsUserDetails userDetails) {
+
+        UUID employeeId = employeeRepository
+                .findByUserIdAndTenantIdAndDeletedAtIsNull(userDetails.getUserId(), tenantId)
+                .map(e -> e.getId())
+                .orElseThrow(() -> new com.fams.shared.exception.ResourceNotFoundException(
+                        "Employee record not found for this tenant"));
+
+        ScheduledCheck check = scheduledCheckRepository.findByIdAndTenant(checkId, tenantId)
+                .filter(c -> c.getEmployeeId().equals(employeeId))
+                .orElseThrow(() -> new com.fams.shared.exception.ResourceNotFoundException(
+                        "Scheduled check not found: " + checkId));
+
+        CheckResponse resp = checkResponseRepository.findByScheduledCheckId(checkId).orElse(null);
+
+        boolean faceRequired = extractCheckMode(check.getConfigSnapshot()).startsWith("location_face");
+        boolean stillProcessing = resp != null && faceRequired && resp.getFaceVerified() == null;
+        String processingStatus = stillProcessing ? "pending" : "completed";
+
+        return ResponseEntity.ok(ApiResponse.success(
+                com.fams.modules.randomcheck.dto.response.MyCheckResultResponse.builder()
+                        .checkId(check.getId())
+                        .status(check.getStatus())
+                        .processingStatus(processingStatus)
+                        .outcome(resp != null ? resp.getOutcome() : null)
+                        .failureReason(resp != null ? resp.getFailureReason() : null)
+                        .locationVerified(resp != null ? resp.isLocationVerified() : null)
+                        .faceVerified(resp != null ? resp.getFaceVerified() : null)
+                        .livenessVerified(resp != null ? resp.getLivenessVerified() : null)
+                        .faceVerifyScore(resp != null ? resp.getFaceVerifyScore() : null)
+                        .respondedAt(resp != null ? resp.getRespondedAt() : null)
+                        .build()));
     }
 
     @Operation(
@@ -523,6 +659,8 @@ public class ScheduledCheckController {
         description = "HR/Supervisor sends an on-demand random check directly to an employee at a site. " +
                       "The check is created with status 'sent' and expires after the configured " +
                       "responseWindowSeconds. The employee must have an active assignment at the site today. " +
+                      "Bypasses the config's applicableRoles population filter by design (targeting one " +
+                      "specific employee is an explicit override) — a reason is required for audit trail. " +
                       "Requires randomchecks:configure permission."
     )
     @ApiResponses({
@@ -653,6 +791,18 @@ public class ScheduledCheckController {
         }
     }
 
+    /** Mirrors CheckResponseService's private helper of the same purpose — reads checkMode back out
+     *  of the JSON snapshot captured at generation time. Small duplication across the module's
+     *  services/controller (each already parses this snapshot independently) rather than a shared
+     *  utility for one two-line regex. */
+    private String extractCheckMode(String configSnapshot) {
+        if (configSnapshot == null) return "location_only";
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("\"checkMode\"\\s*:\\s*\"([^\"]+)\"")
+                .matcher(configSnapshot);
+        return m.find() ? m.group(1) : "location_only";
+    }
+
     private ScheduledCheckDetailResponse toDetailResponse(ScheduledCheck s, CheckResponseDto responseDto) {
         return ScheduledCheckDetailResponse.builder()
                 .id(s.getId())
@@ -670,6 +820,8 @@ public class ScheduledCheckController {
                 .status(s.getStatus())
                 .createdAt(s.getCreatedAt())
                 .response(responseDto)
+                .manualReason(s.getManualReason())
+                .triggeredBy(s.getTriggeredBy())
                 .build();
     }
 
@@ -687,17 +839,26 @@ public class ScheduledCheckController {
                 .livenessVerified(r.getLivenessVerified())
                 .outcome(r.getOutcome())
                 .failureReason(r.getFailureReason())
+                .faceVerifyScore(r.getFaceVerifyScore())
+                .hasPhotoEvidence(r.isPhotoSubmitted())
                 .createdAt(r.getCreatedAt())
                 .build();
     }
 
     private ScheduledCheckResponse toResponse(ScheduledCheck s) {
+        return toResponse(s, null, null, null, null);
+    }
+
+    private ScheduledCheckResponse toResponse(ScheduledCheck s, String employeeName, String siteName,
+                                              String outcome, String failureReason) {
         return ScheduledCheckResponse.builder()
                 .id(s.getId())
                 .tenantId(s.getTenantId())
                 .assignmentId(s.getAssignmentId())
                 .employeeId(s.getEmployeeId())
+                .employeeName(employeeName)
                 .siteId(s.getSiteId())
+                .siteName(siteName)
                 .shiftId(s.getShiftId())
                 .configId(s.getConfigId())
                 .configSnapshot(s.getConfigSnapshot())
@@ -707,6 +868,10 @@ public class ScheduledCheckController {
                 .expiresAt(s.getExpiresAt())
                 .status(s.getStatus())
                 .createdAt(s.getCreatedAt())
+                .manualReason(s.getManualReason())
+                .triggeredBy(s.getTriggeredBy())
+                .outcome(outcome)
+                .failureReason(failureReason)
                 .build();
     }
 }
