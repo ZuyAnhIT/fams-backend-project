@@ -98,6 +98,36 @@ PLAN_ENTERPRISE_ID=$(plan_id enterprise)
 echo "  trial=$PLAN_TRIAL_ID basic=$PLAN_BASIC_ID pro=$PLAN_PRO_ID enterprise=$PLAN_ENTERPRISE_ID"
 echo ""
 
+# ── Legacy plan (will be deactivated near the end, after 1 tenant subscribes to it) ──
+# Spec mục 1.2: "1 gói bị deactivate nhưng vẫn có tenant cũ đang dùng". Thực tế theo đúng
+# nghiệp vụ hệ thống này (Issue #8, PlanService.migrateTenantsOffPlan — KHÔNG cho phép tắt
+# gói còn tenant mà không chỉ định migrateToPlanId): deactivate legacy_basic sẽ tự động
+# chuyển Đại Dương sang gói basic, còn legacy_basic tự nó ở trạng thái isActive=false, 0
+# tenant — đây chính là luồng cần test (không phải "tenant vẫn kẹt ở gói cũ", hệ thống chủ
+# động migrate). Created fresh each run; 409 handles reruns.
+echo "Creating legacy plan (to be deactivated after 1 tenant is on it)..."
+_r=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/plans" \
+    -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" \
+    -d '{"name":"legacy_basic","displayName":"Legacy Basic (ngừng bán)","description":"Gói cũ đã ngừng bán cho khách hàng mới — chỉ còn áp dụng cho tenant đã đăng ký từ trước.","priceMonthly":9.99,"priceYearly":99.99,"sortOrder":99}')
+_s=$(echo "$_r" | tail -n 1); _b=$(echo "$_r" | head -n -1)
+if [ "$_s" -eq 201 ]; then
+    PLAN_LEGACY_ID=$(echo "$_b" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('data',{}).get('id',''))")
+    echo "  Created: legacy_basic (id=$PLAN_LEGACY_ID)"
+elif [ "$_s" -eq 409 ]; then
+    _plans2=$(curl -s "$BASE_URL/api/v1/plans?size=20&activeOnly=false" -H "Authorization: Bearer $TOKEN")
+    PLAN_LEGACY_ID=$(echo "$_plans2" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+items=d.get('data',{}).get('content',[])
+print(next((i['id'] for i in items if i['name']=='legacy_basic'),''))
+")
+    echo "  Exists: legacy_basic (id=$PLAN_LEGACY_ID)"
+else
+    PLAN_LEGACY_ID=""
+    echo "  ! Error creating legacy_basic plan — HTTP $_s ($_b)"
+fi
+echo ""
+
 # Fetch permission IDs grouped by resource once, up front — used by both the tenant-level
 # and platform-level custom-role helpers further down.
 _perms=$(curl -s "$BASE_URL/api/v1/permissions" -H "Authorization: Bearer $TOKEN")
@@ -159,6 +189,10 @@ mk_account "owner.saomai@gmail.com"     "Vũ Thị Mai"
 mk_account "owner.phuquy@gmail.com"     "Hoàng Văn Quý"
 mk_account "owner.tanphat@gmail.com"    "Ngô Thị Tân"
 mk_account "owner.viettin@gmail.com"    "Đặng Văn Tín"
+# 3 chủ sở hữu bổ sung — cho tenant rỗng / sắp hết hạn trial / đã hết hạn trial (spec mục 2.1)
+mk_account "owner.rongvang@gmail.com"   "Lê Văn Rồng"
+mk_account "owner.hoaphuong@gmail.com"  "Trần Thị Phượng"
+mk_account "owner.namviet@gmail.com"    "Nguyễn Văn Nam"
 echo ""
 
 # ── Tenant/Site/Shift/Employee/Workspace helpers ─────────────────────────────
@@ -304,14 +338,20 @@ print(match[0]['id'] if match else '')
     fi
 }
 
-# mk_workspace <tenant_id> <name> [type] [description] — "department" replaces
+# mk_workspace <tenant_id> <name> [type] [description] [parentId] — "department" replaces
 # the old standalone Department entity (consolidated into Workspace, see
-# docs/api/workspace-management-api.md section 4).
+# docs/api/workspace-management-api.md section 4). Optional [parentId] lets callers build a
+# 3rd nesting level (Công ty → Khối → Đội) instead of the flat 1-level parent/child used
+# elsewhere — see the "workspace tree" block per deep tenant below.
 mk_workspace() {
-    local tid="$1" name="$2" type="${3:-department}" desc="${4:-}"
+    local tid="$1" name="$2" type="${3:-department}" desc="${4:-}" parent="${5:-}"
     WORKSPACE_ID=""
     local r s b payload
-    payload=$(python3 -c "import json; print(json.dumps({'name':'$name','type':'$type','description':'$desc'}))")
+    if [ -n "$parent" ]; then
+        payload=$(python3 -c "import json; print(json.dumps({'name':'$name','type':'$type','description':'$desc','parentId':'$parent'}))")
+    else
+        payload=$(python3 -c "import json; print(json.dumps({'name':'$name','type':'$type','description':'$desc'}))")
+    fi
     r=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/tenants/$tid/workspaces" \
         -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" -d "$payload")
     s=$(echo "$r" | tail -n 1); b=$(echo "$r" | head -n -1)
@@ -395,14 +435,15 @@ mk_status() {
 }
 
 mk_assignment() {
-    local tid="$1" sid="$2" emp_id="$3" shift_id="$4" role="${5:-worker}" start="${6:-2026-01-01}"
+    local tid="$1" sid="$2" emp_id="$3" shift_id="$4" role="${5:-worker}" start="${6:-2026-01-01}" end="${7:-}"
     [ -z "$emp_id" ] || [ -z "$sid" ] && return
-    local shift_field=""
+    local shift_field="" end_field=""
     [ -n "$shift_id" ] && shift_field="\"shiftId\":\"$shift_id\","
+    [ -n "$end" ] && end_field="\"endDate\":\"$end\","
     local r s
     r=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/tenants/$tid/sites/$sid/assignments" \
         -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" \
-        -d "{\"employeeId\":\"$emp_id\",${shift_field}\"startDate\":\"$start\",\"role\":\"$role\"}")
+        -d "{\"employeeId\":\"$emp_id\",${shift_field}${end_field}\"startDate\":\"$start\",\"role\":\"$role\"}")
     s=$(echo "$r" | tail -n 1)
     if [ "$s" -eq 201 ]; then
         echo "      → Assigned (role=$role)"
@@ -451,6 +492,28 @@ print('yes' if any(i.get('ipAddress')=='$ip' for i in items) else 'no')
         echo "    ~ IP whitelist đã tồn tại: $ip"
     else
         echo "    ! Lỗi IP whitelist: $ip — HTTP $s"
+    fi
+}
+
+# mk_tenant_custom_role <tenant_id> <name> <desc> <resources_py_list> — moved up here (was
+# previously defined only in the "diversity" section further down, AFTER the 3 deep-tenant
+# blocks that need to call it — bash requires a function to be defined before first use, so
+# calling it from inside the Tenant 1/2/3 blocks silently failed with "command not found").
+mk_tenant_custom_role() {
+    local tenant_id="$1" name="$2" desc="$3" resources_py="$4"
+    [ -z "$tenant_id" ] && return
+    local ids payload r s b
+    ids=$(perm_ids_for "$resources_py")
+    payload=$(python3 -c "import json; print(json.dumps({'name':'$name','description':'$desc','tenantId':'$tenant_id','permissionIds':json.loads('$ids')}))")
+    r=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/roles" \
+        -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" -d "$payload")
+    s=$(echo "$r" | tail -n 1); b=$(echo "$r" | head -n -1)
+    if [ "$s" -eq 201 ]; then
+        echo "  + Role tùy chỉnh (tenant): $name"
+    elif [ "$s" -eq 409 ]; then
+        echo "  ~ Role tùy chỉnh đã tồn tại: $name"
+    else
+        echo "  ! Lỗi tạo role tùy chỉnh: $name — HTTP $s ($b)"
     fi
 }
 
@@ -528,6 +591,44 @@ mk_extra_employees() {
         email=$(echo "${ten}.${ho}${idx}@$(echo "$prefix" | tr '[:upper:]' '[:lower:]').vn" | tr -d ' ')
         mk_employee "{\"firstName\":\"$ten\",\"lastName\":\"$ho\",\"email\":\"$email\",\"employeeCode\":\"$code\",\"position\":\"$pos\",\"department\":\"$dept_name\",\"departmentId\":\"$wsid\",\"hiredDate\":\"2024-0$(( (i % 9) + 1 ))-01\",\"phone\":\"+8490${idx}${idx}0000\"}" "$ten $ho ($pos) [auto]"
         [ -n "$EMP_ID" ] && [ -n "$sid" ] && mk_assignment "$tid" "$sid" "$EMP_ID" "$shid" "worker" "2026-01-01"
+    done
+}
+
+# mk_employee_group <tenant_id> <workspace_id> <dept_name> <site_id> <shift_id> <code_prefix>
+#                    <start_index> <count> <position_label> <assignment_role> <hired_pattern>
+# Like mk_extra_employees but with a FIXED position label + assignment role + hire-date pattern
+# per call, so callers can build up the "10 nhóm nghiệp vụ" mix required by
+# docs/testing/sample-data-requirements-v2.md mục 6.1 by calling this once per nhóm, instead of
+# 1 generic pool that can't express "quản lý công trình" vs "nhân viên thời vụ" as distinct
+# groups. hired_pattern: "established" (2021-2023, lâu năm) | "probation" (thử việc, hired
+# trong ~45 ngày gần nhất) | "seasonal" (thời vụ, hired gần đây + assignment có endDate ngắn
+# hạn ~60-90 ngày, KHÔNG phải 1 status riêng — hệ thống không có status "thời vụ", chỉ mô
+# phỏng qua position + hạn phân công ngắn, xem sample-data-requirements-v2.md mục 6.1).
+mk_employee_group() {
+    local tid="$1" wsid="$2" dept_name="$3" sid="$4" shid="$5" prefix="$6" start_idx="$7" count="$8"
+    local position="$9" arole="${10}" hired_pattern="${11}"
+    local i idx ho ten code email hired end_field=""
+    for i in $(seq 0 $((count - 1))); do
+        idx=$((start_idx + i))
+        ho="${VN_HO[$((RANDOM % ${#VN_HO[@]}))]}"
+        ten="${VN_TEN[$((RANDOM % ${#VN_TEN[@]}))]}"
+        code=$(printf "%s-%03d" "$prefix" "$idx")
+        email=$(echo "${ten}.${ho}${idx}@$(echo "$prefix" | tr '[:upper:]' '[:lower:]').vn" | tr -d ' ')
+        case "$hired_pattern" in
+            probation) hired=$(date -u -d "-$(( (idx % 40) + 5 )) days" +%F 2>/dev/null || date -u -v-$(( (idx % 40) + 5 ))d +%F) ;;
+            seasonal)  hired=$(date -u -d "-$(( (idx % 20) + 3 )) days" +%F 2>/dev/null || date -u -v-$(( (idx % 20) + 3 ))d +%F) ;;
+            *)         hired="2022-0$(( (i % 9) + 1 ))-01" ;;
+        esac
+        mk_employee "{\"firstName\":\"$ten\",\"lastName\":\"$ho\",\"email\":\"$email\",\"employeeCode\":\"$code\",\"position\":\"$position\",\"department\":\"$dept_name\",\"departmentId\":\"$wsid\",\"hiredDate\":\"$hired\",\"phone\":\"+8490${idx}${idx}0000\"}" "$ten $ho ($position) [auto]"
+        if [ -n "$EMP_ID" ] && [ -n "$sid" ]; then
+            if [ "$hired_pattern" = "seasonal" ]; then
+                local end_date
+                end_date=$(date -u -d "+$(( (idx % 30) + 60 )) days" +%F 2>/dev/null || date -u -v+$(( (idx % 30) + 60 ))d +%F)
+                mk_assignment "$tid" "$sid" "$EMP_ID" "$shid" "$arole" "$hired" "$end_date"
+            else
+                mk_assignment "$tid" "$sid" "$EMP_ID" "$shid" "$arole" "2026-01-01"
+            fi
+        fi
     done
 }
 
@@ -682,6 +783,35 @@ if [ -n "$HL_ID" ]; then
 
     echo "  Random check config:"
     mk_rand_config "$HL_ID" "location_only" "2" "300"
+
+    # Bổ sung độ sâu (spec dữ liệu mẫu mục 2.3): thêm 15 nhân viên nữa để đủ 10-15 mẫu/vai
+    # trò khi cộng với 15 người ở trên (tổng ~30), 1 nhóm con cấp 3 trong workspace tree,
+    # và 1 lời mời còn "pending" thật (2 lời mời phía trên đã bị hủy ngay — thiếu case còn
+    # hiệu lực để tester tự bấm accept).
+    echo "  Nhân viên bổ sung (đủ độ sâu 10-15 mẫu/vai trò):"
+    # Đủ 10 nhóm nghiệp vụ (sample-data-requirements-v2.md mục 6.1) — thay cho pool vị trí
+    # chung chung trước đây. 15 người đặt tên tay ở trên đã phủ Admin/Nhân sự/Trưởng phòng/Kỹ
+    # thuật/An toàn, phần dưới bổ sung đúng các nhóm còn thiếu.
+    mk_employee_group "$HL_ID" "$HL_WS_VH" "Vận hành" "$HL_HN" "$HL_HN_SANG" "HL-QLCT" 1 2 "Quản lý công trình" "supervisor" "established"
+    mk_employee_group "$HL_ID" "$HL_WS_KT" "Kỹ thuật" "$HL_HCM" "$HL_HCM_SANG" "HL-TBP" 1 2 "Trưởng bộ phận thi công" "supervisor" "established"
+    mk_employee_group "$HL_ID" "$HL_WS_AT" "An toàn & Chất lượng" "$HL_DN" "$HL_DN_TC" "HL-GS" 1 3 "Giám sát công trình" "supervisor" "established"
+    mk_employee_group "$HL_ID" "$HL_WS_KT" "Kỹ thuật" "$HL_HN" "$HL_HN_SANG" "HL-CT" 1 8 "Công nhân xây dựng" "worker" "established"
+    HL_MULTISITE_E="$EMP_ID"
+    mk_employee_group "$HL_ID" "$HL_WS_TC" "Tài chính - Kế toán" "$HL_HCM" "$HL_HCM_SANG" "HL-VP" 1 4 "Nhân viên văn phòng" "worker" "established"
+    mk_employee_group "$HL_ID" "$HL_WS_VH" "Vận hành" "$HL_HN" "$HL_HN_CHIEU" "HL-TV" 1 3 "Nhân viên thời vụ" "worker" "seasonal"
+    mk_employee_group "$HL_ID" "$HL_WS_KT" "Kỹ thuật" "$HL_HN" "$HL_HN_SANG" "HL-TT" 1 3 "Nhân viên thử việc" "worker" "probation"
+
+    echo "  Workspace lồng 3 cấp (Công ty → Đội → Nhóm) — 3 nhánh:"
+    mk_workspace "$HL_ID" "Nhóm Kỹ thuật Ca sáng" "team" "Nhóm nhỏ trong Đội Kỹ thuật Hà Nội, trực ca sáng" "$HL_WS_TEAM_HN"
+    mk_workspace "$HL_ID" "Nhóm Hành chính Lễ tân" "team" "Nhóm nhỏ trong Đội Hành chính TP.HCM" "$HL_WS_TEAM_HCM"
+    mk_workspace "$HL_ID" "Nhóm Cơ điện M&E" "team" "Nhóm nhỏ trong Đội Cơ điện" "$HL_WS_TEAM_CD"
+
+    echo "  Nhân viên làm việc tại NHIỀU công trình cùng lúc (spec v2 mục 6.3):"
+    [ -n "$HL_MULTISITE_E" ] && [ -n "$HL_HCM" ] && [ -n "$HL_HCM_SANG" ] && \
+        mk_assignment "$HL_ID" "$HL_HCM" "$HL_MULTISITE_E" "$HL_HCM_SANG" "worker" "2026-01-01"
+
+    echo "  Lời mời còn hiệu lực (chưa accept/hủy):"
+    mk_invitation "$HL_ID" "phuong.dang.choloi@hoanglong.vn" "Phượng" "Đặng Thị" "+84906111115"
 fi
 echo ""
 
@@ -799,7 +929,34 @@ if [ -n "$BM_ID" ]; then
     mk_cancel_invitation "$BM_ID" "$HUNG_INVITATION_ID"
 
     echo "  Random check config:"
-    mk_rand_config "$BM_ID" "location_only" "3" "240"
+    mk_rand_config "$BM_ID" "location_face" "3" "240"
+
+    echo "  Nhân viên bổ sung (đủ độ sâu 10-15 mẫu/vai trò):"
+    mk_employee_group "$BM_ID" "$BM_WS_SX" "Sản xuất" "$BM_PLANT" "$BM_PLANT_NGAY" "BM-QLCT" 1 2 "Quản lý công trình" "supervisor" "established"
+    mk_employee_group "$BM_ID" "$BM_WS_BT" "Bảo trì" "$BM_PLANT" "$BM_PLANT_NGAY" "BM-TBP" 1 2 "Trưởng bộ phận sản xuất" "supervisor" "established"
+    mk_employee_group "$BM_ID" "$BM_WS_AT" "An toàn" "$BM_WH_A" "$BM_WH_NGAY" "BM-GS" 1 3 "Giám sát công trình" "supervisor" "established"
+    mk_employee_group "$BM_ID" "$BM_WS_SX" "Sản xuất" "$BM_PLANT" "$BM_PLANT_NGAY" "BM-CT" 1 8 "Công nhân vận hành máy" "worker" "established"
+    BM_MULTISITE_E="$EMP_ID"
+    mk_employee_group "$BM_ID" "$BM_WS_KHO" "Kho vận" "$BM_WH_A" "$BM_WH_NGAY" "BM-VP" 1 4 "Nhân viên văn phòng" "worker" "established"
+    mk_employee_group "$BM_ID" "$BM_WS_SX" "Sản xuất" "$BM_PLANT" "$BM_PLANT_TOI" "BM-TV" 1 3 "Nhân viên thời vụ" "worker" "seasonal"
+    mk_employee_group "$BM_ID" "$BM_WS_SX" "Sản xuất" "$BM_PLANT" "$BM_PLANT_NGAY" "BM-TT" 1 3 "Nhân viên thử việc" "worker" "probation"
+
+    echo "  Workspace lồng 3 cấp (Công ty → Đội → Nhóm) — 3 nhánh:"
+    mk_workspace "$BM_ID" "Nhóm Vận hành Máy CNC" "team" "Nhóm nhỏ trong Đội Sản xuất Ca ngày" "$BM_WS_TEAM_A"
+    mk_workspace "$BM_ID" "Nhóm Xuất kho" "team" "Nhóm nhỏ trong Đội Kho vận" "$BM_WS_TEAM_KHO"
+    mk_workspace "$BM_ID" "Nhóm Bảo trì Điện" "team" "Nhóm nhỏ trong Đội Bảo trì Cơ điện" "$BM_WS_TEAM_BT"
+
+    echo "  Role tùy chỉnh cấp tenant:"
+    mk_tenant_custom_role "$BM_ID" "Trưởng ca đêm" \
+        "Vai trò tùy chỉnh của Bình Minh — chỉ xem chấm công và duyệt Face ID ca đêm, không có quyền xóa nhân viên/site" \
+        "['checkins','face_id']"
+
+    echo "  Nhân viên làm việc tại NHIỀU công trình cùng lúc (spec v2 mục 6.3):"
+    [ -n "$BM_MULTISITE_E" ] && [ -n "$BM_WH_A" ] && [ -n "$BM_WH_NGAY" ] && \
+        mk_assignment "$BM_ID" "$BM_WH_A" "$BM_MULTISITE_E" "$BM_WH_NGAY" "worker" "2026-01-01"
+
+    echo "  Lời mời còn hiệu lực (chưa accept/hủy):"
+    mk_invitation "$BM_ID" "khoi.trinh.choloi@binhminh.vn" "Khôi" "Trịnh Văn" "+84906222223"
 fi
 echo ""
 
@@ -927,7 +1084,29 @@ if [ -n "$PN_ID" ]; then
     mk_cancel_invitation "$PN_ID" "$PHONG_INVITATION_ID"
 
     echo "  Random check config:"
-    mk_rand_config "$PN_ID" "location_only" "2" "360"
+    mk_rand_config "$PN_ID" "location_face_liveness" "2" "360"
+
+    echo "  Nhân viên bổ sung (đủ độ sâu 10-15 mẫu/vai trò):"
+    mk_employee_group "$PN_ID" "$PN_WS_DH" "Điều hành" "$PN_N" "$PN_N_SANG" "PN-QLCT" 1 2 "Quản lý công trình" "supervisor" "established"
+    mk_employee_group "$PN_ID" "$PN_WS_XE" "Quản lý Đội xe" "$PN_S" "$PN_S_SANG" "PN-TBP" 1 2 "Trưởng bộ phận vận chuyển" "supervisor" "established"
+    mk_employee_group "$PN_ID" "$PN_WS_KHO" "Kho vận" "$PN_HUB" "$PN_HUB_TC" "PN-GS" 1 3 "Giám sát công trình" "supervisor" "established"
+    mk_employee_group "$PN_ID" "$PN_WS_KHO" "Kho vận" "$PN_N" "$PN_N_SANG" "PN-CT" 1 8 "Nhân viên kho" "worker" "established"
+    PN_MULTISITE_E="$EMP_ID"
+    mk_employee_group "$PN_ID" "$PN_WS_NS" "Nhân sự" "$PN_S" "$PN_S_SANG" "PN-VP" 1 4 "Nhân viên văn phòng" "worker" "established"
+    mk_employee_group "$PN_ID" "$PN_WS_KHO" "Kho vận" "$PN_N" "$PN_N_CHIEU" "PN-TV" 1 3 "Nhân viên thời vụ" "worker" "seasonal"
+    mk_employee_group "$PN_ID" "$PN_WS_XE" "Quản lý Đội xe" "$PN_S" "$PN_S_SANG" "PN-TT" 1 3 "Nhân viên thử việc" "worker" "probation"
+
+    echo "  Workspace lồng 3 cấp (Công ty → Đội → Nhóm) — 3 nhánh:"
+    mk_workspace "$PN_ID" "Nhóm Điều phối Tuyến Bắc" "team" "Nhóm nhỏ trong Đội Kho Hà Nội" "$PN_WS_TEAM_HN"
+    mk_workspace "$PN_ID" "Nhóm Điều phối Tuyến Nam" "team" "Nhóm nhỏ trong Đội Kho TP.HCM" "$PN_WS_TEAM_HCM"
+    mk_workspace "$PN_ID" "Nhóm Lái xe đường dài Bắc-Nam" "team" "Nhóm nhỏ trong Đội xe đường dài" "$PN_WS_TEAM_XE"
+
+    echo "  Nhân viên làm việc tại NHIỀU công trình cùng lúc (spec v2 mục 6.3):"
+    [ -n "$PN_MULTISITE_E" ] && [ -n "$PN_S" ] && [ -n "$PN_S_SANG" ] && \
+        mk_assignment "$PN_ID" "$PN_S" "$PN_MULTISITE_E" "$PN_S_SANG" "worker" "2026-01-01"
+
+    echo "  Lời mời còn hiệu lực (chưa accept/hủy):"
+    mk_invitation "$PN_ID" "hoa.le.choloi@phuongnam.vn" "Hoa" "Lê Thị" "+84906333333"
 fi
 echo ""
 
@@ -1030,24 +1209,6 @@ print(items[0]['id'] if items else '')
     echo "  + Hủy 1 phân công ($label)"
 }
 
-mk_tenant_custom_role() {
-    local tenant_id="$1" name="$2" desc="$3" resources_py="$4"
-    [ -z "$tenant_id" ] && return
-    local ids payload r s b
-    ids=$(perm_ids_for "$resources_py")
-    payload=$(python3 -c "import json; print(json.dumps({'name':'$name','description':'$desc','tenantId':'$tenant_id','permissionIds':json.loads('$ids')}))")
-    r=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/roles" \
-        -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" -d "$payload")
-    s=$(echo "$r" | tail -n 1); b=$(echo "$r" | head -n -1)
-    if [ "$s" -eq 201 ]; then
-        echo "  + Role tùy chỉnh (tenant): $name"
-    elif [ "$s" -eq 409 ]; then
-        echo "  ~ Role tùy chỉnh đã tồn tại: $name"
-    else
-        echo "  ! Lỗi tạo role tùy chỉnh: $name — HTTP $s ($b)"
-    fi
-}
-
 echo "  -- Trạng thái inactive/cancelled (mỗi tenant chính 1 workspace + 1 ca + 1 site + 1 phân công hủy) --"
 mk_deactivate_workspace "$HL_ID" "Pháp chế"
 mk_deactivate_shift "$HL_ID" "$HL_DN" "Ca mở rộng"
@@ -1064,13 +1225,56 @@ mk_deactivate_shift "$PN_ID" "$PN_HUB" "Ca mở rộng"
 mk_deactivate_site "$PN_ID" "Kho vận Phương Nam - Nam Định"
 mk_cancel_one_assignment "$PN_ID" "$PN_S" "Phương Nam / Kho Nam"
 
+echo "  -- Ca làm việc bổ sung (đa dạng loại ca — spec mục 2.4) --"
+# Ca xoay ngắn 6h — khác biệt với các ca 7-9h hiện có, mô phỏng site vận hành 3 ca/ngày.
+mk_shift "$BM_ID" "$BM_PLANT" "Ca ngắn (6h)" "10:00" "16:00" "false" "false"
+# Dung sai check-in sớm/check-out muộn RỘNG hẳn (so với 15/30 phút mặc định ở các ca có OT) —
+# test rõ 2 thái cực dung sai khác nhau, không chỉ có/không có OT.
+if [ -n "$SHIFT_ID" ]; then
+    curl -s -o /dev/null -X PUT "$BASE_URL/api/v1/tenants/$BM_ID/sites/$BM_PLANT/shifts/$SHIFT_ID/ot-config" \
+        -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" \
+        -d '{"allowOvertime":false,"earlyCheckinMinutes":45,"lateCheckoutMinutes":5}'
+    echo "  + Ca ngắn (6h) — dung sai vào sớm rộng (45p) / ra muộn hẹp (5p)"
+fi
+
+echo "  -- Phân công đã hết hạn TỰ NHIÊN (endDate đã qua, KHÔNG chủ động hủy — spec mục 2.4) --"
+# Khác về nghiệp vụ với mk_cancel_one_assignment ở trên (status=cancelled): đây là status vẫn
+# 'active' trong DB nhưng endDate đã qua — test đúng logic "chỉ tính assignment còn hiệu lực
+# tại thời điểm chấm công", không lẫn với case bị hủy chủ động. Dùng site KHÁC với site hiện
+# tại của nhân viên (constraint hệ thống là 1 assignment active/nhân viên/site — cùng site sẽ
+# bị 409 vì nhân viên đã có assignment hiện tại ở đó rồi).
+[ -n "$HL_E11" ] && [ -n "$HL_DN" ] && [ -n "$HL_DN_TC" ] && \
+    mk_assignment "$HL_ID" "$HL_DN" "$HL_E11" "$HL_DN_TC" "worker" "2025-06-01" "2025-12-31"
+[ -n "$BM_E6" ] && [ -n "$BM_WH_A" ] && [ -n "$BM_WH_NGAY" ] && \
+    mk_assignment "$BM_ID" "$BM_WH_A" "$BM_E6" "$BM_WH_NGAY" "worker" "2025-06-01" "2025-12-31"
+[ -n "$PN_E6" ] && [ -n "$PN_S" ] && [ -n "$PN_S_SANG" ] && \
+    mk_assignment "$PN_ID" "$PN_S" "$PN_E6" "$PN_S_SANG" "worker" "2025-06-01" "2025-12-31"
+
 echo "  -- Role tùy chỉnh cấp tenant (khác role hệ thống mặc định) --"
 mk_tenant_custom_role "$HL_ID" "Kế toán trưởng" \
     "Vai trò tùy chỉnh của Hoàng Long — chỉ xem nhân sự và workspace, không có quyền sửa" \
     "['employees','workspaces']"
+mk_tenant_custom_role "$HL_ID" "Giám sát an toàn công trường" \
+    "Vai trò tùy chỉnh của Hoàng Long — xem chấm công và xử lý vi phạm, không cấu hình hệ thống" \
+    "['checkins','violations']"
+mk_tenant_custom_role "$HL_ID" "Quản lý kho vật tư" \
+    "Vai trò tùy chỉnh của Hoàng Long — quản lý công trình/vùng làm việc, không có quyền nhân sự" \
+    "['sites','geofences']"
 mk_tenant_custom_role "$PN_ID" "Điều phối viên Kho" \
     "Vai trò tùy chỉnh của Phương Nam — xem/sửa phân công và ca làm việc tại kho" \
     "['assignments','shifts']"
+mk_tenant_custom_role "$PN_ID" "Quản lý đội xe" \
+    "Vai trò tùy chỉnh của Phương Nam — quản lý phân công và công trình cho đội xe" \
+    "['assignments','sites']"
+mk_tenant_custom_role "$PN_ID" "Cán bộ báo cáo" \
+    "Vai trò tùy chỉnh của Phương Nam — chỉ xem báo cáo, không có quyền vận hành khác" \
+    "['reports']"
+mk_tenant_custom_role "$BM_ID" "Trưởng ca sản xuất" \
+    "Vai trò tùy chỉnh của Bình Minh — xem phân công và bảng công, không cấu hình hệ thống" \
+    "['assignments','attendance']"
+mk_tenant_custom_role "$BM_ID" "Kiểm soát viên chất lượng" \
+    "Vai trò tùy chỉnh của Bình Minh — xem chấm công và xử lý vi phạm chất lượng" \
+    "['checkins','violations']"
 
 echo "  -- Role giới hạn theo site (site-scope RBAC — cần chạy sau khi seed_historical.sql đã tạo login) --"
 echo "     (Sẽ áp dụng ở bước cuối, sau khi seed_historical.sql tạo tài khoản đăng nhập cho nhân viên)"
@@ -1267,8 +1471,10 @@ mk_light_tenant "Công ty Khai khoáng Phú Quý" "phu-quy-mining" "owner.phuquy
     "Mỏ Phú Quý" "PQ-QN" "Xã Đại Sơn, Quảng Ninh" "21.0060" "107.2920" \
     "Khai thác" "An toàn Mỏ" 6 "PQ"
 
+# Trên gói legacy_basic (sắp bị deactivate ở cuối script) — test "tenant cũ vẫn chạy bình
+# thường sau khi gói ngừng bán cho khách hàng mới" (mục 1.2 của spec dữ liệu mẫu).
 mk_light_tenant "Công ty Thủy sản Đại Dương" "dai-duong-fishery" "owner.phuquy@gmail.com" \
-    "Thủy sản" "$PLAN_BASIC_ID" "basic" \
+    "Thủy sản" "$PLAN_LEGACY_ID" "legacy_basic" \
     "Xưởng chế biến Đại Dương" "DD-CT" "KCN Trà Nóc, Cần Thơ" "10.0490" "105.7520" \
     "Chế biến" "Kiểm định" 5 "DD"
 
@@ -1296,6 +1502,57 @@ if [ -n "$VT_ID" ]; then
     TENANT_ID="$VT_ID"
     echo "=== Việt Tín: đặt subscription CANCELLED (đa dạng trạng thái) ==="
     mk_cancel_subscription
+    echo ""
+fi
+
+# ── 3 tenant bổ sung: rỗng / trial sắp hết hạn / trial đã hết hạn (spec mục 2.1) ──
+
+echo "=== Tenant: Công ty CP Rồng Vàng (rong-vang-holdings, MỚI TẠO — rỗng hoàn toàn) ==="
+mk_tenant "Công ty CP Rồng Vàng" "rong-vang-holdings" "owner.rongvang@gmail.com" \
+    ',"industry":"Đầu tư","timezone":"Asia/Ho_Chi_Minh","countryCode":"VN"' "Đầu tư"
+echo "  (Cố ý KHÔNG tạo thêm site/shift/workspace/employee nào — test empty-state của mọi màn danh sách)"
+echo ""
+
+echo "=== Tenant: Công ty TNHH Hoa Phượng (hoa-phuong-trading, TRIAL sắp hết hạn) ==="
+mk_tenant "Công ty TNHH Hoa Phượng" "hoa-phuong-trading" "owner.hoaphuong@gmail.com" \
+    ',"industry":"Thương mại","timezone":"Asia/Ho_Chi_Minh","countryCode":"VN"' "Thương mại"
+HP_ID="$TENANT_ID"
+if [ -n "$HP_ID" ]; then
+    [ -n "$PLAN_TRIAL_ID" ] && mk_subscription "$PLAN_TRIAL_ID" "trial" "MONTHLY" "TRIAL"
+    mk_workspace "$HP_ID" "Kinh doanh" "department" "Phòng kinh doanh"
+    mk_site "$HP_ID" "Văn phòng Hoa Phượng" "HP-HCM" "5 Lê Duẩn, Quận 1, TP.HCM" "10.7820" "106.6950" "Asia/Ho_Chi_Minh"
+    docker exec -i "$DB_CONTAINER" psql -U "$DB_USER_ENV" -d "$DB_NAME_ENV" -c \
+        "UPDATE tenant_subscriptions SET expires_at = NOW() + INTERVAL '2 days' WHERE tenant_id = '$HP_ID';" >/dev/null 2>&1
+    echo "  → Trial hết hạn sau 2 ngày nữa (test cảnh báo sắp hết hạn)"
+fi
+echo ""
+
+echo "=== Tenant: Công ty TNHH Nam Việt (nam-viet-services, TRIAL ĐÃ hết hạn, chưa nâng cấp) ==="
+mk_tenant "Công ty TNHH Nam Việt" "nam-viet-services" "owner.namviet@gmail.com" \
+    ',"industry":"Dịch vụ","timezone":"Asia/Ho_Chi_Minh","countryCode":"VN"' "Dịch vụ"
+NV_ID="$TENANT_ID"
+if [ -n "$NV_ID" ]; then
+    [ -n "$PLAN_TRIAL_ID" ] && mk_subscription "$PLAN_TRIAL_ID" "trial" "MONTHLY" "TRIAL"
+    mk_workspace "$NV_ID" "Vận hành" "department" "Phòng vận hành"
+    mk_site "$NV_ID" "Văn phòng Nam Việt" "NV-HCM" "20 Nguyễn Trãi, Quận 5, TP.HCM" "10.7550" "106.6720" "Asia/Ho_Chi_Minh"
+    docker exec -i "$DB_CONTAINER" psql -U "$DB_USER_ENV" -d "$DB_NAME_ENV" -c \
+        "UPDATE tenant_subscriptions SET expires_at = NOW() - INTERVAL '5 days' WHERE tenant_id = '$NV_ID';" >/dev/null 2>&1
+    echo "  → Trial đã hết hạn 5 ngày trước, chưa nâng cấp gói (test khóa tính năng đúng lúc)"
+fi
+echo ""
+
+# ── Deactivate the legacy plan (Đại Dương was just put on it above) ─────────
+if [ -n "$PLAN_LEGACY_ID" ] && [ -n "$PLAN_BASIC_ID" ]; then
+    echo "=== Deactivate legacy_basic (auto-migrates Đại Dương → basic, Issue #8) ==="
+    _r=$(curl -s -w "\n%{http_code}" -X PATCH "$BASE_URL/api/v1/plans/$PLAN_LEGACY_ID" \
+        -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" \
+        -d "{\"isActive\":false,\"migrateToPlanId\":\"$PLAN_BASIC_ID\"}")
+    _s=$(echo "$_r" | tail -n 1)
+    if [ "$_s" -eq 200 ]; then
+        echo "  legacy_basic deactivated, tenant(s) migrated to basic — OK"
+    else
+        echo "  ~ Deactivate legacy_basic — HTTP $_s (đã tắt từ lần chạy trước hoặc không có tenant nào cần chuyển)"
+    fi
     echo ""
 fi
 
@@ -1400,6 +1657,139 @@ mk_platform_staff "baomat1.nentang@fams.com"  "Nga"   "Đỗ Thị"        "PLAT
 mk_platform_staff "kythuat1.nentang@fams.com" "Hiếu"  "Ngô Văn"       "PLATFORM_STAFF"
 mk_platform_staff "kythuat2.nentang@fams.com" "Diệu"  "Dương Thị"     "PLATFORM_STAFF"
 mk_platform_staff "qlsp1.nentang@fams.com"    "Việt"  "Cao Văn"       "PLATFORM_STAFF"
+# Bổ sung (spec dữ liệu mẫu mục 1.1): nâng >15 người, đảm bảo mỗi platform-role tùy chỉnh
+# có >=2 người (trước đó chỉ có 1/role — không đủ để test "thu hồi role của 1 người không
+# ảnh hưởng người còn lại cùng role").
+mk_platform_staff "hotro4.nentang@fams.com"   "Phượng" "Lý Thị"       "PLATFORM_SUPPORT_LEAD"
+mk_platform_staff "billing2.nentang@fams.com" "Toàn"   "Đinh Văn"     "PLATFORM_BILLING_OPS"
+mk_platform_staff "baomat2.nentang@fams.com"  "Ánh"    "Trịnh Thị"    "PLATFORM_SECURITY_AUDITOR"
+mk_platform_staff "kythuat3.nentang@fams.com" "Sang"   "Huỳnh Văn"    "PLATFORM_STAFF"
+echo ""
+
+echo "=== Vô hiệu hóa 1 tài khoản nhân viên nền tảng (test mất quyền truy cập giữa chừng) ==="
+docker exec -i "$DB_CONTAINER" psql -U "$DB_USER_ENV" -d "$DB_NAME_ENV" -c \
+    "UPDATE users SET is_active = FALSE WHERE email = 'kythuat3.nentang@fams.com';" >/dev/null 2>&1
+echo "  kythuat3.nentang@fams.com → is_active=false"
+echo ""
+
+# ── Ma trận trạng thái xác thực tài khoản (spec dữ liệu mẫu mục 1.5) ─────────
+# 7 case cụ thể, mỗi case phục vụ 1 mục đích test riêng. Tất cả đứng độc lập với
+# tenant/employee — không phụ thuộc dữ liệu lịch sử phía dưới.
+
+echo "=== Ma trận xác thực tài khoản (email/phone chưa xác thực, khóa, 2FA, Google, session cũ) ==="
+
+# 1) Chưa xác thực email — đăng ký nhưng KHÔNG tự flip email_verified (khác mk_account).
+mk_account_unverified_email() {
+    local email="$1" name="$2"
+    local existing
+    existing=$(docker exec -i "$DB_CONTAINER" psql -U "$DB_USER_ENV" -d "$DB_NAME_ENV" -t -c \
+        "SELECT id FROM users WHERE email='$email';" 2>/dev/null | tr -d ' \n')
+    if [ -n "$existing" ]; then echo "  ~ Đã tồn tại (email chưa xác thực): $email"; return; fi
+    local payload r s
+    payload=$(python3 -c "import json; print(json.dumps({'email':'$email','password':'$DEFAULT_PASSWORD','displayName':'$name'}))")
+    r=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/auth/register" \
+        -H "Content-Type: application/json" -d "$payload")
+    s=$(echo "$r" | tail -n 1)
+    if [ "$s" -eq 201 ]; then
+        echo "  + Email CHƯA xác thực: $email (đăng nhập sẽ bị chặn — đúng nghiệp vụ)"
+    else
+        echo "  ! Lỗi tạo tài khoản chưa xác thực email: $email — HTTP $s"
+    fi
+}
+mk_account_unverified_email "chuaxacthucmail1@gmail.com" "Đặng Thị Chưa Xác Thực"
+mk_account_unverified_email "chuaxacthucmail2@gmail.com" "Vũ Văn Chưa Xác Thực"
+
+# 2) Chưa xác thực số điện thoại — tài khoản email đã verify bình thường, có gắn phone
+#    nhưng phone_verified=false (đăng nhập email/password vẫn hoạt động bình thường).
+mk_account "chuaxacthucphone1@gmail.com" "Bùi Thị Chưa Xác Thực SĐT"
+mk_account "chuaxacthucphone2@gmail.com" "Ngô Văn Chưa Xác Thực SĐT"
+docker exec -i "$DB_CONTAINER" psql -U "$DB_USER_ENV" -d "$DB_NAME_ENV" -c "
+UPDATE users SET phone = '+84907000001', phone_verified = FALSE WHERE email = 'chuaxacthucphone1@gmail.com';
+UPDATE users SET phone = '+84907000002', phone_verified = FALSE WHERE email = 'chuaxacthucphone2@gmail.com';
+" >/dev/null 2>&1
+echo "  + SĐT CHƯA xác thực: chuaxacthucphone1@gmail.com, chuaxacthucphone2@gmail.com"
+
+# 3) Tài khoản bị khóa do đăng nhập sai quá 5 lần (checklist #14).
+mk_account "taikhoanbikhoa@gmail.com" "Hồ Thị Bị Khóa"
+docker exec -i "$DB_CONTAINER" psql -U "$DB_USER_ENV" -d "$DB_NAME_ENV" -c "
+UPDATE users SET failed_login_attempts = 5, locked_until = NOW() + INTERVAL '60 minutes'
+WHERE email = 'taikhoanbikhoa@gmail.com';
+" >/dev/null 2>&1
+echo "  + Tài khoản ĐANG BỊ KHÓA (mở lại sau 60 phút, hoặc qua reset-password): taikhoanbikhoa@gmail.com"
+
+# 4) Đăng nhập qua Google — không có mật khẩu thật, chỉ có google_id.
+docker exec -i "$DB_CONTAINER" psql -U "$DB_USER_ENV" -d "$DB_NAME_ENV" -c "
+INSERT INTO users (id, email, password_hash, display_name, is_active, email_verified, is_platform_admin, google_id, created_at, updated_at)
+SELECT gen_random_uuid(), 'dangnhapgoogle@gmail.com', NULL, 'Mai Văn Đăng Nhập Google', TRUE, TRUE, FALSE,
+       'demo-google-sub-id-0001', NOW() - '90 days'::INTERVAL, NOW()
+WHERE NOT EXISTS (SELECT 1 FROM users WHERE email = 'dangnhapgoogle@gmail.com');
+" >/dev/null 2>&1
+echo "  + Tài khoản Google-only (không có mật khẩu): dangnhapgoogle@gmail.com (google_id giả — không login thật qua Google được, chỉ để test dữ liệu/hiển thị)"
+
+# 5) 2 tài khoản đã bật TOTP 2FA thật — dùng chính flow API + pyotp để sinh mã hợp lệ,
+#    nên bí danh (manualEntryKey) in ra dưới đây NẠP ĐƯỢC vào Google Authenticator/Authy
+#    thật để tự test đăng nhập có 2FA (checklist #12, #13) — không phải dữ liệu giả tĩnh.
+mk_totp_account() {
+    local email="$1" name="$2"
+    mk_account "$email" "$name"
+    # Idempotency: once TOTP is enabled, plain /auth/login no longer returns a full accessToken
+    # (it returns a pendingToken instead, correctly gating on the 2FA code) — so re-running this
+    # helper on a rerun would otherwise misread that as a login failure. Check the DB directly
+    # first and skip if already enabled, same pattern as mk_account's own pre-check.
+    local already_enabled
+    already_enabled=$(docker exec -i "$DB_CONTAINER" psql -U "$DB_USER_ENV" -d "$DB_NAME_ENV" -t -c \
+        "SELECT totp_enabled FROM users WHERE email='$email';" 2>/dev/null | tr -d ' \n')
+    if [ "$already_enabled" = "t" ]; then
+        echo "  ~ TOTP đã bật từ trước: $email"
+        return
+    fi
+    local login_r login_s login_b own_token
+    login_r=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/auth/login" \
+        -H "Content-Type: application/json" -d "{\"identifier\":\"$email\",\"password\":\"$DEFAULT_PASSWORD\"}")
+    login_s=$(echo "$login_r" | tail -n 1); login_b=$(echo "$login_r" | head -n -1)
+    [ "$login_s" -ne 200 ] && { echo "  ! Không đăng nhập được để bật TOTP: $email"; return; }
+    own_token=$(echo "$login_b" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('data',{}).get('accessToken',''))")
+    local setup_r setup_s setup_b setup_token secret
+    setup_r=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/auth/totp/setup" -H "Authorization: Bearer $own_token")
+    setup_s=$(echo "$setup_r" | tail -n 1); setup_b=$(echo "$setup_r" | head -n -1)
+    if [ "$setup_s" -eq 409 ]; then echo "  ~ TOTP đã bật từ trước: $email"; return; fi
+    [ "$setup_s" -ne 200 ] && { echo "  ! Lỗi TOTP setup: $email — HTTP $setup_s"; return; }
+    setup_token=$(echo "$setup_b" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('data',{}).get('setupToken',''))")
+    secret=$(echo "$setup_b" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('data',{}).get('manualEntryKey',''))")
+    local code
+    code=$(python3 -c "import pyotp; print(pyotp.TOTP('$secret').now())")
+    local verify_r verify_s verify_b
+    verify_r=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/auth/totp/verify" \
+        -H "Content-Type: application/json" -H "Authorization: Bearer $own_token" \
+        -d "{\"setupToken\":\"$setup_token\",\"code\":\"$code\"}")
+    verify_s=$(echo "$verify_r" | tail -n 1); verify_b=$(echo "$verify_r" | head -n -1)
+    if [ "$verify_s" -eq 200 ]; then
+        local backup_codes
+        backup_codes=$(echo "$verify_b" | python3 -c "import json,sys; d=json.load(sys.stdin); print(', '.join(d.get('data',{}).get('backupCodes',[])))")
+        echo "  + TOTP 2FA đã bật thật: $email — secret (nạp vào Authenticator app): $secret"
+        echo "      backup codes (dùng 1 lần, lưu lại nếu cần test /login/totp bằng backup code): $backup_codes"
+    else
+        echo "  ! Lỗi TOTP verify: $email — HTTP $verify_s ($verify_b)"
+    fi
+}
+mk_totp_account "bat2fa1@gmail.com" "Đinh Văn Bật 2FA"
+mk_totp_account "bat2fa2@gmail.com" "Lương Thị Bật 2FA"
+
+# 6) Refresh token đã bị thu hồi — login riêng bằng 1 tài khoản KHÁC $TOKEN (không đụng
+#    session platform-admin đang dùng cho toàn bộ script) rồi tự logout ngay, để lại 1
+#    dòng refresh_tokens với revoked_at đã set (test logout-all/logout thực sự chặn token cũ).
+_r=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/auth/login" \
+    -H "Content-Type: application/json" -d '{"identifier":"hotro1.nentang@fams.com","password":"Admin@1234"}')
+_s=$(echo "$_r" | tail -n 1); _b=$(echo "$_r" | head -n -1)
+if [ "$_s" -eq 200 ]; then
+    _own_token=$(echo "$_b" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('data',{}).get('accessToken',''))")
+    _own_refresh=$(echo "$_b" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('data',{}).get('refreshToken',''))")
+    curl -s -o /dev/null -X POST "$BASE_URL/api/v1/auth/logout" -H "Authorization: Bearer $_own_token" \
+        -H "Content-Type: application/json" -d "{\"refreshToken\":\"$_own_refresh\"}"
+    echo "  + Refresh token đã bị thu hồi (revoked_at set) cho hotro1.nentang@fams.com — token cũ này không dùng lại được"
+else
+    echo "  ! Không đăng nhập được hotro1.nentang@fams.com để tạo refresh token đã thu hồi (HTTP $_s)"
+fi
 echo ""
 
 # ── Historical Data (PostgreSQL direct insert) ────────────────────────────────
