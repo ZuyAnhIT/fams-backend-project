@@ -1,18 +1,21 @@
 -- ============================================================
 -- FAMS Historical Seed Data (Vietnamese dataset)
 -- ============================================================
--- Inserts realistic demo data for the past 30 days across the
--- five demo tenants: acme-corp, beta-industries, gamma-logistics,
--- tia-sang-startup, dong-a-jsc.
+-- Inserts realistic demo data for the past ~75 days (~2.5 months, extended
+-- from the original 30 days 01/08/2026 — see docs/testing/sample-data-requirements.md
+-- mục 2.6) across the five demo tenants: acme-corp, beta-industries,
+-- gamma-logistics, tia-sang-startup, dong-a-jsc.
 --
 -- Tables populated:
---   face_profiles, checkins, attendance_summaries,
+--   face_profiles (incl. rejected-review bucket), checkins, attendance_summaries,
 --   random_check_configs (site-level overrides),
---   scheduled_checks, check_responses, violations,
+--   scheduled_checks (incl. near-future 'pending' rows for /my-pending lookahead
+--   testing, and 'cancelled' rows tied to the cancelled-assignment demo),
+--   check_responses, violations (no_response, location_fail, face_fail, liveness_fail),
 --   notifications, notification_templates, audit_logs,
 --   tenant_settings, face_verify_requests, employee_invitations
---   (expired ones), user_notification_settings, user_devices,
---   notification_delivery_logs.
+--   (expired ones), user_notification_settings (all 4 in-app/push combos),
+--   user_devices (incl. 1 unregistered), notification_delivery_logs.
 --
 -- Also links two people to two tenants each under one shared
 -- login (see "Multi-tenant person linking" below):
@@ -44,13 +47,16 @@ BEGIN;
 -- FaceIdService's class-level javadoc for the full state machine. Bucket 1 demos a first-time
 -- submission awaiting HR review (status stays not_enrolled); bucket 3 demos a RE-enrollment
 -- awaiting review on top of an already-approved face (status stays enrolled, old face still
--- usable) — both populate docs/api/face-id-management-api.md's "hàng đợi duyệt" (pending-review
--- queue) with realistic demo data instead of leaving it permanently empty.
+-- usable); bucket 4 demos a submission HR already REJECTED (status stays not_enrolled, with a
+-- reason recorded) — all three populate docs/api/face-id-management-api.md's "hàng đợi duyệt"
+-- (pending-review queue) / rejection history with realistic demo data instead of leaving them
+-- permanently empty. (Seed data spec 01/08/2026 mục 2.5: bổ sung bucket 4 "rejected".)
 INSERT INTO face_profiles (
     id, tenant_id, employee_id,
     consent_given, consent_given_at,
     status, embedding, embedding_deleted,
     review_status, pending_embedding, pending_photo_count, submitted_at,
+    reviewed_by, reviewed_at, rejection_reason,
     enrolled_at, revoked_at,
     created_at, updated_at
 )
@@ -60,55 +66,78 @@ SELECT
     e.id,
     TRUE,
     NOW() - ((20 + (hashtext(e.id::text) % 20))::TEXT || ' days')::INTERVAL,
-    CASE ((hashtext(e.id::text) % 10) + 10) % 10
+    CASE ((hashtext(e.id::text) % 12) + 12) % 12
         WHEN 0 THEN 'not_enrolled'
         WHEN 1 THEN 'not_enrolled'
         WHEN 2 THEN 'revoked'
+        WHEN 3 THEN 'not_enrolled'  -- bucket 4: rejected review, never had an approved face
         ELSE      'enrolled'
     END,
-    CASE ((hashtext(e.id::text) % 10) + 10) % 10
+    CASE ((hashtext(e.id::text) % 12) + 12) % 12
         WHEN 0 THEN NULL
         WHEN 1 THEN NULL
         WHEN 2 THEN NULL
+        WHEN 3 THEN NULL
         ELSE ARRAY(
             SELECT round((((hashtext(e.id::text || i::text) % 200) - 100))::NUMERIC / 100.0, 4)::DOUBLE PRECISION
             FROM generate_series(1, 16) AS i
         )
     END,
     FALSE,
-    CASE ((hashtext(e.id::text) % 10) + 10) % 10
+    CASE ((hashtext(e.id::text) % 12) + 12) % 12
         WHEN 1 THEN 'pending'
-        WHEN 3 THEN 'pending'
+        WHEN 5 THEN 'pending'
+        WHEN 3 THEN 'rejected'
         ELSE 'none'
     END,
-    CASE ((hashtext(e.id::text) % 10) + 10) % 10
+    CASE ((hashtext(e.id::text) % 12) + 12) % 12
         WHEN 1 THEN ARRAY(
             SELECT round((((hashtext('pending:' || e.id::text || i::text) % 200) - 100))::NUMERIC / 100.0, 4)::DOUBLE PRECISION
             FROM generate_series(1, 16) AS i
         )
-        WHEN 3 THEN ARRAY(
+        WHEN 5 THEN ARRAY(
             SELECT round((((hashtext('pending:' || e.id::text || i::text) % 200) - 100))::NUMERIC / 100.0, 4)::DOUBLE PRECISION
             FROM generate_series(1, 16) AS i
         )
         ELSE NULL
     END,
-    CASE ((hashtext(e.id::text) % 10) + 10) % 10
+    CASE ((hashtext(e.id::text) % 12) + 12) % 12
         WHEN 1 THEN 3 + (hashtext(e.id::text) % 3)
+        WHEN 5 THEN 3 + (hashtext(e.id::text) % 3)
         WHEN 3 THEN 3 + (hashtext(e.id::text) % 3)
         ELSE NULL
     END,
-    CASE ((hashtext(e.id::text) % 10) + 10) % 10
+    CASE ((hashtext(e.id::text) % 12) + 12) % 12
         WHEN 1 THEN NOW() - ((1 + (hashtext(e.id::text) % 3))::TEXT || ' days')::INTERVAL
-        WHEN 3 THEN NOW() - ((1 + (hashtext(e.id::text) % 3))::TEXT || ' days')::INTERVAL
+        WHEN 5 THEN NOW() - ((1 + (hashtext(e.id::text) % 3))::TEXT || ' days')::INTERVAL
+        WHEN 3 THEN NOW() - ((3 + (hashtext(e.id::text) % 3))::TEXT || ' days')::INTERVAL
         ELSE NULL
     END,
-    CASE ((hashtext(e.id::text) % 10) + 10) % 10
+    CASE ((hashtext(e.id::text) % 12) + 12) % 12
+        WHEN 3 THEN (SELECT id FROM users WHERE is_platform_admin = TRUE AND deleted_at IS NULL LIMIT 1)
+        ELSE NULL
+    END,
+    CASE ((hashtext(e.id::text) % 12) + 12) % 12
+        WHEN 3 THEN NOW() - ((1 + (hashtext(e.id::text) % 2))::TEXT || ' days')::INTERVAL
+        ELSE NULL
+    END,
+    CASE WHEN ((hashtext(e.id::text) % 12) + 12) % 12 = 3 THEN
+      (ARRAY[
+        'Ảnh mờ, không đủ điều kiện nhận diện khuôn mặt rõ ràng. Vui lòng chụp lại ở nơi đủ sáng.',
+        'Phát hiện nhiều khuôn mặt trong ảnh. Vui lòng chụp lại chỉ 1 người trong khung hình.',
+        'Không nhận diện được khuôn mặt trong ảnh đã nộp. Vui lòng chụp lại, giữ khuôn mặt trong khung hướng dẫn.',
+        'Ảnh chụp góc nghiêng quá lớn, hệ thống không đối chiếu được đặc trưng khuôn mặt. Vui lòng chụp thẳng mặt.',
+        'Ảnh có đeo khẩu trang/kính râm che khuất khuôn mặt. Vui lòng chụp lại không che khuôn mặt.'
+      ])[1 + (hashtext(e.id::text || 'reason') % 5)]
+    ELSE NULL END,
+    CASE ((hashtext(e.id::text) % 12) + 12) % 12
         WHEN 0 THEN NULL
         WHEN 1 THEN NULL
         WHEN 2 THEN NULL
+        WHEN 3 THEN NULL
         ELSE NOW() - ((5 + (hashtext(e.id::text) % 15))::TEXT || ' days')::INTERVAL
     END,
-    CASE ((hashtext(e.id::text) % 10) + 10) % 10
+    CASE ((hashtext(e.id::text) % 12) + 12) % 12
         WHEN 2 THEN NOW() - '3 days'::INTERVAL
         ELSE NULL
     END,
@@ -217,7 +246,9 @@ WHERE t.slug IN ('acme-corp', 'beta-industries', 'gamma-logistics', 'tia-sang-st
     SELECT 1 FROM geofences g WHERE g.site_id = s.id AND g.status = 'superseded'
   );
 
--- ── Historical Checkins (past 30 weekdays) ────────────────────────────────────
+-- ── Historical Checkins (past ~75 days / ~2.5 months of weekdays) ─────────────
+-- Extended from the original 30 days (spec dữ liệu mẫu mục 2.6: "kéo dài lịch sử sang nhiều
+-- tháng" — 30 ngày không đủ để test đúng nghĩa bảng công theo tháng qua nhiều kỳ liên tiếp).
 
 WITH
   demo_tenants AS (
@@ -256,7 +287,7 @@ WITH
   work_dates AS (
     SELECT d::DATE AS work_date
     FROM generate_series(
-      CURRENT_DATE - INTERVAL '30 days',
+      CURRENT_DATE - INTERVAL '75 days',
       CURRENT_DATE - INTERVAL '1 day',
       INTERVAL '1 day'
     ) AS d
@@ -618,6 +649,168 @@ WHERE cr.outcome = 'pass'
     WHERE v.check_response_id = cr.id
   );
 
+-- ── Face/liveness-fail violations (violation_type diversity) ──────────────────
+-- The two blocks above only ever produced 'no_response' / 'location_fail' — 'face_fail' and
+-- 'liveness_fail' are both valid per the DB check constraint but were never demoed. Attach a
+-- few to existing 'responded' checks that used a face/liveness config (spec mục 2.7).
+
+INSERT INTO violations (
+  id, tenant_id, employee_id, site_id,
+  scheduled_check_id, check_response_id,
+  violation_type, check_date, description,
+  resolved, resolved_at, resolved_by,
+  employee_note, employee_photo_url,
+  resolution, resolution_reason,
+  affects_attendance,
+  created_at, updated_at
+)
+SELECT
+  gen_random_uuid(),
+  cr.tenant_id,
+  cr.employee_id,
+  sc.site_id,
+  cr.scheduled_check_id,
+  cr.id,
+  CASE WHEN (hashtext(cr.id::text || 'facetype') % 2) = 0 THEN 'face_fail' ELSE 'liveness_fail' END,
+  sc.check_date,
+  CASE WHEN (hashtext(cr.id::text || 'facetype') % 2) = 0
+       THEN 'Xác minh khuôn mặt không khớp với hồ sơ Face ID đã đăng ký.'
+       ELSE 'Không vượt qua kiểm tra liveness (nghi ngờ dùng ảnh/video giả mạo).' END,
+  (hashtext(cr.id::text || 'faceresolved') % 10) < 4,
+  CASE WHEN (hashtext(cr.id::text || 'faceresolved') % 10) < 4
+       THEN sc.expires_at + INTERVAL '3 hours' ELSE NULL END,
+  CASE WHEN (hashtext(cr.id::text || 'faceresolved') % 10) < 4
+       THEN (SELECT id FROM users WHERE is_platform_admin = TRUE AND deleted_at IS NULL LIMIT 1)
+       ELSE NULL END,
+  NULL, NULL,
+  CASE WHEN (hashtext(cr.id::text || 'faceresolved') % 10) < 4 THEN 'confirmed' ELSE NULL END,
+  CASE WHEN (hashtext(cr.id::text || 'faceresolved') % 10) < 4
+       THEN 'HR đã xác nhận sau khi đối chiếu ảnh chấm công.' ELSE NULL END,
+  TRUE,
+  cr.responded_at,
+  NOW()
+FROM check_responses cr
+JOIN scheduled_checks sc ON sc.id = cr.scheduled_check_id
+JOIN random_check_configs rcc ON rcc.id = sc.config_id
+WHERE cr.outcome = 'pass'
+  AND rcc.check_mode IN ('location_face', 'location_face_liveness')
+  AND cr.tenant_id IN (
+    SELECT id FROM tenants
+    WHERE slug IN ('acme-corp', 'beta-industries', 'gamma-logistics', 'tia-sang-startup', 'dong-a-jsc')
+      AND deleted_at IS NULL
+  )
+  AND (hashtext(cr.id::text || 'faceviol') % 6) = 0
+  AND NOT EXISTS (
+    SELECT 1 FROM violations v WHERE v.check_response_id = cr.id
+  );
+
+-- ── Scheduled checks: 'cancelled' status demo (assignment bị hủy chủ động) ────
+-- The 3 deep tenants each had 1 assignment cancelled via the real API in seed.sh (business-
+-- scenario diversity block) — but that happens BEFORE this file runs and the historical
+-- generator above only looks at status='active' assignments, so no 'cancelled' scheduled_check
+-- ever gets demoed. Backfill a couple directly against that now-cancelled assignment so the
+-- 'cancelled' branch of ScheduledCheck.status has real example rows (spec mục 2.7).
+
+INSERT INTO scheduled_checks (
+  id, tenant_id, assignment_id, employee_id, site_id, shift_id,
+  config_id, config_snapshot, check_date, check_index,
+  scheduled_at, expires_at, status,
+  created_at, updated_at
+)
+SELECT
+  gen_random_uuid(),
+  a.tenant_id, a.id, a.employee_id, a.site_id, a.shift_id,
+  rcc.id,
+  jsonb_build_object('checksPerShift', rcc.checks_per_shift, 'minIntervalMinutes', rcc.min_interval_minutes,
+                      'checkMode', rcc.check_mode, 'responseWindowSeconds', rcc.response_window_seconds),
+  CURRENT_DATE - 2, 1,
+  (CURRENT_DATE - 2 + '10:00'::TIME)::TIMESTAMPTZ,
+  (CURRENT_DATE - 2 + '10:05'::TIME)::TIMESTAMPTZ,
+  'cancelled',
+  NOW() - '2 days'::INTERVAL, NOW() - '2 days'::INTERVAL
+FROM assignments a
+JOIN random_check_configs rcc ON rcc.tenant_id = a.tenant_id AND rcc.site_id IS NULL AND rcc.deleted_at IS NULL
+WHERE a.status = 'cancelled' AND a.deleted_at IS NULL
+  AND a.tenant_id IN (
+    SELECT id FROM tenants
+    WHERE slug IN ('acme-corp', 'beta-industries', 'gamma-logistics')
+      AND deleted_at IS NULL
+  )
+ON CONFLICT (assignment_id, check_date, check_index) WHERE deleted_at IS NULL DO NOTHING;
+
+-- ── Scheduled checks: 'pending' near-future rows for /my-pending lookahead testing ──
+-- api-server bounds GET /my-pending's 'pending' branch to scheduledAt <= now + 60s (see
+-- docs/api/random-check-config-review.md mục 13.1). Demo BOTH sides of that boundary for 1
+-- assignment per deep tenant: one row within the lookahead (should be VISIBLE) and one further
+-- out (should be HIDDEN) — so a tester can hit /my-pending immediately after reseed and see the
+-- exact behavior without having to hand-craft rows themselves.
+
+INSERT INTO scheduled_checks (
+  id, tenant_id, assignment_id, employee_id, site_id, shift_id,
+  config_id, config_snapshot, check_date, check_index,
+  scheduled_at, expires_at, status,
+  created_at, updated_at
+)
+SELECT
+  gen_random_uuid(),
+  la.tenant_id, la.assignment_id, la.employee_id, la.site_id, la.shift_id,
+  rcc.id,
+  jsonb_build_object('checksPerShift', rcc.checks_per_shift, 'minIntervalMinutes', rcc.min_interval_minutes,
+                      'checkMode', rcc.check_mode, 'responseWindowSeconds', rcc.response_window_seconds),
+  CURRENT_DATE, la.slot,
+  la.scheduled_at, la.scheduled_at + INTERVAL '5 minutes',
+  'pending',
+  NOW(), NOW()
+FROM (
+  SELECT DISTINCT ON (a.tenant_id)
+    a.id AS assignment_id, a.tenant_id, a.site_id, a.employee_id, a.shift_id,
+    1 AS slot, NOW() + INTERVAL '30 seconds' AS scheduled_at
+  FROM assignments a
+  JOIN tenants t ON t.id = a.tenant_id AND t.slug IN ('acme-corp', 'beta-industries', 'gamma-logistics')
+  WHERE a.status = 'active' AND a.deleted_at IS NULL
+  ORDER BY a.tenant_id, a.id
+) la
+JOIN random_check_configs rcc ON rcc.tenant_id = la.tenant_id AND rcc.site_id IS NULL AND rcc.deleted_at IS NULL
+WHERE NOT EXISTS (
+  SELECT 1 FROM scheduled_checks sc2
+  WHERE sc2.assignment_id = la.assignment_id AND sc2.check_date = CURRENT_DATE AND sc2.check_index = la.slot
+    AND sc2.deleted_at IS NULL
+)
+ON CONFLICT (assignment_id, check_date, check_index) WHERE deleted_at IS NULL DO NOTHING;
+
+INSERT INTO scheduled_checks (
+  id, tenant_id, assignment_id, employee_id, site_id, shift_id,
+  config_id, config_snapshot, check_date, check_index,
+  scheduled_at, expires_at, status,
+  created_at, updated_at
+)
+SELECT
+  gen_random_uuid(),
+  la.tenant_id, la.assignment_id, la.employee_id, la.site_id, la.shift_id,
+  rcc.id,
+  jsonb_build_object('checksPerShift', rcc.checks_per_shift, 'minIntervalMinutes', rcc.min_interval_minutes,
+                      'checkMode', rcc.check_mode, 'responseWindowSeconds', rcc.response_window_seconds),
+  CURRENT_DATE, la.slot,
+  la.scheduled_at, la.scheduled_at + INTERVAL '5 minutes',
+  'pending',
+  NOW(), NOW()
+FROM (
+  SELECT DISTINCT ON (a.tenant_id)
+    a.id AS assignment_id, a.tenant_id, a.site_id, a.employee_id, a.shift_id,
+    2 AS slot, NOW() + INTERVAL '5 hours' AS scheduled_at
+  FROM assignments a
+  JOIN tenants t ON t.id = a.tenant_id AND t.slug IN ('acme-corp', 'beta-industries', 'gamma-logistics')
+  WHERE a.status = 'active' AND a.deleted_at IS NULL
+  ORDER BY a.tenant_id, a.id
+) la
+JOIN random_check_configs rcc ON rcc.tenant_id = la.tenant_id AND rcc.site_id IS NULL AND rcc.deleted_at IS NULL
+WHERE NOT EXISTS (
+  SELECT 1 FROM scheduled_checks sc2
+  WHERE sc2.assignment_id = la.assignment_id AND sc2.check_date = CURRENT_DATE AND sc2.check_index = la.slot
+    AND sc2.deleted_at IS NULL
+)
+ON CONFLICT (assignment_id, check_date, check_index) WHERE deleted_at IS NULL DO NOTHING;
+
 -- ── Multi-tenant person linking ───────────────────────────────────────────────
 -- Two real-world scenario people who each work at two different tenants
 -- under a single shared login (users.email is globally unique; employees
@@ -757,6 +950,30 @@ FROM (VALUES
 JOIN users u ON u.email = v.login_email
 JOIN employees e ON e.user_id = u.id
 JOIN roles r ON r.tenant_id IS NULL AND r.name = v.role_name
+ON CONFLICT (user_id, role_id, tenant_id) DO NOTHING;
+
+-- ── Liên kết tài khoản CHƯA XÁC THỰC EMAIL vào nhân viên thật ─────────────────
+-- sample-data-requirements-v2.md mục 3.5/6.2: 'chuaxacthucmail1/2@gmail.com' (tạo trong
+-- seed.sh, phần "Ma trận xác thực tài khoản") trước đây chỉ là user độc lập, không gắn với
+-- employee nào — không minh họa đúng case "nhân viên đã có tài khoản nhưng chưa xác thực
+-- email". Gắn vào 1 nhân viên thật/tenant (khác các nhân viên đã có login xác thực ở trên).
+UPDATE employees e
+SET user_id = u.id
+FROM users u
+WHERE e.user_id IS NULL
+  AND e.email IS NOT NULL
+  AND (
+    (u.email = 'chuaxacthucmail1@gmail.com' AND e.employee_code = 'HL-CT-002')
+    OR (u.email = 'chuaxacthucmail2@gmail.com' AND e.employee_code = 'BM-CT-002')
+  );
+
+INSERT INTO user_roles (id, user_id, role_id, tenant_id, assigned_by, created_at, updated_at)
+SELECT gen_random_uuid(), e.user_id, r.id, e.tenant_id,
+       (SELECT id FROM users WHERE is_platform_admin = TRUE LIMIT 1),
+       NOW() - '10 days'::INTERVAL, NOW()
+FROM employees e
+JOIN users u ON u.id = e.user_id AND u.email IN ('chuaxacthucmail1@gmail.com', 'chuaxacthucmail2@gmail.com')
+JOIN roles r ON r.tenant_id IS NULL AND r.name = 'EMPLOYEE'
 ON CONFLICT (user_id, role_id, tenant_id) DO NOTHING;
 
 -- ── Tenant Settings ────────────────────────────────────────────────────────────
@@ -970,6 +1187,9 @@ ON CONFLICT (tenant_id, event_type, locale) DO NOTHING;
 
 -- ── User Notification Settings ─────────────────────────────────────────────────
 
+-- Đủ 4 tổ hợp in-app/push (spec dữ liệu mẫu mục 2.8) — trực tiếp phục vụ việc xác minh phase
+-- sửa lỗi "tắt in-app làm mất luôn push" (random-check-config-review.md mục 13.3): trước đây
+-- chỉ có 3/4 tổ hợp (thiếu cả 2 cùng tắt), giờ dung.pham.hr có đủ cả 4 để so sánh trực quan.
 INSERT INTO user_notification_settings (id, user_id, event_type, in_app_enabled, push_enabled, created_at, updated_at)
 SELECT gen_random_uuid(), u.id, s.event_type, s.in_app, s.push, NOW() - '30 days'::INTERVAL, NOW()
 FROM users u
@@ -978,6 +1198,7 @@ JOIN (VALUES
   ('admin@fams.com',           'report.ready',             TRUE,  FALSE),
   ('dung.pham.hr@gmail.com',   'attendance.late_checkin',  TRUE,  TRUE),
   ('dung.pham.hr@gmail.com',   'violation.raised',         TRUE,  TRUE),
+  ('dung.pham.hr@gmail.com',   'attendance.ot_detected',   FALSE, FALSE),
   ('truong.van.dat@gmail.com', 'randomcheck.dispatched',   TRUE,  FALSE),
   ('truong.van.dat@gmail.com', 'assignment.created',       FALSE, TRUE)
 ) AS s(email, event_type, in_app, push) ON s.email = u.email
@@ -996,6 +1217,14 @@ JOIN (VALUES
 WHERE NOT EXISTS (
   SELECT 1 FROM user_devices ud WHERE ud.device_token = d.token AND ud.deleted_at IS NULL
 );
+
+-- 1 device đã unregister (soft-delete) — test không gửi nhầm push tới token đã hủy (spec mục 2.8).
+INSERT INTO user_devices (id, user_id, device_token, platform, created_at, updated_at, deleted_at)
+SELECT gen_random_uuid(), u.id, 'demo-fcm-token-dung-huy-0002', 'FCM',
+       NOW() - '25 days'::INTERVAL, NOW() - '10 days'::INTERVAL, NOW() - '10 days'::INTERVAL
+FROM users u
+WHERE u.email = 'dung.pham.hr@gmail.com'
+  AND NOT EXISTS (SELECT 1 FROM user_devices ud WHERE ud.device_token = 'demo-fcm-token-dung-huy-0002');
 
 -- ── Notification Delivery Logs ─────────────────────────────────────────────────
 -- ~20% of admin notifications get a first failed attempt, followed by a
