@@ -64,6 +64,50 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         return request.getRemoteAddr();
     }
 
+    /**
+     * Public (permitAll — see SecurityConfig) endpoints that this filter must skip entirely.
+     * Bug fixed here: this filter used to run unconditionally on EVERY request and, whenever
+     * an Authorization header happened to be present — even a stale/irrelevant one left over
+     * from a previous session by a frontend client that blindly re-attaches the last stored
+     * token — it would resolve that token's tenantId claim and enforce THAT tenant's
+     * suspended/IP-whitelist checks against the CURRENT request. That 403'd /auth/login,
+     * /auth/register, and /auth/login/google outright (with "IP not whitelisted") for anyone
+     * whose browser still had an old access token in storage for a tenant with IP whitelist
+     * entries, regardless of which account they were actually trying to log into — login,
+     * registration, and Google sign-in for a brand-new account have no tenant yet and must
+     * never be gated by a leftover, request-irrelevant Bearer token. These endpoints don't
+     * need SecurityContext authentication at all (they're permitAll), so skipping this filter
+     * for them is safe and matches intent. Keep this list in sync with SecurityConfig's
+     * permitAll() matchers.
+     */
+    private static final Set<String> PUBLIC_EXACT_PATHS = Set.of(
+            "/api/v1/auth/health", "/api/v1/auth/db-health", "/api/v1/auth/totp/qr",
+            "/api/v1/auth/login", "/api/v1/auth/register", "/api/v1/auth/register/send-otp",
+            "/api/v1/auth/resend-verification", "/api/v1/auth/otp/verify",
+            "/api/v1/auth/forgot-password", "/api/v1/auth/reset-password",
+            "/api/v1/auth/login/totp", "/api/v1/auth/login/google", "/api/v1/auth/refresh-token",
+            "/api/v1/invitations/validate", "/api/v1/invitations/accept",
+            "/api/v1/platform-invitations/validate", "/api/v1/platform-invitations/accept",
+            "/google-login-test.html", "/actuator/health", "/actuator/info"
+    );
+    private static final String[] PUBLIC_PATH_PREFIXES = {
+            "/v3/api-docs/", "/swagger-ui/", "/internal/"
+    };
+
+    @Override
+    protected boolean shouldNotFilter(HttpServletRequest request) {
+        String path = request.getServletPath();
+        if (PUBLIC_EXACT_PATHS.contains(path) || "/swagger-ui.html".equals(path)) {
+            return true;
+        }
+        for (String prefix : PUBLIC_PATH_PREFIXES) {
+            if (path.startsWith(prefix)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private boolean isTenantSuspended(String tenantId) {
         if (tenantId == null || tenantId.isEmpty()) return false;
         return Boolean.TRUE.equals(redis.hasKey(TenantService.TENANT_SUSPENDED_PREFIX + tenantId));
