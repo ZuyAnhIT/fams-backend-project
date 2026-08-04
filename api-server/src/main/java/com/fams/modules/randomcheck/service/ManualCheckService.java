@@ -3,6 +3,8 @@ package com.fams.modules.randomcheck.service;
 import com.fams.modules.assignment.entity.Assignment;
 import com.fams.modules.assignment.repository.AssignmentRepository;
 import com.fams.modules.assignment.util.DayOfWeekBitmask;
+import com.fams.modules.audit.service.AuditLogService;
+import com.fams.modules.employee.repository.FaceProfileRepository;
 import com.fams.modules.randomcheck.dto.request.ManualCheckRequest;
 import com.fams.modules.randomcheck.entity.RandomCheckConfig;
 import com.fams.modules.randomcheck.entity.ScheduledCheck;
@@ -19,6 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -35,19 +38,36 @@ public class ManualCheckService {
     private final SiteRepository siteRepository;
     private final PlanLimitEnforcementService planLimitEnforcementService;
     private final RandomCheckDispatchService randomCheckDispatchService;
+    private final FaceProfileRepository faceProfileRepository;
+    private final AuditLogService auditLogService;
 
     public ManualCheckService(AssignmentRepository assignmentRepository,
                               RandomCheckConfigRepository configRepository,
                               ScheduledCheckRepository scheduledCheckRepository,
                               SiteRepository siteRepository,
                               PlanLimitEnforcementService planLimitEnforcementService,
-                              @Lazy RandomCheckDispatchService randomCheckDispatchService) {
+                              @Lazy RandomCheckDispatchService randomCheckDispatchService,
+                              FaceProfileRepository faceProfileRepository,
+                              AuditLogService auditLogService) {
         this.assignmentRepository = assignmentRepository;
         this.configRepository = configRepository;
         this.scheduledCheckRepository = scheduledCheckRepository;
         this.siteRepository = siteRepository;
         this.planLimitEnforcementService = planLimitEnforcementService;
         this.randomCheckDispatchService = randomCheckDispatchService;
+        this.faceProfileRepository = faceProfileRepository;
+        this.auditLogService = auditLogService;
+    }
+
+    /** Manual triggers are never rate-limited (audit 2026-08-03 — see the repository query's
+     *  javadoc for why), but HR should still be able to see "how many times today" so they can
+     *  make an informed call. Exposed separately from #trigger so the controller can report the
+     *  post-trigger count without changing the entity return type. */
+    @Transactional(readOnly = true)
+    public int countManualTriggersToday(UUID tenantId, UUID employeeId, LocalDate date) {
+        return (int) scheduledCheckRepository
+                .countByTenantIdAndEmployeeIdAndCheckDateAndCheckIndexLessThanEqualAndDeletedAtIsNull(
+                        tenantId, employeeId, date, 0);
     }
 
     /**
@@ -90,6 +110,25 @@ public class ManualCheckService {
         // Validate and apply checkMode override
         String checkMode = resolveCheckMode(request.getCheckMode(), config.getCheckMode());
 
+        // Same Face ID enrollment fail-safe as ScheduledCheckGeneratorService (audit 2026-08-02)
+        // — but only when HR did NOT explicitly request a face/liveness mode themselves. An
+        // explicit override is a deliberate HR decision (e.g. testing whether this employee can
+        // even complete the check) and must be respected as requested; only the config's
+        // IMPLICIT default gets silently downgraded, same rule as the nightly generator.
+        boolean explicitModeRequested = request.getCheckMode() != null && !request.getCheckMode().isBlank();
+        if (!explicitModeRequested && !"location_only".equals(checkMode)) {
+            boolean faceEnrolled = faceProfileRepository
+                    .findByEmployeeIdAndTenantId(employeeId, tenantId)
+                    .map(fp -> "enrolled".equals(fp.getStatus()))
+                    .orElse(false);
+            if (!faceEnrolled) {
+                log.info("Downgrading manual check mode to location_only for employeeId={} — "
+                                + "config default '{}' but employee has no approved Face ID",
+                        employeeId, checkMode);
+                checkMode = "location_only";
+            }
+        }
+
         // Build config snapshot (same format as ScheduledCheckGeneratorService)
         String snapshot = buildSnapshot(config, checkMode);
 
@@ -119,8 +158,20 @@ public class ManualCheckService {
 
         scheduledCheckRepository.save(check);
 
-        log.info("Manual check triggered: checkId={} employeeId={} siteId={} mode={} reason={} by={}",
-                check.getId(), employeeId, siteId, checkMode, request.getReason(), triggeredBy);
+        int countToday = countManualTriggersToday(tenantId, employeeId, today);
+
+        log.info("Manual check triggered: checkId={} employeeId={} siteId={} mode={} reason={} by={} "
+                        + "countToday={}",
+                check.getId(), employeeId, siteId, checkMode, request.getReason(), triggeredBy, countToday);
+
+        auditLogService.record(
+                tenantId, triggeredBy, null,
+                "ScheduledCheck", check.getId().toString(), "manual_random_check_triggered",
+                null,
+                Map.of("employeeId", employeeId.toString(), "siteId", siteId.toString(),
+                       "checkMode", checkMode, "reason", request.getReason() == null ? "" : request.getReason(),
+                       "triggerCountToday", countToday),
+                null, null, null);
 
         randomCheckDispatchService.sendNotification(check);
 

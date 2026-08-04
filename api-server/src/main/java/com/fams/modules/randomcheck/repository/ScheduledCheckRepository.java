@@ -15,13 +15,26 @@ public interface ScheduledCheckRepository extends JpaRepository<ScheduledCheck, 
 
     /** Used by AttendanceSummaryService.recompute() to set hasRandomCheckFailure — true if this
      *  employee/site/date had >=1 random check that ended in no_response, or was responded to
-     *  with outcome='fail' (location/face/liveness). Read-only signal, never touches pay fields. */
+     *  with outcome='fail' (location/face/liveness). Read-only signal, never touches pay fields.
+     *
+     *  Excludes a check whose failure HR has fully dismissed (found via audit 2026-08-02: this
+     *  previously ignored violation resolution entirely — a no_response/failed check kept
+     *  flagging the day forever even after HR proved it was a false positive and dismissed every
+     *  violation tied to it, e.g. "phone died, legitimate reason"). A check only drops out of
+     *  this flag when EVERY violation linked to it is dismissed; if no violation row exists yet
+     *  (the no_response job hasn't run) or any violation is still unresolved/confirmed, it still
+     *  counts — this only ever makes the flag MORE lenient, never hides an unreviewed failure. */
     @Query(value = "SELECT EXISTS (" +
                   "SELECT 1 FROM scheduled_checks sc " +
                   "LEFT JOIN check_responses cr ON cr.scheduled_check_id = sc.id " +
                   "WHERE sc.tenant_id = :tenantId AND sc.employee_id = :employeeId " +
                   "AND sc.site_id = :siteId AND sc.check_date = :date AND sc.deleted_at IS NULL " +
-                  "AND (sc.status = 'no_response' OR cr.outcome = 'fail'))",
+                  "AND (sc.status = 'no_response' OR cr.outcome = 'fail') " +
+                  "AND NOT (" +
+                  "  EXISTS (SELECT 1 FROM violations v WHERE v.scheduled_check_id = sc.id AND v.deleted_at IS NULL)" +
+                  "  AND NOT EXISTS (SELECT 1 FROM violations v WHERE v.scheduled_check_id = sc.id " +
+                  "                  AND v.deleted_at IS NULL AND (v.resolution IS NULL OR v.resolution <> 'dismissed'))" +
+                  "))",
            nativeQuery = true)
     boolean existsFailedOrNoResponseCheck(@Param("tenantId") UUID tenantId,
                                           @Param("employeeId") UUID employeeId,
@@ -29,6 +42,14 @@ public interface ScheduledCheckRepository extends JpaRepository<ScheduledCheck, 
                                           @Param("date") LocalDate date);
 
     boolean existsByAssignmentIdAndCheckDateAndCheckIndex(UUID assignmentId, LocalDate checkDate, int checkIndex);
+
+    /** Manual (HR-triggered) checks always use checkIndex <= 0 (see ManualCheckService#nextManualIndex),
+     *  so this counts only manual triggers, not the nightly-generated ones. Used to surface a soft
+     *  "you've already sent N today" signal to HR — deliberately NOT a hard limit (audit 2026-08-03):
+     *  manual checks are an urgent-verification tool and must never be rate-limited away right when
+     *  they're needed most, same stance QuickBooks Time/Deputy take on manager-initiated spot checks. */
+    long countByTenantIdAndEmployeeIdAndCheckDateAndCheckIndexLessThanEqualAndDeletedAtIsNull(
+            UUID tenantId, UUID employeeId, LocalDate checkDate, int checkIndex);
 
     @Query("SELECT s FROM ScheduledCheck s WHERE s.tenantId = :tenantId AND s.checkDate = :date " +
            "AND s.deletedAt IS NULL ORDER BY s.scheduledAt")

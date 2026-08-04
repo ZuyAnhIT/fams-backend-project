@@ -1,5 +1,6 @@
 package com.fams.modules.violation.service;
 
+import com.fams.modules.attendance.service.AttendanceSummaryService;
 import com.fams.modules.employee.entity.Employee;
 import com.fams.modules.employee.repository.EmployeeRepository;
 import com.fams.modules.randomcheck.entity.CheckResponse;
@@ -21,6 +22,7 @@ import com.fams.shared.dto.ExplanationResponse;
 import com.fams.shared.dto.SubmitExplanationRequest;
 import com.fams.shared.exception.ResourceNotFoundException;
 import com.fams.shared.pagination.PageResponse;
+import com.fams.shared.storage.ExplanationEvidenceStorageService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -31,6 +33,7 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
@@ -49,17 +52,23 @@ public class ViolationService {
     private final UserRoleRepository userRoleRepository;
     private final ScheduledCheckRepository scheduledCheckRepository;
     private final CheckResponseRepository checkResponseRepository;
+    private final AttendanceSummaryService attendanceSummaryService;
+    private final ExplanationEvidenceStorageService evidenceStorageService;
 
     public ViolationService(ViolationRepository violationRepository,
                             EmployeeRepository employeeRepository,
                             UserRoleRepository userRoleRepository,
                             ScheduledCheckRepository scheduledCheckRepository,
-                            CheckResponseRepository checkResponseRepository) {
+                            CheckResponseRepository checkResponseRepository,
+                            AttendanceSummaryService attendanceSummaryService,
+                            ExplanationEvidenceStorageService evidenceStorageService) {
         this.violationRepository = violationRepository;
         this.employeeRepository = employeeRepository;
         this.userRoleRepository = userRoleRepository;
         this.scheduledCheckRepository = scheduledCheckRepository;
         this.checkResponseRepository = checkResponseRepository;
+        this.attendanceSummaryService = attendanceSummaryService;
+        this.evidenceStorageService = evidenceStorageService;
     }
 
     @Transactional
@@ -81,8 +90,12 @@ public class ViolationService {
                     "Violation does not belong to this employee");
         }
 
-        violation.setEmployeeNote(request.getNote());
-        violation.setEmployeePhotoUrl(request.getPhotoUrl());
+        if (org.springframework.util.StringUtils.hasText(request.getPhotoUrl())) {
+            throw new IllegalArgumentException(
+                    "photoUrl is no longer accepted; upload photo using multipart/form-data");
+        }
+        violation.setEmployeeNote(request.getNote().trim());
+        // A note-only update must not silently remove previously uploaded private evidence.
         violationRepository.save(violation);
 
         log.info("Employee explanation submitted for violation: violationId={} employeeId={}",
@@ -91,9 +104,46 @@ public class ViolationService {
         return ExplanationResponse.builder()
                 .id(violation.getId())
                 .employeeNote(violation.getEmployeeNote())
-                .employeePhotoUrl(violation.getEmployeePhotoUrl())
+                .employeePhotoUrl(toEvidenceUrl(violation))
                 .updatedAt(OffsetDateTime.now())
                 .build();
+    }
+
+    @Transactional
+    public ExplanationResponse explainViolationWithPhoto(UUID tenantId, UUID violationId,
+                                                          String note, MultipartFile photo,
+                                                          UUID callerUserId) {
+        Employee employee = employeeRepository
+                .findByUserIdAndTenantIdAndDeletedAtIsNull(callerUserId, tenantId)
+                .orElseThrow(() -> new ResourceNotFoundException("Employee profile not found for this tenant"));
+        Violation violation = violationRepository
+                .findByIdAndTenantIdAndDeletedAtIsNull(violationId, tenantId)
+                .orElseThrow(() -> new ResourceNotFoundException("Violation not found: " + violationId));
+        if (!violation.getEmployeeId().equals(employee.getId())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Violation does not belong to this employee");
+        }
+        if (!org.springframework.util.StringUtils.hasText(note)) {
+            throw new IllegalArgumentException("note is required");
+        }
+        String marker = evidenceStorageService.store(tenantId, "violation", violationId, photo);
+        violation.setEmployeeNote(note.trim());
+        violation.setEmployeePhotoUrl(marker);
+        violationRepository.save(violation);
+        return ExplanationResponse.builder()
+                .id(violationId)
+                .employeeNote(violation.getEmployeeNote())
+                .employeePhotoUrl(toEvidenceUrl(violation))
+                .updatedAt(OffsetDateTime.now())
+                .build();
+    }
+
+    @Transactional(readOnly = true)
+    public ExplanationEvidenceStorageService.StoredEvidence getExplanationEvidence(
+            UUID tenantId, UUID violationId, UUID callerUserId, boolean callerIsPlatformAdmin) {
+        getViolationDetail(tenantId, violationId, callerUserId, callerIsPlatformAdmin);
+        Violation violation = violationRepository.findByIdAndTenantIdAndDeletedAtIsNull(violationId, tenantId)
+                .orElseThrow(() -> new ResourceNotFoundException("Violation not found: " + violationId));
+        return evidenceStorageService.load(violation.getEmployeePhotoUrl());
     }
 
     @Transactional(readOnly = true)
@@ -101,6 +151,20 @@ public class ViolationService {
                                                                UUID employeeId, UUID siteId,
                                                                String violationType, Boolean resolved,
                                                                LocalDate from, LocalDate to,
+                                                               String sortBy, String sortDir,
+                                                               int page, int size,
+                                                               UUID callerUserId,
+                                                               boolean callerIsPlatformAdmin) {
+        return listViolations(tenantId, employeeId, siteId, violationType, resolved, from, to,
+                null, sortBy, sortDir, page, size, callerUserId, callerIsPlatformAdmin);
+    }
+
+    @Transactional(readOnly = true)
+    public PageResponse<ViolationListResponse> listViolations(UUID tenantId,
+                                                               UUID employeeId, UUID siteId,
+                                                               String violationType, Boolean resolved,
+                                                               LocalDate from, LocalDate to,
+                                                               UUID scheduledCheckId,
                                                                String sortBy, String sortDir,
                                                                int page, int size,
                                                                UUID callerUserId,
@@ -118,12 +182,40 @@ public class ViolationService {
         PageRequest pageable = PageRequest.of(page, cappedSize, Sort.by(dir, resolvedSort));
 
         Specification<Violation> spec =
-                ViolationSpecification.build(tenantId, employeeId, siteId, violationType, resolved, from, to);
+                ViolationSpecification.build(tenantId, employeeId, siteId, violationType, resolved,
+                        from, to, scheduledCheckId);
 
         Page<ViolationListResponse> resultPage = violationRepository.findAll(spec, pageable)
                 .map(this::toListResponse);
 
         log.info("HR violation list: tenantId={} total={}", tenantId, resultPage.getTotalElements());
+
+        return PageResponse.from(resultPage);
+    }
+
+    /**
+     * Employee's own "needs my attention" inbox (found via audit 2026-08-02: EMPLOYEE holds no
+     * violations:* permission at all in the RBAC seed, and there was no self-scoped alternative
+     * — an employee could only call POST .../explain on a violation whose ID they already
+     * somehow knew, with no listed endpoint to discover it in the first place). No permission
+     * check beyond being a real employee of this tenant — scoping is by construction (forced
+     * employeeId = caller's own), same pattern as GET /scheduled-checks/my-pending.
+     */
+    @Transactional(readOnly = true)
+    public PageResponse<ViolationListResponse> listMyViolations(UUID tenantId, UUID callerUserId,
+                                                                 Boolean resolved, int page, int size) {
+        Employee employee = employeeRepository
+                .findByUserIdAndTenantIdAndDeletedAtIsNull(callerUserId, tenantId)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "Employee profile not found for this user in this tenant"));
+
+        int cappedSize = Math.min(size, 100);
+        PageRequest pageable = PageRequest.of(page, cappedSize, Sort.by(Sort.Direction.DESC, "checkDate"));
+        Specification<Violation> spec = ViolationSpecification.build(
+                tenantId, employee.getId(), null, null, resolved, null, null, null);
+
+        Page<ViolationListResponse> resultPage = violationRepository.findAll(spec, pageable)
+                .map(this::toListResponse);
 
         return PageResponse.from(resultPage);
     }
@@ -192,8 +284,11 @@ public class ViolationService {
                 .resolved(violation.isResolved())
                 .resolvedAt(violation.getResolvedAt())
                 .resolvedBy(violation.getResolvedBy())
+                .resolution(violation.getResolution())
+                .resolutionReason(violation.getResolutionReason())
+                .affectsAttendance(violation.isAffectsAttendance())
                 .employeeNote(violation.getEmployeeNote())
-                .employeePhotoUrl(violation.getEmployeePhotoUrl())
+                .employeePhotoUrl(toEvidenceUrl(violation))
                 .createdAt(violation.getCreatedAt())
                 .scheduledCheck(scheduledCheckSummary)
                 .checkResponse(checkResponseEvidence)
@@ -228,6 +323,8 @@ public class ViolationService {
         violation.setResolvedAt(now);
         violation.setResolvedBy(callerUserId);
         violationRepository.save(violation);
+        attendanceSummaryService.recomputeIfSummaryExists(
+                tenantId, violation.getEmployeeId(), violation.getSiteId(), violation.getCheckDate());
 
         log.info("Violation confirmed: tenantId={} violationId={} by userId={}", tenantId, violationId, callerUserId);
 
@@ -269,6 +366,8 @@ public class ViolationService {
         violation.setResolvedAt(now);
         violation.setResolvedBy(callerUserId);
         violationRepository.save(violation);
+        attendanceSummaryService.recomputeIfSummaryExists(
+                tenantId, violation.getEmployeeId(), violation.getSiteId(), violation.getCheckDate());
 
         log.info("Violation dismissed: tenantId={} violationId={} by userId={}", tenantId, violationId, callerUserId);
 
@@ -320,9 +419,20 @@ public class ViolationService {
                 .description(v.getDescription())
                 .resolved(v.isResolved())
                 .resolvedAt(v.getResolvedAt())
+                .resolution(v.getResolution())
                 .employeeNote(v.getEmployeeNote())
-                .employeePhotoUrl(v.getEmployeePhotoUrl())
+                .employeePhotoUrl(toEvidenceUrl(v))
+                .affectsAttendance(v.isAffectsAttendance())
                 .createdAt(v.getCreatedAt())
                 .build();
+    }
+
+    private String toEvidenceUrl(Violation violation) {
+        String stored = violation.getEmployeePhotoUrl();
+        if (stored != null && stored.startsWith(ExplanationEvidenceStorageService.MARKER_PREFIX)) {
+            return "/api/v1/tenants/" + violation.getTenantId() + "/violations/"
+                    + violation.getId() + "/explanation-photo";
+        }
+        return stored;
     }
 }

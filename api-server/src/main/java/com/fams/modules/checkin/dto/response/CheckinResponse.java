@@ -117,4 +117,10 @@ public class CheckinResponse {
 
     @Schema(description = "Site name")
     private String siteName;
+
+    @Schema(description = "Employee-submitted explanation note (null until the employee explains the exception)")
+    private String employeeNote;
+
+    @Schema(description = "Protected evidence URL for the employee explanation; HR clients must fetch it with authentication")
+    private String employeePhotoUrl;
 }

@@ -31,6 +31,7 @@ import com.fams.shared.exception.BusinessException;
 import com.fams.shared.exception.DuplicateResourceException;
 import com.fams.shared.exception.ResourceNotFoundException;
 import com.fams.shared.pagination.PageResponse;
+import com.fams.shared.storage.ExplanationEvidenceStorageService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -41,6 +42,7 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -75,6 +77,7 @@ public class CheckinService {
     private final FaceVerifyJobPublisher faceVerifyJobPublisher;
     private final FaceProfileRepository faceProfileRepository;
     private final LivenessChallengeRepository livenessChallengeRepository;
+    private final ExplanationEvidenceStorageService evidenceStorageService;
 
     public CheckinService(EmployeeRepository employeeRepository,
                           AssignmentService assignmentService,
@@ -87,7 +90,8 @@ public class CheckinService {
                           AttendanceSummaryService attendanceSummaryService,
                           FaceVerifyJobPublisher faceVerifyJobPublisher,
                           FaceProfileRepository faceProfileRepository,
-                          LivenessChallengeRepository livenessChallengeRepository) {
+                          LivenessChallengeRepository livenessChallengeRepository,
+                          ExplanationEvidenceStorageService evidenceStorageService) {
         this.employeeRepository = employeeRepository;
         this.assignmentService = assignmentService;
         this.siteRepository = siteRepository;
@@ -100,6 +104,7 @@ public class CheckinService {
         this.faceVerifyJobPublisher = faceVerifyJobPublisher;
         this.faceProfileRepository = faceProfileRepository;
         this.livenessChallengeRepository = livenessChallengeRepository;
+        this.evidenceStorageService = evidenceStorageService;
     }
 
     // ── Task 67: Available sites ──────────────────────────────────────────────
@@ -572,11 +577,24 @@ public class CheckinService {
     public PageResponse<CheckinResponse> getCheckinHistory(UUID tenantId, UUID callerUserId,
                                                             OffsetDateTime from, OffsetDateTime to,
                                                             int page, int size) {
+        return getCheckinHistory(tenantId, callerUserId, null, from, to, page, size);
+    }
+
+    /** @param status found via audit (2026-08-02) — lets an employee filter their own history to
+     *  status=pending_review, i.e. "which of my check-ins need an explanation right now" — the
+     *  employee-facing half of the same "needs my attention" inbox as ViolationService
+     *  #listMyViolations (the two are still separate lists, since a checkin and a violation are
+     *  genuinely different objects, but both are now at least individually filterable/findable
+     *  instead of the employee having to page through everything). */
+    @Transactional(readOnly = true)
+    public PageResponse<CheckinResponse> getCheckinHistory(UUID tenantId, UUID callerUserId, String status,
+                                                            OffsetDateTime from, OffsetDateTime to,
+                                                            int page, int size) {
         Employee employee = resolveEmployee(tenantId, callerUserId);
 
         PageRequest pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "checkInAt"));
         Specification<CheckinRecord> spec =
-                CheckinSpecification.build(tenantId, employee.getId(), null, null, from, to);
+                CheckinSpecification.build(tenantId, employee.getId(), null, status, from, to);
         Page<CheckinRecord> resultPage = checkinRepository.findAll(spec, pageable);
 
         log.info("Check-in history: tenantId={} employeeId={} from={} to={} total={}",
@@ -660,8 +678,12 @@ public class CheckinService {
                     "Check-in record does not belong to this employee");
         }
 
-        record.setEmployeeNote(request.getNote());
-        record.setEmployeePhotoUrl(request.getPhotoUrl());
+        if (org.springframework.util.StringUtils.hasText(request.getPhotoUrl())) {
+            throw new IllegalArgumentException(
+                    "photoUrl is no longer accepted; upload photo using multipart/form-data");
+        }
+        record.setEmployeeNote(request.getNote().trim());
+        // A note-only update must not silently remove previously uploaded private evidence.
         checkinRepository.save(record);
 
         log.info("Employee explanation submitted: checkinId={} employeeId={}", checkinId, employee.getId());
@@ -669,9 +691,43 @@ public class CheckinService {
         return com.fams.shared.dto.ExplanationResponse.builder()
                 .id(record.getId())
                 .employeeNote(record.getEmployeeNote())
-                .employeePhotoUrl(record.getEmployeePhotoUrl())
+                .employeePhotoUrl(toEvidenceUrl(record))
                 .updatedAt(record.getUpdatedAt())
                 .build();
+    }
+
+    @Transactional
+    public com.fams.shared.dto.ExplanationResponse explainCheckinWithPhoto(
+            UUID tenantId, UUID checkinId, String note, MultipartFile photo, UUID callerUserId) {
+        Employee employee = resolveEmployee(tenantId, callerUserId);
+        CheckinRecord record = checkinRepository.findByIdAndTenantIdAndDeletedAtIsNull(checkinId, tenantId)
+                .orElseThrow(() -> new ResourceNotFoundException("Check-in record not found: " + checkinId));
+        if (!record.getEmployeeId().equals(employee.getId())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "Check-in record does not belong to this employee");
+        }
+        if (!org.springframework.util.StringUtils.hasText(note)) {
+            throw new IllegalArgumentException("note is required");
+        }
+        String marker = evidenceStorageService.store(tenantId, "checkin", checkinId, photo);
+        record.setEmployeeNote(note.trim());
+        record.setEmployeePhotoUrl(marker);
+        checkinRepository.save(record);
+        return com.fams.shared.dto.ExplanationResponse.builder()
+                .id(record.getId())
+                .employeeNote(record.getEmployeeNote())
+                .employeePhotoUrl(toEvidenceUrl(record))
+                .updatedAt(record.getUpdatedAt())
+                .build();
+    }
+
+    @Transactional(readOnly = true)
+    public ExplanationEvidenceStorageService.StoredEvidence getExplanationEvidence(
+            UUID tenantId, UUID checkinId, UUID callerUserId, boolean callerIsPlatformAdmin) {
+        getCheckinDetail(tenantId, checkinId, callerUserId, callerIsPlatformAdmin);
+        CheckinRecord record = checkinRepository.findByIdAndTenantIdAndDeletedAtIsNull(checkinId, tenantId)
+                .orElseThrow(() -> new ResourceNotFoundException("Check-in record not found: " + checkinId));
+        return evidenceStorageService.load(record.getEmployeePhotoUrl());
     }
 
     // ── Task 111: HR override check-in ──────────────────────────────────────────
@@ -819,12 +875,23 @@ public class CheckinService {
                 .note(r.getNote())
                 .overriddenBy(r.getOverriddenBy())
                 .overriddenAt(r.getOverriddenAt())
+                .employeeNote(r.getEmployeeNote())
+                .employeePhotoUrl(toEvidenceUrl(r))
                 .employee(empInfo)
                 .site(siteInfo)
                 .shift(shiftInfo)
                 .createdAt(r.getCreatedAt())
                 .updatedAt(r.getUpdatedAt())
                 .build();
+    }
+
+    private String toEvidenceUrl(CheckinRecord record) {
+        String stored = record.getEmployeePhotoUrl();
+        if (stored != null && stored.startsWith(ExplanationEvidenceStorageService.MARKER_PREFIX)) {
+            return "/api/v1/tenants/" + record.getTenantId() + "/checkin/"
+                    + record.getId() + "/explanation-photo";
+        }
+        return stored;
     }
 
     public CheckinResponse toCheckinResponse(CheckinRecord r) {
@@ -860,6 +927,8 @@ public class CheckinService {
                 .checkoutFaceVerifyScore(r.getCheckoutFaceVerifyScore())
                 .effectiveCheckinPolicy(r.getEffectiveCheckinPolicy())
                 .source(r.getSource())
+                .employeeNote(r.getEmployeeNote())
+                .employeePhotoUrl(toEvidenceUrl(r))
                 .build();
     }
 

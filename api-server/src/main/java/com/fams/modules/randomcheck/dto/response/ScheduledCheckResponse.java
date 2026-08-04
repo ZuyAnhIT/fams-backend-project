@@ -9,7 +9,7 @@ import java.time.OffsetDateTime;
 import java.util.UUID;
 
 @Getter
-@Builder
+@Builder(toBuilder = true)
 public class ScheduledCheckResponse {
 
     @Schema(description = "Scheduled check UUID")
@@ -72,4 +72,10 @@ public class ScheduledCheckResponse {
 
     @Schema(description = "Comma-separated failure reasons (e.g. 'location_mismatch,face_fail'), null if passed or not yet responded")
     private String failureReason;
+
+    @Schema(description = "Only set on the response to a manual-trigger request — how many manual "
+            + "checks (including this one) have been sent to this employee today. Informational only, "
+            + "not enforced as a limit — lets the HR UI show a soft warning ('already sent N today') "
+            + "without blocking urgent re-verification.")
+    private Integer manualTriggerCountToday;
 }

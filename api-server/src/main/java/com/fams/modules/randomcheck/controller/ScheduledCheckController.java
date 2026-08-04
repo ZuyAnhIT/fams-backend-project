@@ -84,6 +84,7 @@ public class ScheduledCheckController {
     private final SiteScopeService siteScopeService;
     private final SiteRepository siteRepository;
     private final AiServiceClient aiServiceClient;
+    private final com.fams.modules.violation.repository.ViolationRepository violationRepository;
 
     public ScheduledCheckController(ScheduledCheckGeneratorService generatorService,
                                     ScheduledCheckRepository scheduledCheckRepository,
@@ -98,7 +99,8 @@ public class ScheduledCheckController {
                                     ManualCheckService manualCheckService,
                                     SiteScopeService siteScopeService,
                                     SiteRepository siteRepository,
-                                    AiServiceClient aiServiceClient) {
+                                    AiServiceClient aiServiceClient,
+                                    com.fams.modules.violation.repository.ViolationRepository violationRepository) {
         this.generatorService = generatorService;
         this.scheduledCheckRepository = scheduledCheckRepository;
         this.checkResponseRepository = checkResponseRepository;
@@ -113,6 +115,7 @@ public class ScheduledCheckController {
         this.siteScopeService = siteScopeService;
         this.siteRepository = siteRepository;
         this.aiServiceClient = aiServiceClient;
+        this.violationRepository = violationRepository;
     }
 
     @Operation(
@@ -709,7 +712,9 @@ public class ScheduledCheckController {
         checkPermission(userDetails.getUserId(), tenantId, userDetails.isPlatformAdmin());
         com.fams.modules.randomcheck.entity.ScheduledCheck check =
                 manualCheckService.trigger(tenantId, request, userDetails.getUserId());
-        return ResponseEntity.status(201).body(ApiResponse.success(toResponse(check)));
+        int countToday = manualCheckService.countManualTriggersToday(
+                tenantId, check.getEmployeeId(), check.getCheckDate());
+        return ResponseEntity.status(201).body(ApiResponse.success(toResponse(check, countToday)));
     }
 
     @Operation(
@@ -826,6 +831,18 @@ public class ScheduledCheckController {
     }
 
     private ScheduledCheckDetailResponse toDetailResponse(ScheduledCheck s, CheckResponseDto responseDto) {
+        List<ScheduledCheckDetailResponse.ViolationSummary> violations = violationRepository
+                .findByScheduledCheckIdAndDeletedAtIsNull(s.getId())
+                .stream()
+                .map(v -> ScheduledCheckDetailResponse.ViolationSummary.builder()
+                        .id(v.getId())
+                        .violationType(v.getViolationType())
+                        .resolved(v.isResolved())
+                        .resolution(v.getResolution())
+                        .description(v.getDescription())
+                        .build())
+                .collect(Collectors.toList());
+
         return ScheduledCheckDetailResponse.builder()
                 .id(s.getId())
                 .tenantId(s.getTenantId())
@@ -844,6 +861,7 @@ public class ScheduledCheckController {
                 .response(responseDto)
                 .manualReason(s.getManualReason())
                 .triggeredBy(s.getTriggeredBy())
+                .violations(violations)
                 .build();
     }
 
@@ -869,6 +887,11 @@ public class ScheduledCheckController {
 
     private ScheduledCheckResponse toResponse(ScheduledCheck s) {
         return toResponse(s, null, null, null, null);
+    }
+
+    private ScheduledCheckResponse toResponse(ScheduledCheck s, Integer manualTriggerCountToday) {
+        ScheduledCheckResponse base = toResponse(s, null, null, null, null);
+        return base.toBuilder().manualTriggerCountToday(manualTriggerCountToday).build();
     }
 
     private ScheduledCheckResponse toResponse(ScheduledCheck s, String employeeName, String siteName,

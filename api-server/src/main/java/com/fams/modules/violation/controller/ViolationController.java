@@ -21,6 +21,8 @@ import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.CacheControl;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -74,6 +76,10 @@ public class ViolationController {
                 @RequestParam(required = false) LocalDate from,
             @Parameter(description = "Filter: check date to (inclusive, ISO date e.g. 2026-07-31)")
                 @RequestParam(required = false) LocalDate to,
+            @Parameter(description = "Filter by scheduled-check UUID — precise dispute-resolution lookup "
+                    + "for 'which violation(s) came from this exact check', instead of filtering by "
+                    + "employeeId+date range and guessing which row matches")
+                @RequestParam(required = false) UUID scheduledCheckId,
             @Parameter(description = "Sort field (default: checkDate)")
                 @RequestParam(defaultValue = "checkDate") String sortBy,
             @Parameter(description = "Sort direction: asc | desc (default: desc)")
@@ -84,12 +90,44 @@ public class ViolationController {
                 @RequestParam(defaultValue = "20") int size,
             @AuthenticationPrincipal FamsUserDetails userDetails) {
         size = Math.min(size, 100);
-        log.info("HR violation list tenantId={} employeeId={} siteId={} violationType={} resolved={} page={} size={}",
-                tenantId, employeeId, siteId, violationType, resolved, page, size);
+        log.info("HR violation list tenantId={} employeeId={} siteId={} violationType={} resolved={} "
+                        + "scheduledCheckId={} page={} size={}",
+                tenantId, employeeId, siteId, violationType, resolved, scheduledCheckId, page, size);
         PageResponse<ViolationListResponse> result = violationService.listViolations(
-                tenantId, employeeId, siteId, violationType, resolved, from, to,
+                tenantId, employeeId, siteId, violationType, resolved, from, to, scheduledCheckId,
                 sortBy, sortDir, page, size,
                 userDetails.getUserId(), userDetails.isPlatformAdmin());
+        return ResponseEntity.ok(ApiResponse.success(result));
+    }
+
+    @Operation(
+        summary = "Employee views their own violations needing attention",
+        description = "Self-scoped 'needs my explanation' inbox — no violations:list permission needed, "
+                      + "scoping is forced to the calling employee's own record (mirrors GET "
+                      + ".../scheduled-checks/my-pending). Pass resolved=false to see only violations "
+                      + "still awaiting HR review, or omit to see all of the employee's own history. "
+                      + "Must be called BEFORE /{violationId} in this file — path collision otherwise."
+    )
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "200",
+            description = "Paginated list of the caller's own violations"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "404",
+            description = "No employee record found for this user in this tenant")
+    })
+    @GetMapping("/my")
+    public ResponseEntity<ApiResponse<PageResponse<ViolationListResponse>>> listMyViolations(
+            @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
+            @Parameter(description = "Filter by resolved status — pass false to see only violations "
+                    + "still awaiting HR review") @RequestParam(required = false) Boolean resolved,
+            @Parameter(description = "Zero-based page index (default 0)")
+                @RequestParam(defaultValue = "0") int page,
+            @Parameter(description = "Page size (default 20, max 100)")
+                @RequestParam(defaultValue = "20") int size,
+            @AuthenticationPrincipal FamsUserDetails userDetails) {
+        PageResponse<ViolationListResponse> result = violationService.listMyViolations(
+                tenantId, userDetails.getUserId(), resolved, page, size);
         return ResponseEntity.ok(ApiResponse.success(result));
     }
 
@@ -271,7 +309,7 @@ public class ViolationController {
             responseCode = "404",
             description = "Violation not found or employee profile not found")
     })
-    @PostMapping("/{violationId}/explain")
+    @PostMapping(value = "/{violationId}/explain", consumes = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<ApiResponse<ExplanationResponse>> explainViolation(
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
             @Parameter(description = "Violation UUID") @PathVariable UUID violationId,
@@ -282,5 +320,33 @@ public class ViolationController {
         ExplanationResponse response = violationService.explainViolation(
                 tenantId, violationId, request, userDetails.getUserId());
         return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    @Operation(summary = "Employee submits a violation explanation with private image evidence")
+    @PostMapping(value = "/{violationId}/explain", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<ApiResponse<ExplanationResponse>> explainViolationWithPhoto(
+            @PathVariable UUID tenantId,
+            @PathVariable UUID violationId,
+            @RequestParam("note") String note,
+            @RequestPart("photo") org.springframework.web.multipart.MultipartFile photo,
+            @AuthenticationPrincipal FamsUserDetails userDetails) {
+        ExplanationResponse response = violationService.explainViolationWithPhoto(
+                tenantId, violationId, note, photo, userDetails.getUserId());
+        return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    @Operation(summary = "HR reads private employee explanation evidence")
+    @PreAuthorize("hasAuthority('violations:read')")
+    @GetMapping("/{violationId}/explanation-photo")
+    public ResponseEntity<byte[]> getExplanationPhoto(
+            @PathVariable UUID tenantId,
+            @PathVariable UUID violationId,
+            @AuthenticationPrincipal FamsUserDetails userDetails) {
+        var evidence = violationService.getExplanationEvidence(
+                tenantId, violationId, userDetails.getUserId(), userDetails.isPlatformAdmin());
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(evidence.contentType()))
+                .cacheControl(CacheControl.noStore())
+                .body(evidence.bytes());
     }
 }

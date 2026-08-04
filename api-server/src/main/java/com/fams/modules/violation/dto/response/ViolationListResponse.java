@@ -38,11 +38,18 @@ public class ViolationListResponse {
     @Schema(description = "When the violation was resolved (null if unresolved)")
     private OffsetDateTime resolvedAt;
 
+    @Schema(description = "Resolution outcome (null while unresolved)",
+            allowableValues = {"confirmed", "dismissed"})
+    private String resolution;
+
     @Schema(description = "Employee-submitted explanation note")
     private String employeeNote;
 
     @Schema(description = "URL of photo submitted by employee as evidence")
     private String employeePhotoUrl;
+
+    @Schema(description = "Reporting flag only; does not automatically deduct attendance or payroll")
+    private boolean affectsAttendance;
 
     @Schema(description = "When the violation record was created")
     private OffsetDateTime createdAt;

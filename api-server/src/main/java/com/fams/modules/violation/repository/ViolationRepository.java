@@ -15,6 +15,11 @@ public interface ViolationRepository extends JpaRepository<Violation, UUID>, Jpa
 
     boolean existsByScheduledCheckIdAndViolationType(UUID scheduledCheckId, String violationType);
 
+    /** Dispute-resolution lookup (found via audit 2026-08-02): HR viewing a scheduled-check's
+     *  detail previously had to separately call GET /violations and filter client-side, with no
+     *  guaranteed-precise join back to the specific check. */
+    List<Violation> findByScheduledCheckIdAndDeletedAtIsNull(UUID scheduledCheckId);
+
     java.util.Optional<Violation> findByIdAndTenantIdAndDeletedAtIsNull(UUID id, UUID tenantId);
 
     @Query("SELECT COUNT(v) FROM Violation v WHERE v.tenantId = :tenantId AND v.resolved = false AND v.deletedAt IS NULL")

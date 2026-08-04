@@ -3,6 +3,7 @@ package com.fams.modules.randomcheck.service;
 import com.fams.modules.assignment.entity.Assignment;
 import com.fams.modules.assignment.repository.AssignmentRepository;
 import com.fams.modules.assignment.util.DayOfWeekBitmask;
+import com.fams.modules.employee.repository.FaceProfileRepository;
 import com.fams.modules.randomcheck.entity.RandomCheckConfig;
 import com.fams.modules.randomcheck.entity.ScheduledCheck;
 import com.fams.modules.randomcheck.redis.RandomCheckDispatchQueue;
@@ -35,6 +36,7 @@ public class ScheduledCheckGeneratorService {
     private final SiteRepository siteRepository;
     private final RandomCheckDispatchQueue dispatchQueue;
     private final PlanLimitEnforcementService planLimitEnforcementService;
+    private final FaceProfileRepository faceProfileRepository;
     private final SecureRandom random = new SecureRandom();
 
     public ScheduledCheckGeneratorService(AssignmentRepository assignmentRepository,
@@ -43,7 +45,8 @@ public class ScheduledCheckGeneratorService {
                                           ShiftRepository shiftRepository,
                                           SiteRepository siteRepository,
                                           RandomCheckDispatchQueue dispatchQueue,
-                                          PlanLimitEnforcementService planLimitEnforcementService) {
+                                          PlanLimitEnforcementService planLimitEnforcementService,
+                                          FaceProfileRepository faceProfileRepository) {
         this.assignmentRepository = assignmentRepository;
         this.configRepository = configRepository;
         this.scheduledCheckRepository = scheduledCheckRepository;
@@ -51,6 +54,7 @@ public class ScheduledCheckGeneratorService {
         this.siteRepository = siteRepository;
         this.dispatchQueue = dispatchQueue;
         this.planLimitEnforcementService = planLimitEnforcementService;
+        this.faceProfileRepository = faceProfileRepository;
     }
 
     /**
@@ -168,7 +172,31 @@ public class ScheduledCheckGeneratorService {
                 window[0], window[1],
                 checksToGenerate, config.getMinIntervalMinutes());
 
-        String snapshot = buildSnapshot(config);
+        // Fail-safe (found via audit 2026-08-02): a location_face/location_face_liveness config
+        // used to be snapshotted as-is regardless of whether this employee was ever enrolled and
+        // HR-approved for Face ID — the check would still fire, the employee would be asked to
+        // respond, and CheckResponseService would then raise a face_fail violation purely because
+        // "no enrolled profile", penalizing them for something they were never approved to do.
+        // This mirrors the fail-safe already established for regular check-in's checkin_policy
+        // (an employee without an approved face profile is never blocked/blamed by a face
+        // requirement they can't satisfy) — downgrade the SNAPSHOT only (not the tenant/site
+        // config itself) to location_only for this specific check when enrollment is missing, so
+        // location auditing still happens but no bogus biometric failure can be raised.
+        String effectiveCheckMode = config.getCheckMode();
+        if (!"location_only".equals(effectiveCheckMode)) {
+            boolean faceEnrolled = faceProfileRepository
+                    .findByEmployeeIdAndTenantId(assignment.getEmployeeId(), assignment.getTenantId())
+                    .map(fp -> "enrolled".equals(fp.getStatus()))
+                    .orElse(false);
+            if (!faceEnrolled) {
+                log.info("Downgrading random-check mode to location_only for assignment={} "
+                                + "employeeId={} — configured mode '{}' but employee has no approved Face ID",
+                        assignment.getId(), assignment.getEmployeeId(), config.getCheckMode());
+                effectiveCheckMode = "location_only";
+            }
+        }
+
+        String snapshot = buildSnapshot(config, effectiveCheckMode);
 
         List<ScheduledCheck> checks = new ArrayList<>();
         for (int i = 0; i < checkTimes.size(); i++) {
@@ -262,14 +290,17 @@ public class ScheduledCheckGeneratorService {
         return Optional.of(new LocalTime[]{start, end});
     }
 
-    private String buildSnapshot(RandomCheckConfig c) {
+    /** @param effectiveCheckMode usually {@code c.getCheckMode()}, but callers pass a downgraded
+     *  value (e.g. "location_only") when this specific check shouldn't require Face ID/liveness
+     *  — see the enrollment fail-safe in generateForAssignment(). */
+    private String buildSnapshot(RandomCheckConfig c, String effectiveCheckMode) {
         // Manual JSON construction avoids pulling in Jackson directly here
         return String.format(
                 "{\"configId\":\"%s\",\"checkMode\":\"%s\",\"checksPerShift\":%d," +
                 "\"minIntervalMinutes\":%d,\"allowedStartTime\":\"%s\"," +
                 "\"allowedEndTime\":\"%s\",\"applicableRoles\":%s," +
                 "\"responseWindowSeconds\":%d}",
-                c.getId(), c.getCheckMode(), c.getChecksPerShift(),
+                c.getId(), effectiveCheckMode, c.getChecksPerShift(),
                 c.getMinIntervalMinutes(), c.getAllowedStartTime(), c.getAllowedEndTime(),
                 buildRolesJson(c.getApplicableRoles()),
                 c.getResponseWindowSeconds());

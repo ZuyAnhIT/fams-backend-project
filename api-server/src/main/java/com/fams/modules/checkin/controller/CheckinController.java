@@ -23,6 +23,8 @@ import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.CacheControl;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -186,6 +188,9 @@ public class CheckinController {
     @GetMapping("/history")
     public ResponseEntity<ApiResponse<PageResponse<CheckinResponse>>> getCheckinHistory(
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
+            @Parameter(description = "Filter by status (e.g. pass status=pending_review to see only "
+                    + "check-ins currently needing an explanation)")
+                @RequestParam(required = false) String status,
             @Parameter(description = "Filter: check-in from (inclusive, ISO-8601)")
                 @RequestParam(required = false) OffsetDateTime from,
             @Parameter(description = "Filter: check-in to (inclusive, ISO-8601)")
@@ -196,10 +201,10 @@ public class CheckinController {
                 @RequestParam(defaultValue = "20") int size,
             @AuthenticationPrincipal FamsUserDetails userDetails) {
         size = Math.min(size, 100);
-        log.info("Check-in history tenantId={} userId={} from={} to={} page={} size={}",
-                tenantId, userDetails.getUserId(), from, to, page, size);
+        log.info("Check-in history tenantId={} userId={} status={} from={} to={} page={} size={}",
+                tenantId, userDetails.getUserId(), status, from, to, page, size);
         PageResponse<CheckinResponse> result =
-                checkinService.getCheckinHistory(tenantId, userDetails.getUserId(), from, to, page, size);
+                checkinService.getCheckinHistory(tenantId, userDetails.getUserId(), status, from, to, page, size);
         return ResponseEntity.ok(ApiResponse.success(result));
     }
 
@@ -294,7 +299,7 @@ public class CheckinController {
             description = "Check-in not found")
     })
     @PreAuthorize("hasAuthority('checkins:read')")
-    @PostMapping("/{checkinId}/explain")
+    @PostMapping(value = "/{checkinId}/explain", consumes = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<ApiResponse<ExplanationResponse>> explainCheckin(
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
             @Parameter(description = "Check-in record UUID") @PathVariable UUID checkinId,
@@ -305,6 +310,35 @@ public class CheckinController {
         ExplanationResponse response =
                 checkinService.explainCheckin(tenantId, checkinId, request, userDetails.getUserId());
         return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    @Operation(summary = "Employee submits a check-in explanation with private image evidence")
+    @PreAuthorize("hasAuthority('checkins:read')")
+    @PostMapping(value = "/{checkinId}/explain", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<ApiResponse<ExplanationResponse>> explainCheckinWithPhoto(
+            @PathVariable UUID tenantId,
+            @PathVariable UUID checkinId,
+            @RequestParam("note") String note,
+            @RequestPart("photo") org.springframework.web.multipart.MultipartFile photo,
+            @AuthenticationPrincipal FamsUserDetails userDetails) {
+        ExplanationResponse response = checkinService.explainCheckinWithPhoto(
+                tenantId, checkinId, note, photo, userDetails.getUserId());
+        return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    @Operation(summary = "HR reads private employee check-in explanation evidence")
+    @PreAuthorize("hasAuthority('checkins:list')")
+    @GetMapping("/{checkinId}/explanation-photo")
+    public ResponseEntity<byte[]> getExplanationPhoto(
+            @PathVariable UUID tenantId,
+            @PathVariable UUID checkinId,
+            @AuthenticationPrincipal FamsUserDetails userDetails) {
+        var evidence = checkinService.getExplanationEvidence(
+                tenantId, checkinId, userDetails.getUserId(), userDetails.isPlatformAdmin());
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(evidence.contentType()))
+                .cacheControl(CacheControl.noStore())
+                .body(evidence.bytes());
     }
 
     @Operation(

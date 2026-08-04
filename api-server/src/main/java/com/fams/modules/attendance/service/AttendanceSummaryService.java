@@ -145,6 +145,29 @@ public class AttendanceSummaryService {
     }
 
     /**
+     * Called by ViolationService right after HR confirms or dismisses a violation (found via
+     * audit 2026-08-02: resolving a violation previously never touched AttendanceSummary at all,
+     * so {@code hasRandomCheckFailure} — see {@link com.fams.modules.randomcheck.repository
+     * .ScheduledCheckRepository#existsFailedOrNoResponseCheck} — stayed stuck at whatever it was
+     * computed as before HR's decision, even after a dismissal proved the failure was a false
+     * positive). No-op if no summary row exists yet for that employee/site/date — same early-
+     * return semantics as {@link #recompute}: there's nothing to refresh until the day actually
+     * has check-in activity, and this call must never CREATE a summary row on its own.
+     */
+    @Transactional
+    public void recomputeIfSummaryExists(UUID tenantId, UUID employeeId, UUID siteId, LocalDate date) {
+        summaryRepository.findByTenantIdAndEmployeeIdAndSiteIdAndAttendanceDateAndDeletedAtIsNull(
+                tenantId, employeeId, siteId, date
+        ).ifPresent(existing -> {
+            String timezone = siteRepository.findByIdAndTenantIdAndDeletedAtIsNull(siteId, tenantId)
+                    .map(Site::getTimezone)
+                    .orElse("UTC");
+            recompute(tenantId, employeeId, siteId, date, timezone,
+                    existing.getShiftId(), existing.getAssignmentId());
+        });
+    }
+
+    /**
      * Nightly catch-up: recomputes summaries for EVERY tenant's check-in records whose local
      * attendance date equals {@code targetDate}. Called only by AttendanceSummaryJob — a system
      * batch job, so tenant-agnostic is correct here. User-facing/API-triggered recompute must go

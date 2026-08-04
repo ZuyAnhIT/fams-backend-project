@@ -3,6 +3,7 @@ package com.fams.modules.checkin.controller;
 import com.fams.modules.checkin.dto.request.FaceResultCallbackRequest;
 import com.fams.modules.checkin.entity.CheckinRecord;
 import com.fams.modules.checkin.repository.CheckinRepository;
+import com.fams.modules.employee.repository.FaceProfileRepository;
 import com.fams.modules.employee.service.FaceIdService;
 import com.fams.modules.randomcheck.service.CheckResponseService;
 import com.fams.modules.shift.entity.Shift;
@@ -33,6 +34,7 @@ public class FaceResultCallbackController {
     private final SiteRepository siteRepository;
     private final ShiftRepository shiftRepository;
     private final ViolationRepository violationRepository;
+    private final FaceProfileRepository faceProfileRepository;
 
     public FaceResultCallbackController(
             @Value("${app.ai.internal-secret}") String internalSecret,
@@ -41,7 +43,8 @@ public class FaceResultCallbackController {
             FaceIdService faceIdService,
             SiteRepository siteRepository,
             ShiftRepository shiftRepository,
-            ViolationRepository violationRepository) {
+            ViolationRepository violationRepository,
+            FaceProfileRepository faceProfileRepository) {
         this.internalSecret = internalSecret;
         this.checkinRepository = checkinRepository;
         this.checkResponseService = checkResponseService;
@@ -49,6 +52,7 @@ public class FaceResultCallbackController {
         this.siteRepository = siteRepository;
         this.shiftRepository = shiftRepository;
         this.violationRepository = violationRepository;
+        this.faceProfileRepository = faceProfileRepository;
     }
 
     @PostMapping("/face-result")
@@ -98,6 +102,31 @@ public class FaceResultCallbackController {
                     } else {
                         checkinRepository.applyCheckinFaceResult(record.getId(), request.getFaceVerified(),
                                 request.getLivenessVerified(), request.getFaceVerifyScore());
+                    }
+
+                    // Race-condition guard (audit 2026-08-03): the enrollment check that gates
+                    // whether Face ID is even required happens synchronously at check-in submit
+                    // time (CheckinService#enforceCheckinPolicy), but the actual face-match runs
+                    // async in an external AI service and lands here later. If HR revokes the
+                    // employee's Face ID enrollment in that window, a stale "verified=true"
+                    // result must not be trusted as if the profile were still valid — otherwise
+                    // a since-revoked face could silently pass a check-in. A revoked profile
+                    // downgrades a reported success to pending_review for HR to confirm manually;
+                    // it does NOT create a violation, since this is a timing artifact, not
+                    // evidence the employee did anything wrong.
+                    boolean reportedSuccess = Boolean.TRUE.equals(request.getFaceVerified());
+                    if (reportedSuccess) {
+                        boolean stillEnrolled = faceProfileRepository
+                                .findByEmployeeIdAndTenantId(record.getEmployeeId(), record.getTenantId())
+                                .map(fp -> "enrolled".equals(fp.getStatus()))
+                                .orElse(false);
+                        if (!stillEnrolled) {
+                            log.warn("Face verified=true callback for checkinId={} employeeId={} but Face ID "
+                                            + "is no longer enrolled (revoked mid-flight) — downgrading to "
+                                            + "pending_review instead of trusting the stale match",
+                                    record.getId(), record.getEmployeeId());
+                            checkinRepository.escalateToPendingReviewIfValid(record.getId());
+                        }
                     }
 
                     // Mirrors the random-check module's face_fail/liveness_fail handling

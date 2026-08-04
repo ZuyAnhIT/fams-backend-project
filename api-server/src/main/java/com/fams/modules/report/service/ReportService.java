@@ -766,8 +766,10 @@ public class ReportService {
                 .description(v.getDescription())
                 .resolved(v.isResolved())
                 .resolvedAt(v.getResolvedAt())
+                .resolution(v.getResolution())
                 .employeeNote(v.getEmployeeNote())
                 .employeePhotoUrl(v.getEmployeePhotoUrl())
+                .affectsAttendance(v.isAffectsAttendance())
                 .createdAt(v.getCreatedAt())
                 .build();
     }

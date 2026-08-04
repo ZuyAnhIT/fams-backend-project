@@ -261,6 +261,15 @@ public class CheckResponseService {
 
     private void createViolation(ScheduledCheck check, UUID checkResponseId,
                                   String violationType, String description) {
+        // Idempotency guard (found via audit 2026-08-02): applyFaceResult() is invoked by the
+        // fams-ai callback, which may retry on a network hiccup — without this guard a retried
+        // callback would raise a second face_fail/liveness_fail violation for the exact same
+        // check_response_id. Same guard pattern already used by NoResponseViolationJob.
+        if (violationRepository.existsByScheduledCheckIdAndViolationType(check.getId(), violationType)) {
+            log.debug("Skipping duplicate {} violation for checkId={} — already exists",
+                    violationType, check.getId());
+            return;
+        }
         Violation violation = Violation.builder()
                 .tenantId(check.getTenantId())
                 .employeeId(check.getEmployeeId())

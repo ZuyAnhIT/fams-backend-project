@@ -119,7 +119,7 @@ Trước đây check-out chỉ có GPS, không xác thực gì thêm — một l
 
 ### 2.2 Thiết kế đã chọn: bắt buộc ngang check-in
 
-Bạn xác nhận qua câu hỏi lựa chọn: **check-out phải xác thực cùng mức độ nghiêm ngặt với check-in** (không được yếu hơn). `submitCheckout` re-derive `effectivePolicy` ngay tại thời điểm check-out (không tái sử dụng policy đã áp lúc check-in — vì policy không phải số liệu ảnh hưởng lương như giờ ca, nên phản ánh chính sách hiện tại là hợp lý và đúng hơn), rồi gọi đúng `enforceCheckinPolicy` dùng chung với check-in, chỉ khác `purpose="checkout"`.
+Bạn xác nhận qua câu hỏi lựa chọn: **check-out phải xác thực cùng mức độ nghiêm ngặt với check-in** (không được yếu hơn). Theo bản vá V78 tại mục 9.3, `submitCheckout` dùng `effectiveCheckinPolicy` đã snapshot trên `CheckinRecord` lúc check-in; chỉ dữ liệu lịch sử trước V78 không có snapshot mới fallback về resolve policy hiện tại. Cách này giữ hai đầu phiên cùng mức xác thực và tránh kẹt nhân viên nếu HR đổi policy giữa ca. Sau đó backend gọi chung `enforceCheckinPolicy`, chỉ khác `purpose="checkout"`.
 
 `SubmitCheckoutRequest` bổ sung 3 field mới, đối xứng với check-in: `employeePhotoBase64`, `requiresLiveness`, `livenessChallengeId`.
 
@@ -219,3 +219,12 @@ Sau khi sửa: `test_available_sites.sh` (6/6 pass), `test_basic_checkin.sh` (11
 - **`work_minutes`** (mục Tính năng 7 trong yêu cầu ban đầu): logic cap theo late-checkout/overtime (Task 73/74) đã đúng, dùng snapshot giờ ca tại thời điểm check-in (không re-fetch live) — xác nhận đúng, không đổi.
 - **Kiểm tra check-in sớm/check-out muộn** (Task 71/73): đã đúng từ trước, không đổi.
 - **Hiển thị kết quả check-in/out**: `CheckinResponse`/`CheckinDetailResponse` đã đủ field cần thiết; bổ sung 3 field checkout Face ID mới (`checkoutFaceVerified`/`checkoutLivenessVerified`/`checkoutFaceVerifyScore`) đối xứng với 3 field check-in đã có sẵn.
+
+## 9. Giải trình check-in có ảnh private (bổ sung 2026-08-04)
+
+`POST /tenants/{tenantId}/checkin/{checkinId}/explain` hỗ trợ:
+
+- `application/json`: `{ "note": "..." }`;
+- `multipart/form-data`: `note` + file `photo` (JPEG/PNG/WEBP, tối đa 5MB, kiểm tra magic bytes).
+
+Ảnh được lưu private trong S3/MinIO. `CheckinDetailResponse` giờ trả thêm `employeeNote` và `employeePhotoUrl`; URL ảnh là endpoint có xác thực `GET .../checkin/{checkinId}/explanation-photo`, quyền `checkins:list`, không phải public object URL.
