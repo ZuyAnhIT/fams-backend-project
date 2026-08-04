@@ -139,6 +139,7 @@ Tương tự 3 field check-in đã có sẵn (`faceVerified`/`livenessVerified`/
 - Cột trạng thái nên phân biệt được nguyên nhân `pending_review` nếu có thể (dựa vào `faceVerified`/`checkoutFaceVerified`/`checkInInsideGeofence`/`checkOutInsideGeofence` — nếu geofence đều `true` mà vẫn `pending_review`, khả năng cao là do face fail, nên hiện gợi ý "Có thể do xác thực khuôn mặt thất bại — xem chi tiết").
 - Nút "Override trạng thái" (`PATCH .../override`) — ẩn nếu `record.status` đã đúng bằng trạng thái muốn set (backend trả `400` "already in status X — no change needed", nên FE disable trước khi bấm nếu trạng thái không đổi).
 - Nếu record đến từ offline sync và bị escalate do `gps_face_liveness` không thể chứng minh offline, HR detail nên hiện rõ ghi chú "Chấm công offline — không thể xác thực chủ động, cần xem thủ công" thay vì để HR nhầm tưởng là gian lận.
+- Hiện `employeeNote` và ảnh giải trình. Nếu `employeePhotoUrl` là API URL FAMS, tải dưới dạng Blob bằng API client có Bearer token; không gắn URL trực tiếp vào `<img>` vì endpoint evidence không public.
 
 ## 7. Sơ đồ nav đề xuất
 

@@ -55,6 +55,16 @@ public class ViolationDetailResponse {
     @Schema(description = "UUID of the user who resolved the violation")
     private UUID resolvedBy;
 
+    @Schema(description = "Resolution outcome (null while unresolved)",
+            allowableValues = {"confirmed", "dismissed"})
+    private String resolution;
+
+    @Schema(description = "HR note/reason attached to the resolution")
+    private String resolutionReason;
+
+    @Schema(description = "Reporting flag only; does not automatically deduct attendance or payroll")
+    private boolean affectsAttendance;
+
     @Schema(description = "Explanation note submitted by employee")
     private String employeeNote;
 

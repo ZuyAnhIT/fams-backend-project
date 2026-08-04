@@ -113,6 +113,12 @@ public class CheckinDetailResponse {
     @Schema(description = "Timestamp of the last override, if any")
     private OffsetDateTime overriddenAt;
 
+    @Schema(description = "Employee explanation submitted for this disputed check-in")
+    private String employeeNote;
+
+    @Schema(description = "Authenticated API URL for the private explanation image, when present")
+    private String employeePhotoUrl;
+
     // ── Embedded context ──────────────────────────────────────────────────────
 
     @Schema(description = "Employee who performed the check-in")

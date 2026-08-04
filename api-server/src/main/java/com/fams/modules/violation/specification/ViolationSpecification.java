@@ -17,6 +17,16 @@ public class ViolationSpecification {
     public static Specification<Violation> build(UUID tenantId, UUID employeeId, UUID siteId,
                                                   String violationType, Boolean resolved,
                                                   LocalDate from, LocalDate to) {
+        return build(tenantId, employeeId, siteId, violationType, resolved, from, to, null);
+    }
+
+    /** @param scheduledCheckId found via audit (2026-08-02) — precise dispute-resolution lookup:
+     *  "which violation(s), if any, came from THIS exact scheduled check", instead of HR having
+     *  to filter by employeeId+date range and guess which row matches. */
+    public static Specification<Violation> build(UUID tenantId, UUID employeeId, UUID siteId,
+                                                  String violationType, Boolean resolved,
+                                                  LocalDate from, LocalDate to,
+                                                  UUID scheduledCheckId) {
         return (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
 
@@ -28,6 +38,9 @@ public class ViolationSpecification {
             }
             if (siteId != null) {
                 predicates.add(cb.equal(root.get("siteId"), siteId));
+            }
+            if (scheduledCheckId != null) {
+                predicates.add(cb.equal(root.get("scheduledCheckId"), scheduledCheckId));
             }
             if (StringUtils.hasText(violationType)) {
                 predicates.add(cb.equal(root.get("violationType"), violationType));

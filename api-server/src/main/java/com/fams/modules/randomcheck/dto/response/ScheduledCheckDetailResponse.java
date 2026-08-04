@@ -6,6 +6,7 @@ import lombok.Getter;
 
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.UUID;
 
 @Getter
@@ -63,4 +64,21 @@ public class ScheduledCheckDetailResponse {
 
     @Schema(description = "Only set for manually (HR-)triggered checks — the user who triggered it")
     private UUID triggeredBy;
+
+    @Schema(description = "Violation(s) raised from this check, if any (no_response, or "
+            + "location_fail/face_fail/liveness_fail off the response) — embedded so HR can see "
+            + "the full story of one check (dispute resolution) without a separate GET /violations "
+            + "call and client-side matching. Usually 0 or 1 entries; can be 2 for a single "
+            + "response that failed BOTH location and face/liveness checks.")
+    private List<ViolationSummary> violations;
+
+    @Getter
+    @Builder
+    public static class ViolationSummary {
+        private UUID id;
+        private String violationType;
+        private boolean resolved;
+        private String resolution;
+        private String description;
+    }
 }

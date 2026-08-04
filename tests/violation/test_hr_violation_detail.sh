@@ -36,10 +36,16 @@ if [ "$(echo "$login_resp" | tail -n 1)" -ne 200 ]; then echo "SETUP FAILED: adm
 ADMIN_TOKEN=$(echo "$login_resp" | head -n -1 | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4)
 
 TS=$(date +%s)
+OWNER_EMAIL="viol.detail.owner.${TS}@example.com"
+curl -s -o /dev/null -X POST "$BASE_URL/api/v1/auth/register" \
+    -H "Content-Type: application/json" \
+    -d "{\"email\":\"$OWNER_EMAIL\",\"password\":\"TestPass1\",\"displayName\":\"Violation Detail Owner\"}"
+docker exec fams-postgres psql -U fams_user -d fams_db -q -c \
+    "UPDATE users SET email_verified = true WHERE email = '$OWNER_EMAIL';" > /dev/null
 
 t_resp=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/tenants" \
     -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"name\":\"Violation Detail Corp ${TS}\",\"slug\":\"viol-detail-${TS}\"}")
+    -d "{\"name\":\"Violation Detail Corp ${TS}\",\"slug\":\"viol-detail-${TS}\",\"ownerEmail\":\"$OWNER_EMAIL\"}")
 if [ "$(echo "$t_resp" | tail -n 1)" -ne 201 ]; then echo "SETUP FAILED: tenant"; exit 1; fi
 TENANT_ID=$(echo "$t_resp" | head -n -1 | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 
@@ -58,7 +64,7 @@ curl -s -o /dev/null -X POST "$BASE_URL/api/v1/invitations/accept" \
 
 emp_login=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d "{\"email\":\"$INVITE_EMAIL\",\"password\":\"Employee@1234\"}")
+    -d "{\"identifier\":\"$INVITE_EMAIL\",\"password\":\"Employee@1234\"}")
 if [ "$(echo "$emp_login" | tail -n 1)" -ne 200 ]; then echo "SETUP FAILED: employee login"; exit 1; fi
 EMP_TOKEN=$(echo "$emp_login" | head -n -1 | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4)
 
@@ -110,7 +116,7 @@ echo ""
 echo "--- Test 4: Response contains required fields ---"
 if [ "$detail_status" -eq 200 ]; then
     MISSING=""
-    for field in '"id"' '"employeeId"' '"siteId"' '"violationType"' '"checkDate"' '"resolved"' '"createdAt"'; do
+    for field in '"id"' '"employeeId"' '"siteId"' '"violationType"' '"checkDate"' '"resolved"' '"resolution"' '"resolutionReason"' '"affectsAttendance"' '"createdAt"'; do
         if ! echo "$detail_body" | grep -q "$field"; then
             MISSING="$MISSING $field"
         fi
@@ -189,7 +195,7 @@ echo "--- Test 9: Wrong tenant → 404 (tenant isolation) ---"
 OTHER_TS=$((TS + 1))
 other_t=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/tenants" \
     -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"name\":\"Other Corp ${OTHER_TS}\",\"slug\":\"other-corp-${OTHER_TS}\"}")
+    -d "{\"name\":\"Other Corp ${OTHER_TS}\",\"slug\":\"other-corp-${OTHER_TS}\",\"ownerEmail\":\"$OWNER_EMAIL\"}")
 OTHER_TENANT_ID=$(echo "$other_t" | head -n -1 | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 run_test "Cross-tenant isolation" 404 -s \
     -H "Authorization: Bearer $ADMIN_TOKEN" \

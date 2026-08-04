@@ -33,6 +33,12 @@ Chi tiết kỹ thuật đầy đủ xem `random-check-config-review.md` mục 1
 
 Chi tiết kỹ thuật đầy đủ (kể cả quyết định retention ảnh sinh trắc học, không phải việc FE cần biết) xem `random-check-config-review.md` mục 13.
 
+## 0.e Bản vá lần 5 (2026-08-04) — Vi phạm (Violation) tách sang tài liệu riêng + tín hiệu mềm cho kích hoạt thủ công
+
+**Vi phạm (Violation) giờ có tài liệu API riêng**: `docs/api/violation-management-api.md` — bao gồm danh sách/chi tiết/confirm/dismiss (HR), tự xem + gửi giải trình (nhân viên), và inbox gộp mới `GET /me/exceptions`. Tài liệu này (`random-check-ui-guide.md`) chỉ còn phạm vi Cấu hình + vòng đời `ScheduledCheck` — không lặp lại nội dung violation nữa.
+
+Thay đổi duy nhất trong phạm vi tài liệu này: `POST /scheduled-checks/manual` (mục 3.9) giờ trả thêm **`manualTriggerCountToday`** (số nguyên) — số lần kiểm tra thủ công đã gửi cho đúng nhân viên đó trong ngày, **bao gồm cả lần vừa gửi**. Đây **không phải giới hạn cứng** (chủ đích không rate-limit, xem mục 5 bên dưới) — chỉ để FE hiện tín hiệu mềm kiểu "Đã gửi 3 lần hôm nay" cạnh nút "Kiểm tra ngay", giúp HR tự cân nhắc trước khi gửi thêm, không chặn thao tác.
+
 ## 0. Trả lời câu hỏi: 5 tính năng bạn nêu đã có trên giao diện chưa?
 
 **Chưa — đây là các API backend đã có sẵn (và vừa được kiểm tra/sửa lỗi), nhưng chưa có màn hình Web/App nào gọi tới chúng.** Cả 5 tính năng dưới đây đều thuộc **Web (Company Portal)**, dành cho Company Admin/HR — không có phần nào thuộc App (nhân viên chỉ là đối tượng BỊ kiểm tra, không cấu hình).
@@ -221,8 +227,9 @@ Các field trong cùng 1 config (không phải API riêng — nằm trong `POST`
 - `checkMode` optional — nếu bỏ trống, dùng mode của config effective tại site đó; có thể override riêng cho lần kiểm tra thủ công này.
 - Nhân viên phải có assignment active tại site đó hôm nay, và tenant phải có config (site-override hoặc tenant-default) — nếu không, `400`/`404` tương ứng.
 - Response trả về `manualReason` và `triggeredBy` — **nên hiện lại 2 field này** trên UI danh sách/chi tiết (mục 3.8) để phân biệt kiểm tra thủ công với kiểm tra tự động, và biết ai đã yêu cầu.
+- **Mới (bản vá lần 5, 2026-08-04)**: response còn trả `manualTriggerCountToday` — xem mục 0.e. Mỗi lần gọi endpoint này cũng tự động ghi 1 dòng audit log (`action=manual_random_check_triggered`) — không cần FE tự log riêng gì thêm, chỉ cần biết là đã có audit trail nếu HR hỏi "ai đã gửi kiểm tra cho tôi hôm nay".
 
-**UI đề xuất**: nút "Kiểm tra ngay" trên trang chi tiết nhân viên hoặc trang danh sách nhân viên tại site → modal bắt buộc nhập lý do → xác nhận → hiện kết quả tạo thành công + đếm ngược thời gian phản hồi còn lại.
+**UI đề xuất**: nút "Kiểm tra ngay" trên trang chi tiết nhân viên hoặc trang danh sách nhân viên tại site → modal bắt buộc nhập lý do → xác nhận → hiện kết quả tạo thành công + đếm ngược thời gian phản hồi còn lại + dòng nhỏ "Đã gửi {manualTriggerCountToday} lần hôm nay cho nhân viên này" (không phải cảnh báo màu đỏ, chỉ là thông tin).
 
 ### 3.10 Huỷ / dispatch tay / xử lý hết hạn (vận hành nâng cao)
 
@@ -368,3 +375,5 @@ App nên đọc `metadata.checkId` để mở thẳng đúng màn phản hồi c
 - [ ] **App (bản vá lần 2)**: đọc `metadata.checkId` từ notification để deep-link, thay vì mở danh sách chung (mục 4.6) — lưu ý giới hạn chưa áp dụng cho push payload thô.
 - [ ] **Web — mới (bản vá lần 3, 01/08/2026)**: thêm nút "Xem ảnh bằng chứng" trong modal chi tiết, chỉ hiện khi `response.hasPhotoEvidence=true`, gọi `GET /{checkId}/photo` (authenticated, tự dựng blob URL) — mục 3.8.
 - [ ] **Web — xác nhận (bản vá lần 3)**: giữ nguyên UI chỉ cho chọn `worker`/`supervisor` ở mục cấu hình vai trò áp dụng — đã xác nhận đúng qua code, không cần đổi gì (mục 3.6).
+- [ ] **Web — mới (bản vá lần 5, 2026-08-04)**: hiện `manualTriggerCountToday` cạnh nút "Kiểm tra ngay" sau khi gửi thành công (mục 3.9, 0.e) — tín hiệu mềm, không chặn.
+- [ ] **Web + App — chuyển sang tài liệu riêng (bản vá lần 5)**: mọi màn hình liên quan tới Vi phạm (danh sách, chi tiết, confirm/dismiss, giải trình, inbox gộp `/me/exceptions`) nay theo dõi ở `docs/api/violation-management-api.md` — xem checklist riêng trong tài liệu đó, không lặp lại ở đây.

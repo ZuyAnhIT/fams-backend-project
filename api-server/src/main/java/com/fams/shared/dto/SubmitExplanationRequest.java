@@ -13,5 +13,7 @@ public class SubmitExplanationRequest {
     @NotBlank(message = "note is required")
     private String note;
 
+    /** @deprecated Public/arbitrary URLs are rejected. Upload evidence with multipart/form-data. */
+    @Deprecated
     private String photoUrl;
 }
