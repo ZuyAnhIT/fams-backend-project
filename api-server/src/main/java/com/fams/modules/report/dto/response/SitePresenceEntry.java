@@ -30,9 +30,9 @@ public class SitePresenceEntry {
     @Schema(description = "Assigned employees not yet checked in (assignedCount - presentCount)", example = "3")
     private int absentCount;
 
-    @Schema(description = "Employee IDs currently checked in at this site")
-    private List<UUID> presentEmployeeIds;
+    @Schema(description = "Employees currently checked in at this site (id + name + code — no client-side batch resolve needed, added 2026-08-05)")
+    private List<EmployeeRef> presentEmployees;
 
-    @Schema(description = "Employee IDs assigned today but not yet checked in")
-    private List<UUID> absentEmployeeIds;
+    @Schema(description = "Employees assigned today but not yet checked in (id + name + code — no client-side batch resolve needed, added 2026-08-05)")
+    private List<EmployeeRef> absentEmployees;
 }

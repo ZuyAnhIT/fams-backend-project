@@ -45,6 +45,11 @@ public class ViolationReportResponse {
     @Schema(description = "Violation count grouped by violation type (no_response, location_fail, face_fail, liveness_fail)")
     private Map<String, Long> byViolationType;
 
+    @Schema(description = "Violation count grouped by severity (HIGH/MEDIUM/LOW), derived from violationType — "
+            + "HIGH: face_fail/liveness_fail (identity verification failure); MEDIUM: location_fail; "
+            + "LOW: no_response. Not a separately editable field, see ViolationSeverity")
+    private Map<String, Long> bySeverity;
+
     @Schema(description = "Violation count grouped by site ID (string UUID → count)")
     private Map<String, Long> bySite;
 

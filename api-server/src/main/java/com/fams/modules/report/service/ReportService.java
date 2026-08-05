@@ -14,6 +14,7 @@ import com.fams.modules.employee.repository.FaceProfileRepository;
 import com.fams.modules.rbac.repository.UserRoleRepository;
 import com.fams.modules.attendance.dto.response.AttendanceHrMonthlyResponse;
 import com.fams.modules.report.dto.response.DailyAttendanceReportResponse;
+import com.fams.modules.report.dto.response.EmployeeRef;
 import com.fams.modules.report.dto.response.FaceIdReportResponse;
 import com.fams.modules.report.dto.response.FaceIdReportRow;
 import com.fams.modules.report.dto.response.MonthlyAttendanceReportResponse;
@@ -28,6 +29,7 @@ import com.fams.modules.violation.dto.response.ViolationListResponse;
 import com.fams.modules.violation.entity.Violation;
 import com.fams.modules.violation.repository.ViolationRepository;
 import com.fams.modules.violation.specification.ViolationSpecification;
+import com.fams.modules.violation.util.ViolationSeverity;
 import com.fams.shared.pagination.PageResponse;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
@@ -104,8 +106,23 @@ public class ReportService {
             }
         }
 
+        // Site-scope enforcement (audit 2026-08-04) — this was the one report endpoint that
+        // never got the fix already applied to monthly attendance/export back on 2026-07-31: a
+        // site-restricted caller (e.g. SITE_SUPERVISOR) could pass ANY siteId, or omit it and see
+        // every site's daily attendance. Reuses the exact same helper as the monthly report.
+        UUID effectiveSiteId;
+        try {
+            effectiveSiteId = resolveSiteFilterForReports(callerUserId, tenantId, siteId, callerIsPlatformAdmin);
+        } catch (NoSitesAllowedForReport e) {
+            return DailyAttendanceReportResponse.builder()
+                    .date(date).siteId(siteId)
+                    .absentEmployees(List.of())
+                    .records(PageResponse.from(Page.empty(PageRequest.of(page, size))))
+                    .build();
+        }
+
         Specification<AttendanceSummary> spec =
-                AttendanceSummarySpecification.build(tenantId, null, siteId, null, date, date);
+                AttendanceSummarySpecification.build(tenantId, null, effectiveSiteId, null, date, date);
 
         // Load all records for the day to compute aggregate stats across the full result set
         List<AttendanceSummary> allForDay = summaryRepository.findAll(spec);
@@ -123,15 +140,16 @@ public class ReportService {
                 .collect(Collectors.toSet());
 
         int dateBit = DayOfWeekBitmask.bitForDate(date);
-        List<Assignment> activeAssignments = siteId != null
-                ? assignmentRepository.findActiveAssignmentsForSiteOnDate(tenantId, siteId, date, dateBit)
+        List<Assignment> activeAssignments = effectiveSiteId != null
+                ? assignmentRepository.findActiveAssignmentsForSiteOnDate(tenantId, effectiveSiteId, date, dateBit)
                 : assignmentRepository.findActiveAssignmentsWithShiftForDate(tenantId, date, dateBit);
 
-        List<UUID> absentEmployeeIds = activeAssignments.stream()
+        List<UUID> absentEmployeeIdList = activeAssignments.stream()
                 .map(Assignment::getEmployeeId)
                 .filter(id -> !presentEmployeeIds.contains(id))
                 .distinct()
                 .collect(Collectors.toList());
+        List<EmployeeRef> absentEmployeeIds = toEmployeeRefs(tenantId, absentEmployeeIdList);
 
         // Paginated individual records
         PageRequest pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.ASC, "employeeId"));
@@ -151,7 +169,7 @@ public class ReportService {
                 .totalMissingCheckout(totalMissingCheckout)
                 .totalWorkMinutes(totalWorkMinutes)
                 .totalOtMinutes(totalOtMinutes)
-                .absentEmployeeIds(absentEmployeeIds)
+                .absentEmployees(absentEmployeeIds)
                 .records(PageResponse.from(recordPage))
                 .build();
     }
@@ -456,8 +474,22 @@ public class ReportService {
             }
         }
 
+        // Site-scope enforcement (audit 2026-08-04) — same gap as the daily attendance report:
+        // a site-restricted caller could previously pass any siteId (or none) and see every
+        // site's violations tenant-wide.
+        UUID effectiveSiteId;
+        try {
+            effectiveSiteId = resolveSiteFilterForReports(callerUserId, tenantId, siteId, callerIsPlatformAdmin);
+        } catch (NoSitesAllowedForReport e) {
+            return ViolationReportResponse.builder()
+                    .from(from).to(to).siteId(siteId).employeeId(employeeId).violationType(violationType)
+                    .byViolationType(Map.of()).bySite(Map.of()).byEmployee(Map.of()).bySeverity(Map.of())
+                    .records(PageResponse.from(Page.empty(PageRequest.of(page, size))))
+                    .build();
+        }
+
         org.springframework.data.jpa.domain.Specification<Violation> spec =
-                ViolationSpecification.build(tenantId, employeeId, siteId, violationType, null, from, to);
+                ViolationSpecification.build(tenantId, employeeId, effectiveSiteId, violationType, null, from, to);
 
         // Load all matching violations for aggregate stats
         List<Violation> all = violationRepository.findAll(spec);
@@ -469,6 +501,16 @@ public class ReportService {
 
         Map<String, Long> byViolationType = all.stream()
                 .collect(Collectors.groupingBy(Violation::getViolationType, Collectors.counting()));
+
+        // Severity is derived from violationType (audit 2026-08-04) — the system tracks no
+        // separate manually-set severity field, and none of the 8 violation-handling stories
+        // asked for HR to set one; deriving it from type is the same approach real attendance
+        // platforms (Deputy's exception categories) use, and keeps the breakdown meaningful
+        // without adding a new column/migration for a value nothing else in the system reads.
+        Map<String, Long> bySeverity = all.stream()
+                .collect(Collectors.groupingBy(
+                        v -> ViolationSeverity.of(v.getViolationType()).name(),
+                        Collectors.counting()));
 
         Map<String, Long> bySite = all.stream()
                 .collect(Collectors.groupingBy(v -> v.getSiteId().toString(), Collectors.counting()));
@@ -482,7 +524,7 @@ public class ReportService {
                 .map(this::toViolationListResponse);
 
         log.info("Violation report: tenantId={} from={} to={} siteId={} employeeId={} total={}",
-                tenantId, from, to, siteId, employeeId, totalViolations);
+                tenantId, from, to, effectiveSiteId, employeeId, totalViolations);
 
         return ViolationReportResponse.builder()
                 .from(from)
@@ -495,6 +537,7 @@ public class ReportService {
                 .unresolvedCount(unresolvedCount)
                 .affectsAttendanceCount(affectsAttendanceCount)
                 .byViolationType(byViolationType)
+                .bySeverity(bySeverity)
                 .bySite(bySite)
                 .byEmployee(byEmployee)
                 .records(PageResponse.from(recordPage))
@@ -514,6 +557,18 @@ public class ReportService {
             }
         }
 
+        // Site-scope enforcement (audit 2026-08-04) — this endpoint iterates the site LIST
+        // directly (not a single siteId like attendance/violation reports), so it needs the
+        // Face-ID-report-style multi-site pattern rather than resolveSiteFilterForReports. A
+        // site-restricted caller (now including SITE_SUPERVISOR, granted reports:list in V84
+        // specifically so they could see this report) must not see every site's headcount —
+        // this was the exact gap the V84 grant would otherwise have reintroduced.
+        java.util.Optional<Set<UUID>> allowedSiteIds =
+                siteScopeService.resolveAllowedSiteIds(callerUserId, tenantId, callerIsPlatformAdmin);
+        if (siteId != null && allowedSiteIds.isPresent() && !allowedSiteIds.get().contains(siteId)) {
+            throw new AccessDeniedException("You do not have permission to view presence for this site");
+        }
+
         // Fetch active sites for this tenant (optionally filtered to one site)
         org.springframework.data.jpa.domain.Specification<Site> siteSpec = (root, query, cb) -> {
             List<jakarta.persistence.criteria.Predicate> predicates = new ArrayList<>();
@@ -521,6 +576,8 @@ public class ReportService {
             predicates.add(cb.isNull(root.get("deletedAt")));
             if (siteId != null) {
                 predicates.add(cb.equal(root.get("id"), siteId));
+            } else {
+                allowedSiteIds.ifPresent(ids -> predicates.add(root.get("id").in(ids)));
             }
             return cb.and(predicates.toArray(new jakarta.persistence.criteria.Predicate[0]));
         };
@@ -554,8 +611,7 @@ public class ReportService {
                     .map(Assignment::getEmployeeId)
                     .collect(Collectors.toSet());
 
-            List<UUID> presentList = new ArrayList<>(presentIds);
-            List<UUID> absentList  = assignedIds.stream()
+            List<UUID> absentIdList  = assignedIds.stream()
                     .filter(id -> !presentIds.contains(id))
                     .collect(Collectors.toList());
 
@@ -565,9 +621,9 @@ public class ReportService {
                     .timezone(site.getTimezone())
                     .assignedCount(assignedIds.size())
                     .presentCount(presentIds.size())
-                    .absentCount(absentList.size())
-                    .presentEmployeeIds(presentList)
-                    .absentEmployeeIds(absentList)
+                    .absentCount(absentIdList.size())
+                    .presentEmployees(toEmployeeRefs(tenantId, new ArrayList<>(presentIds)))
+                    .absentEmployees(toEmployeeRefs(tenantId, absentIdList))
                     .build();
         }).collect(Collectors.toList());
 
@@ -610,10 +666,18 @@ public class ReportService {
             }
         }
 
-        org.springframework.data.jpa.domain.Specification<Violation> spec =
-                ViolationSpecification.build(tenantId, employeeId, siteId, violationType, null, from, to);
-        List<Violation> all = violationRepository.findAll(spec,
-                Sort.by(Sort.Direction.DESC, "checkDate"));
+        List<Violation> all;
+        try {
+            UUID effectiveSiteId =
+                    resolveSiteFilterForReports(callerUserId, tenantId, siteId, callerIsPlatformAdmin);
+            org.springframework.data.jpa.domain.Specification<Violation> spec = ViolationSpecification.build(
+                    tenantId, employeeId, effectiveSiteId, violationType, null, from, to);
+            all = violationRepository.findAll(spec, Sort.by(Sort.Direction.DESC, "checkDate"));
+        } catch (NoSitesAllowedForReport e) {
+            // Caller is site-restricted but has no allowed sites left — correct result is an
+            // empty export, not "no site filter" (which would leak every site's violations).
+            all = List.of();
+        }
 
         try (XSSFWorkbook workbook = new XSSFWorkbook()) {
             Sheet sheet = workbook.createSheet("Violations");
@@ -660,7 +724,7 @@ public class ReportService {
 
     @Transactional(readOnly = true)
     public FaceIdReportResponse getFaceIdEnrollmentReport(
-            UUID tenantId, String statusFilter, int page, int size,
+            UUID tenantId, String statusFilter, UUID departmentId, String search, int page, int size,
             UUID callerUserId, boolean callerIsPlatformAdmin) {
 
         if (!callerIsPlatformAdmin) {
@@ -671,10 +735,28 @@ public class ReportService {
             }
         }
 
-        // Load all active employees for the tenant
-        Specification<Employee> empSpec = (root, query, cb) -> cb.and(
-                cb.equal(root.get("tenantId"), tenantId),
-                cb.isNull(root.get("deletedAt")));
+        // Load all active employees for the tenant — departmentId and search (name/email/code)
+        // are applied server-side (added 2026-08-05 per FE feedback) rather than forcing FE to
+        // fetch the full roster and filter client-side, same reasoning as global search.
+        String searchTerm = search == null ? null : search.trim();
+        String searchPattern = (searchTerm != null && !searchTerm.isEmpty())
+                ? "%" + searchTerm.toLowerCase() + "%" : null;
+        Specification<Employee> empSpec = (root, query, cb) -> {
+            List<jakarta.persistence.criteria.Predicate> predicates = new ArrayList<>(List.of(
+                    cb.equal(root.get("tenantId"), tenantId),
+                    cb.isNull(root.get("deletedAt"))));
+            if (departmentId != null) {
+                predicates.add(cb.equal(root.get("departmentId"), departmentId));
+            }
+            if (searchPattern != null) {
+                predicates.add(cb.or(
+                        cb.like(cb.lower(root.get("firstName")), searchPattern),
+                        cb.like(cb.lower(root.get("lastName")), searchPattern),
+                        cb.like(cb.lower(root.get("email")), searchPattern),
+                        cb.like(cb.lower(root.get("employeeCode")), searchPattern)));
+            }
+            return cb.and(predicates.toArray(new jakarta.persistence.criteria.Predicate[0]));
+        };
         List<Employee> employees = employeeRepository.findAll(empSpec,
                 Sort.by(Sort.Direction.ASC, "lastName", "firstName"));
 
@@ -761,6 +843,8 @@ public class ReportService {
                 .notEnrolledCount(notEnrolledCount)
                 .revokedCount(revokedCount)
                 .statusFilter(statusFilter)
+                .departmentId(departmentId)
+                .search(searchTerm)
                 .records(recordPage)
                 .build();
     }
@@ -781,6 +865,29 @@ public class ReportService {
                 .affectsAttendance(v.isAffectsAttendance())
                 .createdAt(v.getCreatedAt())
                 .build();
+    }
+
+    /** Batch-resolves employee id/name/code for report rows that list many employees by ID
+     *  (site presence, daily-report absent list) — added 2026-08-05 per FE feedback that forced
+     *  a client-side batch lookup for every ID in these lists. 1 query regardless of list size,
+     *  same batching approach already used for checkin/scheduled-check list responses. */
+    private List<EmployeeRef> toEmployeeRefs(UUID tenantId, List<UUID> employeeIds) {
+        if (employeeIds.isEmpty()) {
+            return List.of();
+        }
+        Map<UUID, Employee> byId = employeeRepository
+                .findAllByTenantIdAndIdInAndDeletedAtIsNull(tenantId, new java.util.HashSet<>(employeeIds))
+                .stream().collect(Collectors.toMap(Employee::getId, e -> e));
+        return employeeIds.stream()
+                .map(id -> {
+                    Employee e = byId.get(id);
+                    return EmployeeRef.builder()
+                            .employeeId(id)
+                            .employeeName(e != null ? (e.getFirstName() + " " + e.getLastName()).trim() : null)
+                            .employeeCode(e != null ? e.getEmployeeCode() : null)
+                            .build();
+                })
+                .collect(Collectors.toList());
     }
 
     private AttendanceSummaryResponse toResponse(AttendanceSummary a) {

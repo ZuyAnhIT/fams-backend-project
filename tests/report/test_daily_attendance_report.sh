@@ -99,7 +99,7 @@ if [ "$report_status" -eq 200 ]; then
     has_missing=$(echo "$report_body" | grep -c '"totalMissingCheckout"' || true)
     has_work=$(echo "$report_body" | grep -c '"totalWorkMinutes"' || true)
     has_ot=$(echo "$report_body" | grep -c '"totalOtMinutes"' || true)
-    has_absent_ids=$(echo "$report_body" | grep -c '"absentEmployeeIds"' || true)
+    has_absent_ids=$(echo "$report_body" | grep -c '"absentEmployees"' || true)
     has_records=$(echo "$report_body" | grep -c '"records"' || true)
     if [ "${has_date:-0}" -ge 1 ] && [ "${has_present:-0}" -ge 1 ] && \
        [ "${has_absent:-0}" -ge 1 ] && [ "${has_late:-0}" -ge 1 ] && \

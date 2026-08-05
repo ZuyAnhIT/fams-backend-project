@@ -42,8 +42,9 @@ public class DailyAttendanceReportResponse {
     @Schema(description = "Sum of otMinutes across all present employees for this date", example = "240")
     private int totalOtMinutes;
 
-    @Schema(description = "Employee IDs that have active assignments but no attendance record on this date")
-    private List<UUID> absentEmployeeIds;
+    @Schema(description = "Employees that have active assignments but no attendance record on this date "
+            + "(id + name + code — no client-side batch resolve needed, added 2026-08-05)")
+    private List<EmployeeRef> absentEmployees;
 
     @Schema(description = "Paginated individual attendance records for this date")
     private PageResponse<AttendanceSummaryResponse> records;

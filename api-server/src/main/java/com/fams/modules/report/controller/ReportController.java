@@ -287,12 +287,16 @@ public class ReportController {
             @PathVariable UUID tenantId,
             @Parameter(description = "Filter by Face ID status: enrolled | pending | not_enrolled | revoked (optional)")
                 @RequestParam(required = false) String status,
+            @Parameter(description = "Filter by department ID (optional)")
+                @RequestParam(required = false) UUID departmentId,
+            @Parameter(description = "Server-side search by name, email, or employee code (optional)")
+                @RequestParam(required = false) String search,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
             @AuthenticationPrincipal FamsUserDetails caller) {
 
         FaceIdReportResponse result = reportService.getFaceIdEnrollmentReport(
-                tenantId, status, page, size,
+                tenantId, status, departmentId, search, page, size,
                 caller.getUserId(), caller.isPlatformAdmin());
 
         return ResponseEntity.ok(ApiResponse.success(result));

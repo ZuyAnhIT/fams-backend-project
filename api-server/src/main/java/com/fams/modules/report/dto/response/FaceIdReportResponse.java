@@ -28,6 +28,12 @@ public class FaceIdReportResponse {
     @Schema(description = "Status filter applied (null = all statuses)", example = "not_enrolled")
     private String statusFilter;
 
+    @Schema(description = "Department filter applied (null = all departments) — added 2026-08-05")
+    private java.util.UUID departmentId;
+
+    @Schema(description = "Server-side name/email/code search term applied (null = none) — added 2026-08-05")
+    private String search;
+
     @Schema(description = "Paginated employee Face ID rows matching the filters")
     private PageResponse<FaceIdReportRow> records;
 }
