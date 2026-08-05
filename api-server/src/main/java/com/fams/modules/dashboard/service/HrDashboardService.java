@@ -6,6 +6,8 @@ import com.fams.modules.dashboard.dto.response.HrDashboardResponse;
 import com.fams.modules.employee.repository.EmployeeRepository;
 import com.fams.modules.rbac.repository.UserRoleRepository;
 import com.fams.modules.site.repository.SiteRepository;
+import com.fams.modules.tenant.entity.Tenant;
+import com.fams.modules.tenant.repository.TenantRepository;
 import com.fams.modules.violation.repository.ViolationRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.access.AccessDeniedException;
@@ -14,7 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
-import java.time.ZoneOffset;
+import java.time.ZoneId;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -31,19 +33,22 @@ public class HrDashboardService {
     private final AttendanceSummaryRepository attendanceSummaryRepository;
     private final ViolationRepository violationRepository;
     private final UserRoleRepository userRoleRepository;
+    private final TenantRepository tenantRepository;
 
     public HrDashboardService(EmployeeRepository employeeRepository,
                                SiteRepository siteRepository,
                                CheckinRepository checkinRepository,
                                AttendanceSummaryRepository attendanceSummaryRepository,
                                ViolationRepository violationRepository,
-                               UserRoleRepository userRoleRepository) {
+                               UserRoleRepository userRoleRepository,
+                               TenantRepository tenantRepository) {
         this.employeeRepository = employeeRepository;
         this.siteRepository = siteRepository;
         this.checkinRepository = checkinRepository;
         this.attendanceSummaryRepository = attendanceSummaryRepository;
         this.violationRepository = violationRepository;
         this.userRoleRepository = userRoleRepository;
+        this.tenantRepository = tenantRepository;
     }
 
     @Transactional(readOnly = true)
@@ -55,13 +60,24 @@ public class HrDashboardService {
             }
         }
 
-        LocalDate today = LocalDate.now(ZoneOffset.UTC);
-        OffsetDateTime firstOfMonth = today.withDayOfMonth(1).atStartOfDay().atOffset(ZoneOffset.UTC);
+        // "Today" and "this month" are computed in the tenant's own timezone (audit 2026-08-04)
+        // — using a hardcoded UTC boundary meant every tenant's morning shift (e.g. Vietnam,
+        // UTC+7) started counting as "today" up to 7 hours late by the wall clock HR actually
+        // works on, understating presentToday/lateToday right when they matter most.
+        Tenant tenant = tenantRepository.findByIdAndDeletedAtIsNull(tenantId).orElse(null);
+        ZoneId zone = ZoneId.of(tenant != null && tenant.getTimezone() != null ? tenant.getTimezone() : "UTC");
+        LocalDate today = LocalDate.now(zone);
+        OffsetDateTime startOfToday = today.atStartOfDay(zone).toOffsetDateTime();
+        OffsetDateTime firstOfMonth = today.withDayOfMonth(1).atStartOfDay(zone).toOffsetDateTime();
+
+        // Computed once and shared — "on-site now" means the same thing in both the attendance
+        // and site overview sections, no reason to run the identical query twice per request.
+        long onSiteNow = checkinRepository.countOpenSessions(tenantId, startOfToday);
 
         HrDashboardResponse.PersonnelOverview personnel = buildPersonnel(tenantId, firstOfMonth);
-        HrDashboardResponse.AttendanceOverview attendance = buildAttendance(tenantId, today);
+        HrDashboardResponse.AttendanceOverview attendance = buildAttendance(tenantId, today, onSiteNow);
         HrDashboardResponse.ViolationOverview violations = buildViolations(tenantId, firstOfMonth);
-        HrDashboardResponse.SiteOverview sites = buildSites(tenantId);
+        HrDashboardResponse.SiteOverview sites = buildSites(tenantId, onSiteNow);
 
         log.info("HR dashboard fetched: tenantId={} by userId={}", tenantId, callerUserId);
 
@@ -82,14 +98,13 @@ public class HrDashboardService {
                 .build();
     }
 
-    private HrDashboardResponse.AttendanceOverview buildAttendance(UUID tenantId, LocalDate today) {
+    private HrDashboardResponse.AttendanceOverview buildAttendance(UUID tenantId, LocalDate today, long onSiteNow) {
         long present = attendanceSummaryRepository.countByTenantAndDate(tenantId, today);
         long late = attendanceSummaryRepository.countLateByTenantAndDate(tenantId, today);
-        long onSite = checkinRepository.countOpenSessions(tenantId);
         return HrDashboardResponse.AttendanceOverview.builder()
                 .presentToday(present)
                 .lateToday(late)
-                .onSiteNow(onSite)
+                .onSiteNow(onSiteNow)
                 .build();
     }
 
@@ -110,12 +125,11 @@ public class HrDashboardService {
                 .build();
     }
 
-    private HrDashboardResponse.SiteOverview buildSites(UUID tenantId) {
+    private HrDashboardResponse.SiteOverview buildSites(UUID tenantId, long onSiteNow) {
         long total = siteRepository.countByTenantIdAndDeletedAtIsNull(tenantId);
-        long onSite = checkinRepository.countOpenSessions(tenantId);
         return HrDashboardResponse.SiteOverview.builder()
                 .totalSites(total)
-                .employeesOnSiteNow(onSite)
+                .employeesOnSiteNow(onSiteNow)
                 .build();
     }
 }

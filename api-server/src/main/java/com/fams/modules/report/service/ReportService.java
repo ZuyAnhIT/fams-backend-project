@@ -526,13 +526,22 @@ public class ReportService {
         };
         List<Site> sites = siteRepository.findAll(siteSpec);
 
-        LocalDate today = LocalDate.now();
         OffsetDateTime reportedAt = OffsetDateTime.now();
 
         List<SitePresenceEntry> entries = sites.stream().map(site -> {
-            // Employees currently checked in (open sessions)
+            // "Today" resolved per-site in that site's own timezone (audit 2026-08-04) — a
+            // hardcoded JVM-default/UTC "today" was wrong for the exact hours it mattered most
+            // (shift start/end near a UTC day boundary), and also bounds which open sessions
+            // count as "currently checked in": a session opened days ago and never checked out
+            // must not still count as present today (same guard as the dashboard fix).
+            java.time.ZoneId siteZone = java.time.ZoneId.of(
+                    site.getTimezone() != null ? site.getTimezone() : "UTC");
+            LocalDate today = LocalDate.now(siteZone);
+            OffsetDateTime startOfToday = today.atStartOfDay(siteZone).toOffsetDateTime();
+
+            // Employees currently checked in (open sessions opened today)
             List<CheckinRecord> openSessions = checkinRepository
-                    .findOpenSessionsBySite(tenantId, site.getId());
+                    .findOpenSessionsBySite(tenantId, site.getId(), startOfToday);
             Set<UUID> presentIds = openSessions.stream()
                     .map(CheckinRecord::getEmployeeId)
                     .collect(Collectors.toSet());

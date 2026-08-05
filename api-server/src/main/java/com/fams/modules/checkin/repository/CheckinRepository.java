@@ -49,15 +49,27 @@ public interface CheckinRepository extends JpaRepository<CheckinRecord, UUID>, J
                                            @Param("from") OffsetDateTime from,
                                            @Param("to") OffsetDateTime to);
 
-    /** Count of currently open check-in sessions (no checkout) for the tenant. */
-    @Query("SELECT COUNT(c) FROM CheckinRecord c WHERE c.tenantId = :tenantId AND c.checkOutAt IS NULL AND c.deletedAt IS NULL")
-    long countOpenSessions(@Param("tenantId") UUID tenantId);
+    /** Used by the employee dashboard's "needs my attention" count — mirrors
+     *  CheckinService#getCheckinHistory(status="pending_review") scoping. */
+    long countByTenantIdAndEmployeeIdAndStatusAndDeletedAtIsNull(UUID tenantId, UUID employeeId, String status);
 
-    /** All open check-in sessions for a specific site (employees currently on-site). */
+    /** Count of check-in sessions still open (no checkout) that were opened on-or-after
+     *  {@code since} — i.e. "on-site right now" as of today, not an unclosed session from days/
+     *  weeks ago that the employee simply forgot to check out of (that scenario is tracked
+     *  separately as a data-quality issue, see AttendanceSummary#missingCheckoutDays). Without
+     *  this bound, a single forgotten checkout would silently and permanently inflate every
+     *  "currently on-site" count shown to HR/supervisors (audit 2026-08-04). */
+    @Query("SELECT COUNT(c) FROM CheckinRecord c WHERE c.tenantId = :tenantId AND c.checkOutAt IS NULL " +
+           "AND c.checkInAt >= :since AND c.deletedAt IS NULL")
+    long countOpenSessions(@Param("tenantId") UUID tenantId, @Param("since") OffsetDateTime since);
+
+    /** Open check-in sessions for a specific site, opened on-or-after {@code since} — same
+     *  stale-session guard as {@link #countOpenSessions}, see its javadoc. */
     @Query("SELECT c FROM CheckinRecord c WHERE c.tenantId = :tenantId AND c.siteId = :siteId " +
-           "AND c.checkOutAt IS NULL AND c.deletedAt IS NULL ORDER BY c.checkInAt ASC")
+           "AND c.checkOutAt IS NULL AND c.checkInAt >= :since AND c.deletedAt IS NULL ORDER BY c.checkInAt ASC")
     List<CheckinRecord> findOpenSessionsBySite(@Param("tenantId") UUID tenantId,
-                                                @Param("siteId") UUID siteId);
+                                                @Param("siteId") UUID siteId,
+                                                @Param("since") OffsetDateTime since);
 
     /** All non-deleted checkins whose check_in_at falls within the given UTC range, across EVERY
      *  tenant — intentionally unscoped, used only by the nightly AttendanceSummaryJob batch (a

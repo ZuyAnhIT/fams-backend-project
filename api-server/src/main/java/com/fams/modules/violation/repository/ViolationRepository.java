@@ -25,6 +25,10 @@ public interface ViolationRepository extends JpaRepository<Violation, UUID>, Jpa
     @Query("SELECT COUNT(v) FROM Violation v WHERE v.tenantId = :tenantId AND v.resolved = false AND v.deletedAt IS NULL")
     long countUnresolved(@Param("tenantId") UUID tenantId);
 
+    /** Used by the employee dashboard's "needs my attention" count — mirrors ViolationService
+     *  #listMyViolations scoping (own violations, unresolved only). */
+    long countByTenantIdAndEmployeeIdAndResolvedFalseAndDeletedAtIsNull(UUID tenantId, UUID employeeId);
+
     @Query("SELECT v.violationType, COUNT(v) FROM Violation v WHERE v.tenantId = :tenantId AND v.resolved = false AND v.deletedAt IS NULL GROUP BY v.violationType")
     List<Object[]> countUnresolvedByType(@Param("tenantId") UUID tenantId);
 

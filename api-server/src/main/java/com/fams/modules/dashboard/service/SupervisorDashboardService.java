@@ -10,13 +10,16 @@ import com.fams.modules.employee.entity.Employee;
 import com.fams.modules.employee.repository.EmployeeRepository;
 import com.fams.modules.site.entity.Site;
 import com.fams.modules.site.repository.SiteRepository;
+import com.fams.modules.tenant.entity.Tenant;
+import com.fams.modules.tenant.repository.TenantRepository;
 import com.fams.shared.exception.ResourceNotFoundException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
-import java.time.ZoneOffset;
+import java.time.OffsetDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -30,15 +33,18 @@ public class SupervisorDashboardService {
     private final AssignmentRepository assignmentRepository;
     private final SiteRepository siteRepository;
     private final CheckinRepository checkinRepository;
+    private final TenantRepository tenantRepository;
 
     public SupervisorDashboardService(EmployeeRepository employeeRepository,
                                        AssignmentRepository assignmentRepository,
                                        SiteRepository siteRepository,
-                                       CheckinRepository checkinRepository) {
+                                       CheckinRepository checkinRepository,
+                                       TenantRepository tenantRepository) {
         this.employeeRepository = employeeRepository;
         this.assignmentRepository = assignmentRepository;
         this.siteRepository = siteRepository;
         this.checkinRepository = checkinRepository;
+        this.tenantRepository = tenantRepository;
     }
 
     @Transactional(readOnly = true)
@@ -48,14 +54,17 @@ public class SupervisorDashboardService {
                 .orElseThrow(() -> new ResourceNotFoundException(
                         "Employee profile not found for this tenant"));
 
-        LocalDate today = LocalDate.now(ZoneOffset.UTC);
+        Tenant tenant = tenantRepository.findByIdAndDeletedAtIsNull(tenantId).orElse(null);
+        ZoneId zone = ZoneId.of(tenant != null && tenant.getTimezone() != null ? tenant.getTimezone() : "UTC");
+        LocalDate today = LocalDate.now(zone);
+        OffsetDateTime startOfToday = today.atStartOfDay(zone).toOffsetDateTime();
 
         List<Assignment> supervisorAssignments = assignmentRepository
                 .findActiveSupervisorAssignmentsForEmployee(tenantId, supervisor.getId(), today,
                         DayOfWeekBitmask.bitForDate(today));
 
         List<SupervisorDashboardResponse.SiteStatus> siteStatuses = supervisorAssignments.stream()
-                .map(a -> buildSiteStatus(tenantId, a.getSiteId(), today))
+                .map(a -> buildSiteStatus(tenantId, a.getSiteId(), today, startOfToday))
                 .collect(Collectors.toList());
 
         log.info("Supervisor dashboard fetched: tenantId={} supervisorId={} sites={}",
@@ -67,7 +76,7 @@ public class SupervisorDashboardService {
     }
 
     private SupervisorDashboardResponse.SiteStatus buildSiteStatus(UUID tenantId, UUID siteId,
-                                                                     LocalDate today) {
+                                                                     LocalDate today, OffsetDateTime startOfToday) {
         Site site = siteRepository.findByIdAndTenantIdAndDeletedAtIsNull(siteId, tenantId)
                 .orElse(null);
         String siteName = site != null ? site.getName() : null;
@@ -76,7 +85,10 @@ public class SupervisorDashboardService {
                 .findActiveAssignmentsForSiteOnDate(tenantId, siteId, today,
                         DayOfWeekBitmask.bitForDate(today)).size();
 
-        List<CheckinRecord> openSessions = checkinRepository.findOpenSessionsBySite(tenantId, siteId);
+        // Bounded to sessions opened today — an employee who forgot to check out days ago must
+        // not still show as "on-site now" to the supervisor (audit 2026-08-04, same guard as
+        // CheckinRepository#countOpenSessions).
+        List<CheckinRecord> openSessions = checkinRepository.findOpenSessionsBySite(tenantId, siteId, startOfToday);
 
         List<SupervisorDashboardResponse.OnSiteEmployee> onSiteEmployees = new ArrayList<>();
         for (CheckinRecord record : openSessions) {
