@@ -23,6 +23,24 @@ public class EmployeeDashboardResponse {
     @Schema(description = "Aggregated attendance stats for the current calendar month")
     private MonthlyAttendanceSummary monthlyAttendance;
 
+    @Schema(description = "Actionable items — unread notifications and items needing the employee's own explanation")
+    private AlertsSummary alerts;
+
+    @Data
+    @Builder
+    @Schema(description = "Actionable items summary for the employee's home screen")
+    public static class AlertsSummary {
+
+        @Schema(description = "Unread notification count (see GET /notifications for the full list)")
+        private long unreadNotifications;
+
+        @Schema(description = "Combined count of pending_review check-ins and unresolved violations "
+                + "belonging to this employee that still need an explanation submitted — same set "
+                + "as GET /me/exceptions, provided here as a lightweight badge count so the home "
+                + "screen doesn't need to fetch and count the full list")
+        private long pendingExplanations;
+    }
+
     @Data
     @Builder
     @Schema(description = "Details of a single active assignment and its associated shift for today")

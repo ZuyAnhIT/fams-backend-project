@@ -37,7 +37,7 @@ public class HrDashboardResponse {
 
     @Data
     @Builder
-    @Schema(description = "Attendance summary for today (UTC date)")
+    @Schema(description = "Attendance summary for today (tenant's own timezone, falls back to UTC if unset)")
     public static class AttendanceOverview {
 
         @Schema(description = "Number of employees with an attendance record for today")
