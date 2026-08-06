@@ -7,6 +7,7 @@
 set -euo pipefail
 
 BASE_URL="${BASE_URL:-http://localhost:8080}"
+NOTIFICATIONS_INTERNAL_SECRET="${NOTIFICATIONS_INTERNAL_SECRET:-fams_notifications_secret_local_dev}"
 PASS=0
 FAIL=0
 
@@ -210,6 +211,7 @@ echo "--- Test 5: POST /internal/notifications creates notification ---"
 create_resp=$(curl -s -w "\n%{http_code}" \
     -X POST "$INTERNAL_URL" \
     -H "Content-Type: application/json" \
+    -H "X-Internal-Secret: $NOTIFICATIONS_INTERNAL_SECRET" \
     -d "{
       \"tenantId\": \"$TENANT_ID\",
       \"userId\": \"$EMP1_USER_ID\",
@@ -306,6 +308,7 @@ echo ""
 echo "--- Test 13: Second notification increases unreadCount ---"
 curl -s -o /dev/null -X POST "$INTERNAL_URL" \
     -H "Content-Type: application/json" \
+    -H "X-Internal-Secret: $NOTIFICATIONS_INTERNAL_SECRET" \
     -d "{
       \"tenantId\": \"$TENANT_ID\",
       \"userId\": \"$EMP1_USER_ID\",

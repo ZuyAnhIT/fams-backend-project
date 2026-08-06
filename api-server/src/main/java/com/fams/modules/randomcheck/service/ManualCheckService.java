@@ -171,7 +171,7 @@ public class ManualCheckService {
                 Map.of("employeeId", employeeId.toString(), "siteId", siteId.toString(),
                        "checkMode", checkMode, "reason", request.getReason() == null ? "" : request.getReason(),
                        "triggerCountToday", countToday),
-                null, null, null);
+                com.fams.shared.security.HttpRequestUtils.currentRequestId(), null, null);
 
         randomCheckDispatchService.sendNotification(check);
 

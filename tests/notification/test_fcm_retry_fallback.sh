@@ -10,6 +10,7 @@
 set -euo pipefail
 
 BASE_URL="${BASE_URL:-http://localhost:8080}"
+NOTIFICATIONS_INTERNAL_SECRET="${NOTIFICATIONS_INTERNAL_SECRET:-fams_notifications_secret_local_dev}"
 PASS=0
 FAIL=0
 
@@ -109,6 +110,7 @@ echo "--- 2. Create notification (FCM fails → email fallback) ---"
 notif_resp=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/internal/notifications" \
     -H "Content-Type: application/json" \
+    -H "X-Internal-Secret: $NOTIFICATIONS_INTERNAL_SECRET" \
     -d "{\"tenantId\":\"$TENANT_ID\",\"userId\":\"$EMP_USER_ID\",\"eventType\":\"TEST_RETRY\",\"title\":\"Retry Test\",\"body\":\"This tests retry and fallback\"}")
 notif_status=$(echo "$notif_resp" | tail -n 1)
 notif_body=$(echo "$notif_resp" | head -n -1)

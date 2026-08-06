@@ -9,6 +9,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.OffsetDateTime;
+import java.util.Collection;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -58,4 +59,17 @@ public interface NotificationRepository extends JpaRepository<Notification, UUID
   @Modifying
   @Query("DELETE FROM Notification n WHERE n.createdAt < :cutoff AND n.isRead = true")
   int deleteReadNotificationsOlderThan(@Param("cutoff") OffsetDateTime cutoff);
+
+  /** Bulk-mark a specific set of notifications as read (audit 2026-08-05 — previously the only
+   *  choices were exactly one, via markAsRead, or literally all via markAllAsRead; nothing for a
+   *  user multi-selecting a subset of their inbox, the common case in Gmail/Slack-style UIs).
+   *  Scoped to tenant+user like every other notification query — a caller can never mark another
+   *  user's notification as read even by guessing its ID. Returns row count. */
+  @Modifying
+  @Query(
+      "UPDATE Notification n SET n.isRead = true, n.readAt = CURRENT_TIMESTAMP "
+          + "WHERE n.tenantId = :tenantId AND n.userId = :userId "
+          + "AND n.id IN :ids AND n.isRead = false AND n.deletedAt IS NULL")
+  int markAsReadBatch(@Param("tenantId") UUID tenantId, @Param("userId") UUID userId,
+                       @Param("ids") Collection<UUID> ids);
 }

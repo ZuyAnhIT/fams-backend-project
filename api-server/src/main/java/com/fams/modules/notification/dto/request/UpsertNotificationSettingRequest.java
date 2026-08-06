@@ -7,7 +7,7 @@ import lombok.Data;
 @Schema(description = "Request to upsert a single notification setting")
 public class UpsertNotificationSettingRequest {
 
-    @Schema(description = "Event type identifier (required in bulk upsert; ignored in single PUT where path param is used)", example = "RANDOM_CHECK_DISPATCHED")
+    @Schema(description = "Event type identifier (required in bulk upsert; ignored in single PUT where path param is used)", example = "RANDOM_CHECK_SENT")
     private String eventType;
 
     @Schema(description = "Whether in-app notifications are enabled for this event type", example = "true")

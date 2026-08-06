@@ -116,6 +116,12 @@ app:
     internal-secret: ${AI_INTERNAL_SECRET}
     enroll-min-photos: ${AI_ENROLL_MIN_PHOTOS:3}
     enroll-max-photos: ${AI_ENROLL_MAX_PHOTOS:5}
+  notifications:
+    # Guards POST /internal/notifications (audit 2026-08-05) — same X-Internal-Secret pattern
+    # as app.ai.internal-secret. All in-process callers use NotificationService directly and
+    # never touch this HTTP endpoint; it exists only for a genuinely external caller (separate
+    # process/service), which previously had zero authentication.
+    internal-secret: ${NOTIFICATIONS_INTERNAL_SECRET}
   data-retention:
     delivery-log-days: ${DATA_RETENTION_DELIVERY_LOG_DAYS:30}
     notification-days: ${DATA_RETENTION_NOTIFICATION_DAYS:90}

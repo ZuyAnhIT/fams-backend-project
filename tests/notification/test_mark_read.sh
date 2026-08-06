@@ -7,6 +7,7 @@
 set -euo pipefail
 
 BASE_URL="${BASE_URL:-http://localhost:8080}"
+NOTIFICATIONS_INTERNAL_SECRET="${NOTIFICATIONS_INTERNAL_SECRET:-fams_notifications_secret_local_dev}"
 PASS=0
 FAIL=0
 
@@ -165,6 +166,7 @@ NOTIF_URL="$BASE_URL/api/v1/tenants/$TENANT_ID/notifications"
 notif1_resp=$(curl -s -w "\n%{http_code}" \
     -X POST "$INTERNAL_URL" \
     -H "Content-Type: application/json" \
+    -H "X-Internal-Secret: $NOTIFICATIONS_INTERNAL_SECRET" \
     -d "{\"tenantId\":\"$TENANT_ID\",\"userId\":\"$EMP1_USER_ID\",\"eventType\":\"TEST_READ\",\"title\":\"Notification One\",\"body\":\"Body one\"}")
 if [ "$(echo "$notif1_resp" | tail -n 1)" -ne 201 ]; then echo "SETUP FAILED: create notif1"; exit 1; fi
 NOTIF1_ID=$(echo "$notif1_resp" | head -n -1 | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
@@ -172,6 +174,7 @@ NOTIF1_ID=$(echo "$notif1_resp" | head -n -1 | grep -o '"id":"[^"]*"' | head -1 
 notif2_resp=$(curl -s -w "\n%{http_code}" \
     -X POST "$INTERNAL_URL" \
     -H "Content-Type: application/json" \
+    -H "X-Internal-Secret: $NOTIFICATIONS_INTERNAL_SECRET" \
     -d "{\"tenantId\":\"$TENANT_ID\",\"userId\":\"$EMP1_USER_ID\",\"eventType\":\"TEST_READ_2\",\"title\":\"Notification Two\",\"body\":\"Body two\"}")
 if [ "$(echo "$notif2_resp" | tail -n 1)" -ne 201 ]; then echo "SETUP FAILED: create notif2"; exit 1; fi
 NOTIF2_ID=$(echo "$notif2_resp" | head -n -1 | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
@@ -182,6 +185,7 @@ if [ -n "$EMP2_USER_ID" ]; then
     notif_emp2_resp=$(curl -s -w "\n%{http_code}" \
         -X POST "$INTERNAL_URL" \
         -H "Content-Type: application/json" \
+    -H "X-Internal-Secret: $NOTIFICATIONS_INTERNAL_SECRET" \
         -d "{\"tenantId\":\"$TENANT_ID\",\"userId\":\"$EMP2_USER_ID\",\"eventType\":\"TEST_READ_EMP2\",\"title\":\"Emp2 Notification\",\"body\":\"For emp2\"}")
     if [ "$(echo "$notif_emp2_resp" | tail -n 1)" -eq 201 ]; then
         NOTIF_EMP2_ID=$(echo "$notif_emp2_resp" | head -n -1 | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)

@@ -287,7 +287,7 @@ public class GoogleLoginService {
                     action,
                     null,
                     null,
-                    null,
+                    HttpRequestUtils.currentRequestId(),
                     HttpRequestUtils.currentIpAddress(),
                     HttpRequestUtils.currentUserAgent());
         } catch (Exception ex) {

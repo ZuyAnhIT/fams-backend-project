@@ -8,8 +8,10 @@ import com.fams.modules.auth.entity.TotpBackupCode;
 import com.fams.modules.auth.entity.User;
 import com.fams.modules.auth.repository.TotpBackupCodeRepository;
 import com.fams.modules.auth.repository.UserRepository;
+import com.fams.modules.audit.service.AuditLogService;
 import com.fams.shared.exception.InvalidCredentialsException;
 import com.fams.shared.exception.ResourceNotFoundException;
+import com.fams.shared.security.HttpRequestUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -45,19 +47,22 @@ public class TotpService {
     private final TotpSecretCipher secretCipher;
     private final BCryptPasswordEncoder passwordEncoder;
     private final String baseUrl;
+    private final AuditLogService auditLogService;
 
     public TotpService(StringRedisTemplate redis,
                        UserRepository userRepository,
                        TotpBackupCodeRepository backupCodeRepository,
                        TotpSecretCipher secretCipher,
                        BCryptPasswordEncoder passwordEncoder,
-                       @Value("${app.base-url}") String baseUrl) {
+                       @Value("${app.base-url}") String baseUrl,
+                       AuditLogService auditLogService) {
         this.redis = redis;
         this.userRepository = userRepository;
         this.backupCodeRepository = backupCodeRepository;
         this.secretCipher = secretCipher;
         this.passwordEncoder = passwordEncoder;
         this.baseUrl = baseUrl;
+        this.auditLogService = auditLogService;
     }
 
     public TotpSetupResponse initiateSetup(UUID userId) {
@@ -174,6 +179,7 @@ public class TotpService {
         List<String> backupCodes = regenerateBackupCodes(userId);
 
         log.info("TOTP enabled for user id={}", userId);
+        recordTotpAudit(user, "TOTP_ENABLED");
         return TotpEnableResponse.builder().backupCodes(backupCodes).build();
     }
 
@@ -202,6 +208,30 @@ public class TotpService {
         userRepository.save(user);
         backupCodeRepository.deleteByUserId(userId);
         log.info("TOTP disabled for user id={}", userId);
+        recordTotpAudit(user, "TOTP_DISABLED");
+    }
+
+    /** 2FA toggling is exactly the kind of security-sensitive action the audit trail exists for
+     *  (audit 2026-08-05 — previously untracked). TOTP is account-level, not tied to any one
+     *  tenant, so tenantId is left null here — same as AuthService's own login-audit call does
+     *  for a user with no tenant roles yet. Best-effort: an audit-log failure must not roll back
+     *  a real 2FA state change, same defensive stance already used at every other call site. */
+    private void recordTotpAudit(User user, String action) {
+        try {
+            auditLogService.record(
+                    null,
+                    user.getId(),
+                    user.getEmail() != null ? user.getEmail() : user.getPhone(),
+                    "USER",
+                    user.getId().toString(),
+                    action,
+                    null, null,
+                    HttpRequestUtils.currentRequestId(),
+                    HttpRequestUtils.currentIpAddress(),
+                    HttpRequestUtils.currentUserAgent());
+        } catch (Exception ex) {
+            log.warn("Failed to record audit log for {} userId={}: {}", action, user.getId(), ex.getMessage());
+        }
     }
 
     private boolean reauthenticate(User user, DisableTotpRequest request) {

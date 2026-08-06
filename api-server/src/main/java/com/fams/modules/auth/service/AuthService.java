@@ -219,7 +219,7 @@ public class AuthService {
                     "LOGIN",
                     null,
                     null,
-                    null,
+                    HttpRequestUtils.currentRequestId(),
                     HttpRequestUtils.currentIpAddress(),
                     HttpRequestUtils.currentUserAgent());
         } catch (Exception ex) {

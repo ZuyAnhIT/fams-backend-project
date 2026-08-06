@@ -9,7 +9,7 @@ import lombok.Data;
 public class CreateTemplateRequest {
 
   @NotBlank
-  @Schema(description = "Event type identifier", example = "RANDOM_CHECK_DISPATCHED", required = true)
+  @Schema(description = "Event type identifier", example = "RANDOM_CHECK_SENT", required = true)
   private String eventType;
 
   @Schema(description = "Locale code (default 'vi')", example = "vi")
