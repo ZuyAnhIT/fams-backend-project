@@ -4,6 +4,7 @@ import com.fams.modules.audit.dto.response.AuditLogResponse;
 import com.fams.modules.audit.service.AuditLogService;
 import com.fams.shared.pagination.PageResponse;
 import com.fams.shared.response.ApiResponse;
+import com.fams.shared.security.FamsUserDetails;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -14,6 +15,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.OffsetDateTime;
@@ -37,7 +39,11 @@ public class AuditLogController {
       description =
           "Returns a paginated list of audit log entries. Supports filtering by actor, entity type, "
               + "entity ID, action, date range, and request ID. "
-              + "Accessible by PLATFORM_ADMIN or users with audit:list permission.")
+              + "Accessible by PLATFORM_ADMIN or users with audit:list permission. "
+              + "Tenant-scoped for non-platform-admin callers (audit 2026-08-06): tenantId is forced "
+              + "to the caller's own tenant — passing a different tenantId returns 403, and omitting "
+              + "it requires the caller belong to exactly one tenant. Platform Admin may pass any "
+              + "tenantId or omit it entirely to see every tenant.")
   @ApiResponses({
     @io.swagger.v3.oas.annotations.responses.ApiResponse(
         responseCode = "200",
@@ -62,13 +68,15 @@ public class AuditLogController {
       @Parameter(description = "Start of date range (ISO-8601)") @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) OffsetDateTime from,
       @Parameter(description = "End of date range (ISO-8601)") @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) OffsetDateTime to,
       @Parameter(description = "Zero-based page index (default 0)") @RequestParam(defaultValue = "0") int page,
-      @Parameter(description = "Page size (default 20, max 200)") @RequestParam(defaultValue = "20") int size) {
+      @Parameter(description = "Page size (default 20, max 200)") @RequestParam(defaultValue = "20") int size,
+      @AuthenticationPrincipal FamsUserDetails userDetails) {
 
     size = Math.min(size, 200);
 
     if (requestId != null && !requestId.isBlank()) {
       log.info("Audit trace by requestId={}", requestId);
-      List<AuditLogResponse> entries = auditLogService.findByRequestId(requestId);
+      List<AuditLogResponse> entries = auditLogService.findByRequestId(
+          requestId, userDetails.getUserId(), userDetails.isPlatformAdmin());
       PageResponse<AuditLogResponse> singlePage = PageResponse.<AuditLogResponse>builder()
           .content(entries)
           .page(0)
@@ -85,7 +93,8 @@ public class AuditLogController {
         "List audit logs tenantId={} actorId={} entityType={} entityId={} action={} page={} size={}",
         tenantId, actorId, entityType, entityId, action, page, size);
     PageResponse<AuditLogResponse> result =
-        auditLogService.listAuditLogs(tenantId, actorId, entityType, entityId, action, from, to, page, size);
+        auditLogService.listAuditLogs(tenantId, actorId, entityType, entityId, action, from, to, page, size,
+            userDetails.getUserId(), userDetails.isPlatformAdmin());
     return ResponseEntity.ok(ApiResponse.success(result));
   }
 
@@ -112,9 +121,10 @@ public class AuditLogController {
   @GetMapping("/{id}")
   @PreAuthorize("hasRole('PLATFORM_ADMIN') or hasAuthority('audit:read')")
   public ResponseEntity<ApiResponse<AuditLogResponse>> getAuditLog(
-      @Parameter(description = "Audit log entry UUID") @PathVariable UUID id) {
+      @Parameter(description = "Audit log entry UUID") @PathVariable UUID id,
+      @AuthenticationPrincipal FamsUserDetails userDetails) {
     log.info("Get audit log id={}", id);
-    AuditLogResponse response = auditLogService.getById(id);
+    AuditLogResponse response = auditLogService.getById(id, userDetails.getUserId(), userDetails.isPlatformAdmin());
     return ResponseEntity.ok(ApiResponse.success(response));
   }
 }
