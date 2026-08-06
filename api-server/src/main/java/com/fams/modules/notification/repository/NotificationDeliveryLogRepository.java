@@ -2,6 +2,7 @@ package com.fams.modules.notification.repository;
 
 import com.fams.modules.notification.entity.NotificationDeliveryLog;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -10,7 +11,8 @@ import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.UUID;
 
-public interface NotificationDeliveryLogRepository extends JpaRepository<NotificationDeliveryLog, UUID> {
+public interface NotificationDeliveryLogRepository
+    extends JpaRepository<NotificationDeliveryLog, UUID>, JpaSpecificationExecutor<NotificationDeliveryLog> {
 
   List<NotificationDeliveryLog> findByNotificationIdOrderByCreatedAtAsc(UUID notificationId);
 

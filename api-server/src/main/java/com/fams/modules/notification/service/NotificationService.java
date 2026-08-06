@@ -5,6 +5,7 @@ import com.fams.modules.notification.dto.response.NotificationPageResponse;
 import com.fams.modules.notification.dto.response.NotificationResponse;
 import com.fams.modules.notification.entity.Notification;
 import com.fams.modules.notification.repository.NotificationRepository;
+import com.fams.modules.tenant.repository.TenantRepository;
 import com.fams.shared.exception.ResourceNotFoundException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Lazy;
@@ -26,14 +27,20 @@ public class NotificationService {
   private final NotificationRepository notificationRepository;
   private final UserNotificationSettingService userNotificationSettingService;
   private final UserDeviceService userDeviceService;
+  private final NotificationTemplateService notificationTemplateService;
+  private final TenantRepository tenantRepository;
 
   public NotificationService(
       NotificationRepository notificationRepository,
       @Lazy UserNotificationSettingService userNotificationSettingService,
-      @Lazy UserDeviceService userDeviceService) {
+      @Lazy UserDeviceService userDeviceService,
+      NotificationTemplateService notificationTemplateService,
+      TenantRepository tenantRepository) {
     this.notificationRepository = notificationRepository;
     this.userNotificationSettingService = userNotificationSettingService;
     this.userDeviceService = userDeviceService;
+    this.notificationTemplateService = notificationTemplateService;
+    this.tenantRepository = tenantRepository;
   }
 
   /**
@@ -124,6 +131,30 @@ public class NotificationService {
     log.info(
         "Creating notification tenantId={} userId={} eventType={}", tenantId, userId, eventType);
 
+    // Admin-configured template (audit 2026-08-06) overrides the caller-supplied title/body when
+    // one exists for this tenant+eventType+locale — this is the ONLY place in the codebase that
+    // ever consulted NotificationTemplateService before this fix, so it's the single choke point
+    // every notification (present and future) goes through, guaranteeing an admin-edited template
+    // actually changes what gets sent. Falls back to the caller's hardcoded defaults when no
+    // template is configured (no seed data required, no risk of breaking a send just because a
+    // tenant never bothered to customize this eventType). Uses the non-throwing
+    // renderTemplateIfExists, NOT renderTemplate — see that method's Javadoc for why the throwing
+    // version silently breaks every send in this exact call position (nested @Transactional
+    // exception marks the shared transaction rollback-only even when caught locally).
+    String resolvedTitle = title;
+    String resolvedBody = body;
+    String locale = resolveLocale(tenantId);
+    Map<String, String> vars = toPushDataPayload(eventType, metadata);
+    java.util.Optional<String[]> rendered =
+        notificationTemplateService.renderTemplateIfExists(tenantId, eventType, locale, vars);
+    if (rendered.isPresent()) {
+      resolvedTitle = rendered.get()[0];
+      resolvedBody = rendered.get()[1];
+    } else {
+      log.debug("No custom template for tenantId={} eventType={} — using caller-supplied text",
+              tenantId, eventType);
+    }
+
     boolean inAppEnabled = userNotificationSettingService.isInAppEnabled(userId, eventType);
     boolean pushEnabled = userNotificationSettingService.isPushEnabled(userId, eventType);
 
@@ -134,8 +165,8 @@ public class NotificationService {
               .tenantId(tenantId)
               .userId(userId)
               .eventType(eventType)
-              .title(title)
-              .body(body)
+              .title(resolvedTitle)
+              .body(resolvedBody)
               .metadata(metadata)
               .isRead(false)
               .build();
@@ -150,10 +181,18 @@ public class NotificationService {
       Map<String, String> pushData = toPushDataPayload(eventType, metadata);
       // notificationId may be null here (in-app disabled, push-only path) — the delivery log
       // FK already tolerates that, see UserDeviceService.sendPush's Javadoc.
-      userDeviceService.sendPush(saved != null ? saved.getId() : null, userId, title, body, pushData);
+      userDeviceService.sendPush(saved != null ? saved.getId() : null, userId, resolvedTitle, resolvedBody, pushData);
     }
 
     return saved != null ? toResponse(saved) : null;
+  }
+
+  /** Tenant's configured locale, defaulting to "vi" — matches NotificationTemplate's own default
+   *  (see NotificationTemplateService.createTemplate) since there is no per-user locale field. */
+  private String resolveLocale(UUID tenantId) {
+    return tenantRepository.findByIdAndDeletedAtIsNull(tenantId)
+            .map(t -> t.getLocale() != null ? t.getLocale() : "vi")
+            .orElse("vi");
   }
 
   /** FCM data payloads are always String→String — stringify eventType + every metadata value,

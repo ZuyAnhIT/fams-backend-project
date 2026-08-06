@@ -189,6 +189,30 @@ public class NotificationTemplateService {
     return new String[]{title, body};
   }
 
+  /**
+   * Same as {@link #renderTemplate}, but returns empty instead of throwing when no template is
+   * configured — for use from inside an ALREADY-OPEN, non-readonly transaction (e.g.
+   * NotificationService.createNotification). Found via live testing (audit 2026-08-06): the
+   * throwing version, called from within another @Transactional method's try/catch, still marked
+   * the whole shared transaction rollback-only even though the exception was caught locally —
+   * this is a well-known Spring AOP gotcha (a nested @Transactional proxy call that throws marks
+   * the PHYSICAL transaction doomed before the exception ever reaches the caller's catch block,
+   * since Spring's TransactionInterceptor for the inner method runs completeTransactionAfterThrowing
+   * before the exception propagates). Confirmed the throwing version broke EVERY notification send
+   * with no custom template configured — i.e. almost all of them — with UnexpectedRollbackException
+   * at commit time, with zero error logged at the actual failure point. Never use the throwing
+   * renderTemplate for a "does a template exist" check inside another transaction — this is why.
+   */
+  @Transactional(readOnly = true)
+  public java.util.Optional<String[]> renderTemplateIfExists(UUID tenantId, String eventType, String locale,
+                                                               Map<String, String> vars) {
+    return templateRepository.findByTenantIdAndEventTypeAndLocaleAndDeletedAtIsNull(tenantId, eventType, locale)
+        .map(template -> new String[]{
+            substitute(template.getTitleTemplate(), vars),
+            substitute(template.getBodyTemplate(), vars)
+        });
+  }
+
   private String substitute(String template, Map<String, String> vars) {
     if (vars == null || vars.isEmpty()) {
       return template;
