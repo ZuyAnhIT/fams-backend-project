@@ -221,7 +221,9 @@ public class ReportController {
         summary = "Export violation list to Excel (HR/Admin)",
         description = "Generates and downloads an Excel (.xlsx) file containing all violations matching the " +
                       "supplied filters — one row per violation with type, date, resolved status, attendance " +
-                      "impact, employee note, and timestamps. All filters are optional. " +
+                      "impact, employee note, and timestamps. All filters are optional, including `resolved` " +
+                      "(2026-08-06: previously unavailable — omitting it exports both resolved and unresolved, " +
+                      "matching the exact set the caller would see when browsing with the same filter). " +
                       "Requires reports:export permission."
     )
     @ApiResponses({
@@ -248,10 +250,12 @@ public class ReportController {
                 @RequestParam(required = false) UUID employeeId,
             @Parameter(description = "Filter by violation type (optional)")
                 @RequestParam(required = false) String violationType,
+            @Parameter(description = "Filter by resolved status (optional) — omit to export both resolved and unresolved")
+                @RequestParam(required = false) Boolean resolved,
             @AuthenticationPrincipal FamsUserDetails caller) {
 
         byte[] content = reportService.exportViolations(
-                tenantId, from, to, siteId, employeeId, violationType,
+                tenantId, from, to, siteId, employeeId, violationType, resolved,
                 caller.getUserId(), caller.isPlatformAdmin());
 
         String filename = "violations-export.xlsx";

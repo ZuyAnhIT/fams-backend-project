@@ -139,6 +139,8 @@ Query: `from`, `to` (tuỳ chọn, theo `checkDate`), `siteId`, `employeeId`, `v
 
 Cùng bộ filter, quyền `reports:export`. Không có guard "not ready" như bảng công — vi phạm không ảnh hưởng lương tự động (xem `violation-management-api.md` mục 1.4), nên xuất file bất kỳ lúc nào không cần điều kiện tiên quyết.
 
+**Cập nhật 2026-08-06 — thêm filter `resolved` (boolean, tuỳ chọn)**: trước đây endpoint export **thiếu** `resolved` dù màn danh sách vi phạm đã hỗ trợ — dẫn tới việc export không khớp đúng bộ lọc người dùng đang xem (ví dụ đang lọc "chưa xử lý" nhưng file export lại gồm cả đã xử lý). Đã bổ sung `resolved` vào export, hoạt động giống hệt `GET /violations?resolved=...`: `true` → chỉ vi phạm đã xử lý, `false` → chỉ chưa xử lý, bỏ trống → cả hai. **FE cần bỏ modal cảnh báo "file sẽ gồm cả hai trạng thái"** (không còn cần thiết) và truyền thẳng `resolved` hiện tại của bộ lọc màn hình vào request export, để file tải về khớp tuyệt đối với danh sách đang xem trên UI.
+
 ---
 
 ## 7. `GET /reports/sites/presence` — Báo cáo hiện diện theo site

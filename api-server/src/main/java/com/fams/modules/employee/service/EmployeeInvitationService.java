@@ -21,6 +21,7 @@ import com.fams.modules.rbac.repository.RoleRepository;
 import com.fams.modules.rbac.repository.UserRoleRepository;
 import com.fams.modules.tenant.repository.TenantRepository;
 import com.fams.modules.employee.specification.EmployeeInvitationSpecification;
+import com.fams.modules.subscription.service.PlanLimitEnforcementService;
 import com.fams.shared.exception.DuplicateResourceException;
 import com.fams.shared.exception.InvalidInvitationException;
 import com.fams.shared.exception.ResourceNotFoundException;
@@ -62,6 +63,7 @@ public class EmployeeInvitationService {
     private final int invitationExpiryDays;
     private final int accessTtlMinutes;
     private final int refreshTtlDays;
+    private final PlanLimitEnforcementService planLimitEnforcementService;
 
     public EmployeeInvitationService(
             EmployeeInvitationRepository invitationRepository,
@@ -77,7 +79,8 @@ public class EmployeeInvitationService {
             @Value("${app.frontend-url}") String frontendUrl,
             @Value("${app.invitation.expiry-days:7}") int invitationExpiryDays,
             @Value("${app.jwt.access-ttl-minutes}") int accessTtlMinutes,
-            @Value("${app.jwt.refresh-ttl-days}") int refreshTtlDays) {
+            @Value("${app.jwt.refresh-ttl-days}") int refreshTtlDays,
+            PlanLimitEnforcementService planLimitEnforcementService) {
         this.invitationRepository = invitationRepository;
         this.employeeRepository = employeeRepository;
         this.userRoleRepository = userRoleRepository;
@@ -92,6 +95,7 @@ public class EmployeeInvitationService {
         this.invitationExpiryDays = invitationExpiryDays;
         this.accessTtlMinutes = accessTtlMinutes;
         this.refreshTtlDays = refreshTtlDays;
+        this.planLimitEnforcementService = planLimitEnforcementService;
     }
 
     @Transactional(readOnly = true)
@@ -160,6 +164,12 @@ public class EmployeeInvitationService {
                 throw new AccessDeniedException("You do not have permission to invite employees in this tenant");
             }
         }
+
+        // Early feedback only — not authoritative (audit 2026-08-06, see the real gap this
+        // closes at accept-time below). A pending invite doesn't reserve a seat, so this can
+        // still race with other invites/direct creates between now and acceptance; that's fine,
+        // it just means HR occasionally finds out at accept-time instead of at send-time.
+        planLimitEnforcementService.assertEmployeeLimit(tenantId);
 
         String normalizedEmail = request.getEmail().trim().toLowerCase();
         String normalizedPhone = (request.getPhone() != null) ? request.getPhone().trim() : null;
@@ -339,6 +349,16 @@ public class EmployeeInvitationService {
                 log.info("Existing employee record linked to new account via invitation: employeeId={} userId={} tenantId={}",
                         employee.getId(), user.getId(), invitation.getTenantId());
             } else {
+                // Authoritative limit check (audit 2026-08-06) — this branch is the one that
+                // actually consumes a new employee seat (the branch above links to an existing
+                // unlinked record instead, which doesn't increase headcount and correctly isn't
+                // gated). Previously EmployeeService#createEmployee was the only place this was
+                // enforced, so a tenant already at (or pushed over, via a plan downgrade after
+                // invites were already sent) its maxEmployees limit could still onboard
+                // unlimited staff simply by accepting pending invitations — the direct-create
+                // API path was gated, this one silently wasn't.
+                planLimitEnforcementService.assertEmployeeLimit(invitation.getTenantId());
+
                 String firstName;
                 String lastName;
                 if (StringUtils.hasText(invitation.getFirstName())) {

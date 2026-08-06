@@ -656,7 +656,7 @@ public class ReportService {
 
     @Transactional(readOnly = true)
     public byte[] exportViolations(UUID tenantId, LocalDate from, LocalDate to,
-                                   UUID siteId, UUID employeeId, String violationType,
+                                   UUID siteId, UUID employeeId, String violationType, Boolean resolved,
                                    UUID callerUserId, boolean callerIsPlatformAdmin) {
         if (!callerIsPlatformAdmin) {
             Set<String> perms = userRoleRepository
@@ -671,7 +671,7 @@ public class ReportService {
             UUID effectiveSiteId =
                     resolveSiteFilterForReports(callerUserId, tenantId, siteId, callerIsPlatformAdmin);
             org.springframework.data.jpa.domain.Specification<Violation> spec = ViolationSpecification.build(
-                    tenantId, employeeId, effectiveSiteId, violationType, null, from, to);
+                    tenantId, employeeId, effectiveSiteId, violationType, resolved, from, to);
             all = violationRepository.findAll(spec, Sort.by(Sort.Direction.DESC, "checkDate"));
         } catch (NoSitesAllowedForReport e) {
             // Caller is site-restricted but has no allowed sites left — correct result is an
@@ -714,8 +714,8 @@ public class ReportService {
 
             ByteArrayOutputStream out = new ByteArrayOutputStream();
             workbook.write(out);
-            log.info("Violation export: tenantId={} from={} to={} siteId={} employeeId={} rows={}",
-                    tenantId, from, to, siteId, employeeId, all.size());
+            log.info("Violation export: tenantId={} from={} to={} siteId={} employeeId={} resolved={} rows={}",
+                    tenantId, from, to, siteId, employeeId, resolved, all.size());
             return out.toByteArray();
         } catch (IOException e) {
             throw new RuntimeException("Failed to generate violations Excel export", e);
