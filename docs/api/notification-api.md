@@ -14,6 +14,16 @@
 
 ---
 
+## 0.1 Bản vá 2026-08-06 — Template thông báo giờ thực sự có tác dụng, thêm delivery-log cho admin
+
+**Quan trọng cho FE quản trị (màn "Quản lý template thông báo" nếu đã/đang dựng)**: `POST/PUT/DELETE /api/v1/tenants/{tenantId}/notification-templates` (CRUD template theo `eventType` + `locale`) đã tồn tại từ trước nhưng **trước ngày 2026-08-06 không có tác dụng thật** — sửa/xoá template không ảnh hưởng gì tới nội dung thông báo thực tế gửi đi. Đã sửa: từ nay, nếu tenant có template khớp đúng `eventType` + locale của tenant (`tenants.locale`, mặc định "vi"), title/body của template sẽ **ghi đè** nội dung mặc định của hệ thống. Không có template khớp → dùng nguyên text mặc định, không lỗi.
+
+- FE màn quản lý template: có thể yên tâm rằng lưu template giờ có tác dụng thật ngay lần gửi thông báo tiếp theo — không cần thêm bước "áp dụng"/"kích hoạt" nào khác.
+- Biến `{tenVarName}` trong `titleTemplate`/`bodyTemplate` được thay bằng đúng field tương ứng trong `metadata` của thông báo đó (ví dụ với `RANDOM_CHECK_SENT`: `{checkId}`, `{siteId}`, `{expiresAt}`) — field nào không có trong `metadata` sẽ giữ nguyên dạng `{tenBien}` chưa thay, không lỗi, không ẩn đi.
+- **Mới**: `GET /api/v1/platform/notifications/delivery-logs` (PLATFORM_ADMIN) — xem lịch sử gửi push/email, lọc theo `status` (`SUCCESS`/`FAILED`/`FALLBACK_EMAIL_SENT`/`FALLBACK_EMAIL_FAILED`), `channel`, khoảng thời gian. Dùng khi cần tra "tại sao user X không nhận được thông báo". `deviceToken` trong response bị che, chỉ hiện 6 ký tự cuối.
+
+---
+
 Bao gồm 5 user story:
 - *Hệ thống tạo thông báo in-app cho user để có nền cho các module sau.*
 - *Nhân viên dùng app đăng ký FCM token cho thiết bị để nhận thông báo realtime.*
@@ -190,7 +200,92 @@ Không theo tenant (danh mục dùng chung toàn hệ thống). Cần đăng nh�
 
 ---
 
-## 7. Mã lỗi cần xử lý
+## 7. Quản lý template thông báo (Admin — `/api/v1/tenants/{tenantId}/notification-templates`)
+
+Màn hình Admin cấu hình title/body theo `eventType` + ngôn ngữ. Từ 2026-08-06, lưu template ở đây **có tác dụng thật ngay lần gửi tiếp theo** (xem mục 0.1) — không cần bước "kích hoạt" nào khác.
+
+**Quyền**: `PLATFORM_ADMIN` hoặc quyền `notifications:manage`/`tenant:admin` trong tenant. HR_MANAGER thường KHÔNG có quyền này mặc định — nếu Admin/Owner của tenant thấy 403, kiểm tra lại role được gán quyền `notifications:manage`.
+
+### 7.1 `POST /api/v1/tenants/{tenantId}/notification-templates` — Tạo template
+
+```json
+{
+  "eventType": "RANDOM_CHECK_SENT",
+  "locale": "vi",
+  "titleTemplate": "Kiểm tra vị trí — {siteName}",
+  "bodyTemplate": "Vui lòng phản hồi trước {expiresAt}."
+}
+```
+- `eventType`, `titleTemplate`, `bodyTemplate` bắt buộc. `locale` mặc định `"vi"` nếu bỏ trống.
+- Cặp `eventType + locale` phải **duy nhất trong tenant** — trùng trả `409`.
+- `{tenBien}` trong template sẽ được thay bằng đúng field cùng tên trong `metadata` của thông báo lúc gửi thật (ví dụ với `RANDOM_CHECK_SENT`: `checkId`, `siteId`, `expiresAt`) — field nào không có trong `metadata` sẽ giữ nguyên `{tenBien}` chưa thay, không lỗi. **FE nên hiện gợi ý rõ những biến khả dụng cho từng `eventType`** (hiện tại backend không tự liệt kê — chỉ hỗ trợ 1 `eventType` thật là `RANDOM_CHECK_SENT` với 3 biến trên, xem mục 6.1 catalog).
+- Trả `201` + object template (có `id`, `createdAt`, `updatedAt`).
+
+### 7.2 `GET /api/v1/tenants/{tenantId}/notification-templates` — Danh sách (phân trang)
+
+Trả `Page<NotificationTemplateResponse>` chuẩn Spring (`content`, `page`, `size`, `totalElements`...).
+
+### 7.3 `GET /{templateId}` — Chi tiết 1 template
+
+### 7.4 `PUT /{templateId}` — Cập nhật
+
+Tất cả field đều optional — chỉ field nào gửi lên mới bị đổi. Đổi `eventType`/`locale` mà trùng với template khác trong cùng tenant → `409`.
+
+```json
+{ "titleTemplate": "Tiêu đề mới", "bodyTemplate": "Nội dung mới" }
+```
+
+### 7.5 `DELETE /{templateId}` — Xoá mềm
+
+Sau khi xoá, thông báo cho `eventType`/`locale` đó tự động quay về dùng text mặc định của hệ thống — không lỗi, không gián đoạn.
+
+### 7.6 Mã lỗi riêng của module template
+
+| HTTP | Khi nào |
+|---|---|
+| 400 | Thiếu `eventType`/`titleTemplate`/`bodyTemplate` khi tạo |
+| 403 | Thiếu quyền `notifications:manage`/`tenant:admin` |
+| 404 | `templateId` không tồn tại hoặc không thuộc tenant trong path |
+| 409 | Trùng `eventType + locale` trong cùng tenant |
+
+---
+
+## 8. Delivery log — theo dõi gửi thất bại (Platform Admin — `GET /api/v1/platform/notifications/delivery-logs`)
+
+Mới thêm 2026-08-06. Dùng cho màn/dashboard vận hành nội bộ (Platform Admin), **không phải màn hình cho tenant/HR** — endpoint không nhận `tenantId`, xem được delivery log của mọi tenant.
+
+**Quyền**: `PLATFORM_ADMIN` (hoặc `system:read`).
+
+**Query params** (đều optional): `status` (`SUCCESS`/`FAILED`/`FALLBACK_EMAIL_SENT`/`FALLBACK_EMAIL_FAILED`), `channel` (`FCM`/`EMAIL_FALLBACK`), `from`/`to` (ISO-8601), `page`, `size` (mặc định 20, tối đa 200).
+
+```json
+{
+  "success": true,
+  "data": {
+    "content": [
+      {
+        "id": "…",
+        "notificationId": "…",
+        "deviceToken": "…n-0001",
+        "channel": "FCM",
+        "attemptNumber": 2,
+        "status": "FAILED",
+        "errorMessage": "Device token unregistered",
+        "createdAt": "2026-08-06T04:13:56Z"
+      }
+    ],
+    "page": 0, "size": 20, "totalElements": 79, "totalPages": 4
+  }
+}
+```
+
+- `deviceToken` bị **che bớt**, chỉ hiện 6 ký tự cuối — không dùng để định danh thiết bị chính xác, chỉ để đối chiếu nhanh.
+- `notificationId` có thể `null` (trường hợp push-only, user đã tắt in-app cho `eventType` đó).
+- **UI đề xuất**: bảng lọc theo `status=FAILED` để tra nhanh "tại sao user X không nhận được thông báo" khi có khiếu nại — không cần dựng ngay nếu chưa có nhu cầu vận hành cấp thiết, đây là công cụ hỗ trợ ops chứ không phải tính năng end-user.
+
+---
+
+## 9. Mã lỗi cần xử lý (module gửi/nhận thông báo)
 
 | HTTP | Khi nào | FE nên làm gì |
 |---|---|---|
@@ -200,7 +295,7 @@ Không theo tenant (danh mục dùng chung toàn hệ thống). Cần đăng nh�
 
 ---
 
-## 8. Checklist bàn giao frontend
+## 10. Checklist bàn giao frontend
 
 - [ ] **App — bắt buộc**: gọi `POST /me/devices` sau đăng nhập + mỗi lần token FCM refresh; `DELETE` khi logout.
 - [ ] **App — bắt buộc**: xử lý push nhận được kể cả khi app tắt hoàn toàn — đọc `remoteMessage.data` (không chỉ chờ mở app rồi gọi `GET /notifications`).
@@ -209,3 +304,5 @@ Không theo tenant (danh mục dùng chung toàn hệ thống). Cần đăng nh�
 - [ ] **Web/App**: màn Cài đặt thông báo — 2 toggle độc lập (in-app/push) cho mỗi loại sự kiện, dùng `GET`/`PUT /me/notification-settings`.
 - [ ] **Web/App — mới (bản vá P1)**: dựng màn Cài đặt thông báo dựa trên `GET /me/notification-settings` (giờ luôn đủ catalog) thay vì tự hardcode danh sách `eventType` hay chỉ hiện các loại đã thấy xuất hiện trong response — không cần gọi thêm `GET /notification-event-types` riêng trừ khi cần catalog ở màn khác (ví dụ Web HR quản lý template).
 - [ ] **Web/App**: item thông báo có `metadata` thì điều hướng thẳng theo dữ liệu đó, không mở màn danh sách chung.
+- [ ] **Web Admin — mới (2026-08-06)**: dựng màn "Quản lý template thông báo" (mục 7) — CRUD `eventType` + `locale` + title/body, hiện gợi ý biến `{tenBien}` khả dụng theo `eventType`. Xác nhận với backend role nào trong tenant được gán quyền `notifications:manage` trước khi ẩn/hiện màn này theo role.
+- [ ] **Web Ops/Platform Admin — mới (2026-08-06), không khẩn cấp**: nếu có dashboard vận hành nội bộ, cân nhắc thêm bảng xem delivery log (mục 8) để tra cứu khi có khiếu nại "không nhận được thông báo" — không phải màn hình end-user.

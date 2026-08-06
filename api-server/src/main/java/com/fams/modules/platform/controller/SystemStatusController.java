@@ -1,9 +1,14 @@
 package com.fams.modules.platform.controller;
 
 import com.fams.modules.attendance.service.AttendanceSummaryService;
+import com.fams.modules.notification.dto.response.NotificationDeliveryLogResponse;
+import com.fams.modules.notification.entity.NotificationDeliveryLog;
+import com.fams.modules.notification.repository.NotificationDeliveryLogRepository;
+import com.fams.modules.notification.specification.NotificationDeliveryLogSpecification;
 import com.fams.modules.platform.dto.SystemStatusResponse;
 import com.fams.modules.randomcheck.redis.RandomCheckDispatchQueue;
 import com.fams.modules.tenant.repository.TenantRepository;
+import com.fams.shared.pagination.PageResponse;
 import com.fams.shared.monitoring.ScheduledJobMonitor;
 import com.fams.shared.monitoring.ScheduledJobStatus;
 import com.fams.shared.monitoring.ScheduledJobStatusRepository;
@@ -16,6 +21,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.actuate.health.HealthComponent;
 import org.springframework.boot.actuate.health.HealthEndpoint;
 import org.springframework.boot.actuate.health.SystemHealth;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
@@ -47,6 +54,7 @@ public class SystemStatusController {
     private final RandomCheckDispatchQueue dispatchQueue;
     private final StringRedisTemplate redisTemplate;
     private final AttendanceSummaryService attendanceSummaryService;
+    private final NotificationDeliveryLogRepository deliveryLogRepository;
 
     public SystemStatusController(HealthEndpoint healthEndpoint,
                                    ScheduledJobMonitor jobMonitor,
@@ -54,7 +62,8 @@ public class SystemStatusController {
                                    TenantRepository tenantRepository,
                                    RandomCheckDispatchQueue dispatchQueue,
                                    StringRedisTemplate redisTemplate,
-                                   AttendanceSummaryService attendanceSummaryService) {
+                                   AttendanceSummaryService attendanceSummaryService,
+                                   NotificationDeliveryLogRepository deliveryLogRepository) {
         this.healthEndpoint = healthEndpoint;
         this.jobMonitor = jobMonitor;
         this.jobStatusRepository = jobStatusRepository;
@@ -62,6 +71,7 @@ public class SystemStatusController {
         this.dispatchQueue = dispatchQueue;
         this.redisTemplate = redisTemplate;
         this.attendanceSummaryService = attendanceSummaryService;
+        this.deliveryLogRepository = deliveryLogRepository;
     }
 
     @Operation(
@@ -147,6 +157,63 @@ public class SystemStatusController {
         body.put("daysFailed", result.daysFailed());
 
         return ResponseEntity.ok(ApiResponse.success(body));
+    }
+
+    @Operation(
+        summary = "List notification delivery attempts (dead-letter visibility)",
+        description = "Paginated, filterable view of every push/email delivery attempt recorded by " +
+                      "FcmClient/UserDeviceService — the only way to see FAILED/FALLBACK_EMAIL_FAILED " +
+                      "rows today; they were previously only reachable via direct DB query (audit 2026-08-06). " +
+                      "Cross-tenant by nature (NotificationDeliveryLog does not carry tenantId — it's keyed " +
+                      "off notificationId/deviceToken), so restricted to PLATFORM_ADMIN like the rest of " +
+                      "this controller. Device tokens are masked to the last 6 characters."
+    )
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Paginated delivery log list"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Unauthorized"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "Forbidden — PLATFORM_ADMIN only")
+    })
+    @PreAuthorize("hasRole('PLATFORM_ADMIN') or hasAuthority('system:read')")
+    @GetMapping("/notifications/delivery-logs")
+    public ResponseEntity<ApiResponse<PageResponse<NotificationDeliveryLogResponse>>> listDeliveryLogs(
+            @Parameter(description = "Filter by status: SUCCESS, FAILED, FALLBACK_EMAIL_SENT, FALLBACK_EMAIL_FAILED")
+                @RequestParam(required = false) String status,
+            @Parameter(description = "Filter by channel, e.g. FCM, EMAIL")
+                @RequestParam(required = false) String channel,
+            @Parameter(description = "Start of date range (ISO-8601)")
+                @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) OffsetDateTime from,
+            @Parameter(description = "End of date range (ISO-8601)")
+                @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) OffsetDateTime to,
+            @Parameter(description = "Zero-based page index") @RequestParam(defaultValue = "0") int page,
+            @Parameter(description = "Page size (max 200)") @RequestParam(defaultValue = "20") int size) {
+
+        size = Math.min(size, 200);
+        Page<NotificationDeliveryLog> result = deliveryLogRepository.findAll(
+                NotificationDeliveryLogSpecification.build(status, channel, from, to),
+                PageRequest.of(page, size, org.springframework.data.domain.Sort.by(
+                        org.springframework.data.domain.Sort.Direction.DESC, "createdAt")));
+
+        PageResponse<NotificationDeliveryLogResponse> response = PageResponse.from(
+                result.map(this::toDeliveryLogResponse));
+        return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    private NotificationDeliveryLogResponse toDeliveryLogResponse(NotificationDeliveryLog entry) {
+        return NotificationDeliveryLogResponse.builder()
+                .id(entry.getId())
+                .notificationId(entry.getNotificationId())
+                .deviceToken(maskToken(entry.getDeviceToken()))
+                .channel(entry.getChannel())
+                .attemptNumber(entry.getAttemptNumber())
+                .status(entry.getStatus())
+                .errorMessage(entry.getErrorMessage())
+                .createdAt(entry.getCreatedAt())
+                .build();
+    }
+
+    private String maskToken(String token) {
+        if (token == null) return null;
+        return token.length() <= 6 ? token : "…" + token.substring(token.length() - 6);
     }
 
     private Map<String, Object> flattenHealth(HealthComponent component) {
