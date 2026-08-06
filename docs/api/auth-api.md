@@ -84,6 +84,8 @@ Riêng request bị chặn bởi security filter (thiếu/hết hạn Bearer tok
 { "success": false, "message": "Unauthorized", "data": null }
 ```
 
+**Mới (2026-08-05) — header `X-Request-Id`**: mọi response từ API (không riêng module auth) giờ kèm header `X-Request-Id` — tự sinh mới nếu client không gửi, hoặc echo lại đúng giá trị nếu client tự gửi kèm request. Dùng để đối chiếu với đội backend khi báo lỗi ("request bị lỗi có ID XXX, log lúc HH:mm") — dữ liệu này cũng được ghi vào audit log nội bộ cho các hành động quan trọng (đăng nhập, bật/tắt 2FA...). FE nên tự gửi kèm 1 UUID ở header này cho mỗi request nếu muốn tự tương quan log phía client với phía server (không bắt buộc — nếu không gửi, backend tự sinh).
+
 ### 1.3 Quy ước dữ liệu
 
 - Số điện thoại nên gửi theo E.164, ví dụ `+84912345678`.
@@ -473,6 +475,34 @@ Frontend phải chuyển sang màn nhập mã Authenticator và gọi:
 Hoặc dùng `backupCode` thay cho `code`. `pendingToken` hết hạn sau 5 phút và chỉ dùng một lần. Thành công trả cặp access/refresh token theo cùng cấu trúc login.
 
 Nhánh TOTP này áp dụng cho **cả 3 kênh đăng nhập** dùng mật khẩu/OTP-thay-mật-khẩu: login thường (mục 4), đăng nhập nhanh Firebase OTP (mục 5). Riêng **Google login không đi qua TOTP** — xem mục 6.3.
+
+### 4.3.1 [MỚI — trước đây chưa có tài liệu] Bật/tắt TOTP 2FA (màn Cài đặt bảo mật)
+
+**User story**: *Người dùng muốn bật xác thực hai lớp bằng ứng dụng Authenticator để bảo vệ tài khoản tốt hơn.*
+
+API đã tồn tại từ trước nhưng **chưa từng được đưa vào tài liệu FE** — mục 4.3 ở trên chỉ nói tới nhánh LOGIN khi TOTP đã bật; đây là toàn bộ luồng BẬT/TẮT trong màn Cài đặt tài khoản.
+
+**Bước 1 — Khởi tạo**: `POST /api/v1/auth/totp/setup` (cần Bearer token). `409` nếu tài khoản đã bật TOTP rồi.
+```json
+// response
+{ "setupToken": "uuid", "qrCodeUrl": "http://.../api/v1/auth/totp/qr?token=uuid", "manualEntryKey": "BASE32SECRET..." }
+```
+- `qrCodeUrl`: trang HTML dựng sẵn (không cần Bearer token, hết hạn sau 10 phút) — có thể mở trực tiếp trong WebView hoặc hiện QR ảnh cho user quét bằng Google Authenticator/Authy. Web có thể tự vẽ QR từ `manualEntryKey` nếu muốn UI riêng thay vì mở trang HTML này.
+- `manualEntryKey`: dùng khi user muốn nhập tay thay vì quét QR.
+
+**Bước 2 — Xác nhận mã đầu tiên và kích hoạt**: `POST /api/v1/auth/totp/verify`
+```json
+{ "setupToken": "uuid", "code": "123456" }
+```
+```json
+// response — CHỈ hiện MỘT LẦN DUY NHẤT, bắt buộc nhắc user lưu lại
+{ "backupCodes": ["RNJYVZY2", "P85W53GC", "...", "8 mã tổng cộng"] }
+```
+`400` nếu `setupToken` hết hạn/sai, hoặc mã nhập sai. **UI bắt buộc**: sau khi thành công, hiện màn hình yêu cầu user xác nhận đã lưu 8 backup code (dùng khi mất điện thoại) — không hiện lại được sau màn này.
+
+**Tắt 2FA**: `POST /api/v1/auth/totp/disable` — **bắt buộc xác thực lại**, gửi đúng 1 trong 3: `{"password": "..."}`, `{"code": "123456"}`, hoặc `{"backupCode": "..."}`. Chỉ có Bearer token hợp lệ là **không đủ** (chủ đích — chống trường hợp session token bị đánh cắp thì tắt luôn 2FA). `401` nếu xác thực lại thất bại, `400` nếu tài khoản chưa bật TOTP.
+
+**Mới (2026-08-05)**: cả bật và tắt TOTP giờ được ghi vào audit log (`action=TOTP_ENABLED`/`TOTP_DISABLED`) — không đổi API contract, chỉ là dữ liệu nội bộ để truy vết bảo mật, FE không cần làm gì thêm.
 
 ### 4.4 Các lỗi đăng nhập
 

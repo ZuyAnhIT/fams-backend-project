@@ -979,23 +979,28 @@ public class CheckinService {
                 .build();
     }
 
+    // Vietnamese, matching every BusinessException.userMessage elsewhere in this service (audit
+    // 2026-08-05) — this was the one message on the check-in flow still in English, which read
+    // as inconsistent to the Vietnamese field workers this app is built for, right on the
+    // success/pending path they see every single day (not just on error, like every other
+    // friendly message here).
     private String resolveDisplayMessage(CheckinRecord r) {
         boolean checkedOut = r.getCheckOutAt() != null;
         return switch (r.getStatus()) {
             case "valid" -> checkedOut
-                    ? "Check-out recorded successfully. You worked " + r.getWorkMinutes() + " minutes."
-                    : "Check-in recorded successfully.";
+                    ? "Chấm công ra thành công. Bạn đã làm việc " + r.getWorkMinutes() + " phút."
+                    : "Chấm công vào thành công.";
             // pending_review can now come from more than just geofence (P0-3 async face-verify
             // escalation, offline-sync best-effort verification) — keep the message generic
             // rather than always blaming location, which would mislead someone whose actual
             // issue was a failed face match.
             case "pending_review" -> checkedOut
-                    ? "Check-out recorded, but needs HR review (location or face verification). "
-                            + "This won't affect your pay until reviewed."
-                    : "Check-in recorded, but needs HR review (location or face verification). "
-                            + "You may proceed with work as normal.";
-            case "rejected" -> "Your attendance record was rejected by HR. Please contact your manager.";
-            default -> "Attendance recorded with status: " + r.getStatus() + ".";
+                    ? "Đã ghi nhận chấm công ra, nhưng cần HR xem lại (vị trí hoặc xác thực khuôn mặt). "
+                            + "Việc này không ảnh hưởng tới lương cho tới khi được duyệt."
+                    : "Đã ghi nhận chấm công vào, nhưng cần HR xem lại (vị trí hoặc xác thực khuôn mặt). "
+                            + "Bạn có thể tiếp tục làm việc bình thường.";
+            case "rejected" -> "Bản ghi chấm công của bạn đã bị HR từ chối. Vui lòng liên hệ quản lý.";
+            default -> "Đã ghi nhận chấm công với trạng thái: " + r.getStatus() + ".";
         };
     }
 

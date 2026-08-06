@@ -1,5 +1,7 @@
 package com.fams.modules.notification.service;
 
+import com.fams.modules.notification.constant.NotificationEventTypeCatalog;
+import com.fams.modules.notification.constant.NotificationEventTypeCatalog.NotificationEventTypeInfo;
 import com.fams.modules.notification.dto.request.UpsertNotificationSettingRequest;
 import com.fams.modules.notification.dto.response.UserNotificationSettingResponse;
 import com.fams.modules.notification.entity.UserNotificationSetting;
@@ -9,6 +11,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -23,18 +26,48 @@ public class UserNotificationSettingService {
     }
 
     /**
-     * Returns all notification settings for the given user.
+     * Returns effective notification settings for the UNION of every catalog event type and
+     * every event type the user has actually saved a row for — not just the intersection either
+     * way. Two audit-2026-08-05 gaps, fixed together:
+     * <ul>
+     *   <li>Previously only ever returned saved rows — a user who never touched settings got an
+     *       empty list, with no way to discover what event types even exist.</li>
+     *   <li>A naive "just return the catalog" fix (the first attempt at this fix) broke the
+     *       opposite case: {@code NotificationTemplate.eventType} is deliberately free text per
+     *       tenant (a tenant can define its own custom event types beyond the system catalog —
+     *       see {@code NotificationTemplateController}), and a user could already have saved a
+     *       real customization for one. Filtering the response down to only catalog entries would
+     *       have silently hidden that saved customization from the user's own settings screen,
+     *       even though {@link #isInAppEnabled}/{@link #isPushEnabled} still honor it correctly.</li>
+     * </ul>
+     * An event type the user hasn't customized comes back with the catalog's default flags and
+     * {@code customized=false}; one they have saved a row for (catalog or tenant-custom) comes
+     * back with their actual choice, {@code customized=true}, and a {@code label} only if it's a
+     * known catalog type (null for a tenant-custom one — FE falls back to showing the raw code).
      *
      * @param userId user UUID from JWT
-     * @return list of settings (may be empty for a new user)
+     * @return one row per catalog event type, plus one per any additional tenant-custom event
+     *         type the user has saved a row for (never empty — catalog alone guarantees ≥1)
      */
     @Transactional(readOnly = true)
     public List<UserNotificationSettingResponse> getSettings(UUID userId) {
         log.debug("Getting notification settings for userId={}", userId);
-        return settingRepository.findAllByUserId(userId)
+        Map<String, UserNotificationSetting> saved = settingRepository.findAllByUserId(userId)
                 .stream()
-                .map(this::toResponse)
-                .collect(Collectors.toList());
+                .collect(Collectors.toMap(UserNotificationSetting::getEventType, s -> s));
+
+        List<UserNotificationSettingResponse> result = NotificationEventTypeCatalog.ALL.stream()
+                .map(info -> {
+                    UserNotificationSetting existing = saved.remove(info.eventType());
+                    return existing != null ? toResponse(existing, info) : toDefaultResponse(userId, info);
+                })
+                .collect(Collectors.toCollection(java.util.ArrayList::new));
+
+        // Whatever's left in `saved` is a tenant-custom event type not in the system catalog —
+        // still a real, previously-visible customization, append it as-is (no catalog label).
+        saved.values().stream().map(this::toResponse).forEach(result::add);
+
+        return result;
     }
 
     /**
@@ -120,13 +153,39 @@ public class UserNotificationSettingService {
     }
 
     private UserNotificationSettingResponse toResponse(UserNotificationSetting s) {
+        NotificationEventTypeInfo info = NotificationEventTypeCatalog.ALL.stream()
+                .filter(i -> i.eventType().equals(s.getEventType()))
+                .findFirst()
+                .orElse(null);
+        return toResponse(s, info);
+    }
+
+    private UserNotificationSettingResponse toResponse(UserNotificationSetting s, NotificationEventTypeInfo info) {
         return UserNotificationSettingResponse.builder()
                 .id(s.getId())
                 .userId(s.getUserId())
                 .eventType(s.getEventType())
+                .label(info != null ? info.label() : null)
                 .inAppEnabled(s.isInAppEnabled())
                 .pushEnabled(s.isPushEnabled())
+                .customized(true)
                 .updatedAt(s.getUpdatedAt())
+                .build();
+    }
+
+    /** A catalog event type the user has never explicitly saved a row for — returns the
+     *  catalog's own default flags, {@code customized=false}, and no {@code id}/{@code updatedAt}
+     *  (nothing has actually been persisted). */
+    private UserNotificationSettingResponse toDefaultResponse(UUID userId, NotificationEventTypeInfo info) {
+        return UserNotificationSettingResponse.builder()
+                .id(null)
+                .userId(userId)
+                .eventType(info.eventType())
+                .label(info.label())
+                .inAppEnabled(info.defaultInAppEnabled())
+                .pushEnabled(info.defaultPushEnabled())
+                .customized(false)
+                .updatedAt(null)
                 .build();
     }
 }

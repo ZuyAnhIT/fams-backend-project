@@ -7,7 +7,7 @@ import lombok.Data;
 @Schema(description = "Request body for updating a notification template (all fields optional)")
 public class UpdateTemplateRequest {
 
-  @Schema(description = "Event type identifier", example = "RANDOM_CHECK_DISPATCHED")
+  @Schema(description = "Event type identifier", example = "RANDOM_CHECK_SENT")
   private String eventType;
 
   @Schema(description = "Locale code", example = "vi")

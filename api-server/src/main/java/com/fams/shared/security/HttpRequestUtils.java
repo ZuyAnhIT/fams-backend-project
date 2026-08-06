@@ -28,6 +28,19 @@ public final class HttpRequestUtils {
         return truncate(ua);
     }
 
+    /** Reads the request ID {@link RequestIdFilter} attached to the current request (client-sent
+     *  {@code X-Request-Id} if present, otherwise a fresh generated one) — see that filter's
+     *  javadoc. Null outside a request context (e.g. a scheduled job), same as the other
+     *  current*() methods here. */
+    public static String currentRequestId() {
+        HttpServletRequest request = currentRequest();
+        if (request == null) {
+            return null;
+        }
+        Object value = request.getAttribute(RequestIdFilter.ATTRIBUTE);
+        return value != null ? truncate(value.toString()) : null;
+    }
+
     public static String currentIpAddress() {
         HttpServletRequest request = currentRequest();
         if (request == null) {

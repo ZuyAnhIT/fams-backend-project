@@ -23,7 +23,7 @@ public class NotificationResponse {
   @Schema(description = "User UUID")
   private UUID userId;
 
-  @Schema(description = "Event type identifier", example = "RANDOM_CHECK_DISPATCHED")
+  @Schema(description = "Event type identifier", example = "RANDOM_CHECK_SENT")
   private String eventType;
 
   @Schema(description = "Notification title", example = "Random check requested")

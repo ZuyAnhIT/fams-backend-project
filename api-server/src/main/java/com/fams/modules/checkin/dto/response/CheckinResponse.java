@@ -78,8 +78,10 @@ public class CheckinResponse {
     @Schema(description = "Record last-updated timestamp")
     private OffsetDateTime updatedAt;
 
-    @Schema(description = "Human-readable result message for the employee",
-            example = "Check-in recorded. Your location was outside the site geofence — HR will review your attendance.")
+    @Schema(description = "Human-readable result message for the employee, in Vietnamese "
+            + "(matches every other user-facing message in the check-in flow)",
+            example = "Đã ghi nhận chấm công vào, nhưng cần HR xem lại (vị trí hoặc xác thực khuôn mặt). "
+                    + "Bạn có thể tiếp tục làm việc bình thường.")
     private String message;
 
     @Schema(description = "Face verification result (null until async job completes)", example = "true")

@@ -18,7 +18,7 @@ public class NotificationTemplateResponse {
   @Schema(description = "Tenant UUID")
   private UUID tenantId;
 
-  @Schema(description = "Event type identifier", example = "RANDOM_CHECK_DISPATCHED")
+  @Schema(description = "Event type identifier", example = "RANDOM_CHECK_SENT")
   private String eventType;
 
   @Schema(description = "Locale code", example = "vi")

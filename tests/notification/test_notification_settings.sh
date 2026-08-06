@@ -9,6 +9,9 @@
 set -euo pipefail
 
 BASE_URL="${BASE_URL:-http://localhost:8080}"
+# POST /internal/notifications now requires X-Internal-Secret (audit 2026-08-05) — matches
+# NOTIFICATIONS_INTERNAL_SECRET in .env for local dev.
+NOTIFICATIONS_INTERNAL_SECRET="${NOTIFICATIONS_INTERNAL_SECRET:-fams_notifications_secret_local_dev}"
 PASS=0
 FAIL=0
 
@@ -173,6 +176,7 @@ curl -s -X PUT "$BASE_URL/api/v1/me/notification-settings/SETTING_TEST_DISABLED"
 create_resp=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/internal/notifications" \
     -H "Content-Type: application/json" \
+    -H "X-Internal-Secret: $NOTIFICATIONS_INTERNAL_SECRET" \
     -d "{\"tenantId\":\"$TENANT_ID\",\"userId\":\"$USER_ID\",\"eventType\":\"SETTING_TEST_DISABLED\",\"title\":\"Should not appear\",\"body\":\"disabled\"}")
 create_status=$(echo "$create_resp" | tail -n 1)
 create_body=$(echo "$create_resp" | head -n -1)
@@ -180,6 +184,7 @@ create_body=$(echo "$create_resp" | head -n -1)
 run_test "POST /internal/notifications returns 201 even when skipped" 201 \
     -X POST "$BASE_URL/internal/notifications" \
     -H "Content-Type: application/json" \
+    -H "X-Internal-Secret: $NOTIFICATIONS_INTERNAL_SECRET" \
     -d "{\"tenantId\":\"$TENANT_ID\",\"userId\":\"$USER_ID\",\"eventType\":\"SETTING_TEST_DISABLED\",\"title\":\"Should not appear\",\"body\":\"disabled\"}"
 
 # Response data should be null since notification was not created
@@ -210,6 +215,7 @@ echo "Notification count before enabled test: $count_before2"
 
 curl -s -X POST "$BASE_URL/internal/notifications" \
     -H "Content-Type: application/json" \
+    -H "X-Internal-Secret: $NOTIFICATIONS_INTERNAL_SECRET" \
     -d "{\"tenantId\":\"$TENANT_ID\",\"userId\":\"$USER_ID\",\"eventType\":\"SETTING_TEST_ENABLED\",\"title\":\"Should appear\",\"body\":\"enabled\"}" > /dev/null
 
 count_after2=$(curl -s \

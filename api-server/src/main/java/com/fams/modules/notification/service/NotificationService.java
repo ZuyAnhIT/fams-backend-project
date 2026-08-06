@@ -221,6 +221,25 @@ public class NotificationService {
   }
 
   /**
+   * Marks a specific set of notifications as read — the "select several from the inbox" case
+   * between markAsRead (exactly one) and markAllAsRead (everything). IDs that don't exist, don't
+   * belong to this user/tenant, or are already read are silently skipped rather than erroring —
+   * matches markAllAsRead's own idempotent style.
+   *
+   * @return the number of notifications actually updated
+   */
+  @Transactional
+  public int markAsReadBatch(UUID tenantId, UUID userId, List<UUID> notificationIds) {
+    log.info("Mark batch as read tenantId={} userId={} count={}", tenantId, userId, notificationIds.size());
+    if (notificationIds.isEmpty()) {
+      return 0;
+    }
+    int count = notificationRepository.markAsReadBatch(tenantId, userId, notificationIds);
+    log.debug("Marked {} notifications as read for userId={}", count, userId);
+    return count;
+  }
+
+  /**
    * Marks all unread notifications as read for the given user in a tenant.
    *
    * @param tenantId tenant UUID from path

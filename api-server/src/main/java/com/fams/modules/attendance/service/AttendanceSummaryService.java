@@ -777,7 +777,7 @@ public class AttendanceSummaryService {
                        "totalWorkMinutes", previousTotalWorkMinutes),
                 Map.of("reason", reason,
                        "totalWorkMinutes", recomputed.getTotalWorkMinutes()),
-                null, null, null);
+                com.fams.shared.security.HttpRequestUtils.currentRequestId(), null, null);
 
         log.info("HR unlocked and recomputed attendance summary: summaryId={} by={} reason={} " +
                 "previousAdjustmentReason={}", summaryId, callerUserId, reason, previousAdjustmentReason);
