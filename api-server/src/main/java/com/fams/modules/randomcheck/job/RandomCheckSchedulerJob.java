@@ -30,15 +30,16 @@ public class RandomCheckSchedulerJob {
      */
     @Scheduled(cron = "${fams.randomcheck.scheduler.cron:0 1 0 * * *}")
     public void generateDailyChecks() {
+        long startedAt = System.currentTimeMillis();
         LocalDate today = LocalDate.now();
         log.info("RandomCheckSchedulerJob — generating checks for {}", today);
         try {
             int count = generatorService.generateForDate(today);
             log.info("RandomCheckSchedulerJob — created {} scheduled checks for {}", count, today);
-            jobMonitor.recordSuccess(JOB_NAME);
+            jobMonitor.recordSuccess(JOB_NAME, System.currentTimeMillis() - startedAt);
         } catch (Exception e) {
             log.error("RandomCheckSchedulerJob — failed for {}: {}", today, e.getMessage(), e);
-            jobMonitor.recordFailure(JOB_NAME, e);
+            jobMonitor.recordFailure(JOB_NAME, System.currentTimeMillis() - startedAt, e);
         }
     }
 }

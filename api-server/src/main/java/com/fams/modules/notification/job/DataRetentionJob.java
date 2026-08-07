@@ -58,17 +58,18 @@ public class DataRetentionJob {
     @Scheduled(cron = "0 0 3 * * SUN")
     @Transactional
     public void runRetention() {
+        long startedAt = System.currentTimeMillis();
         log.info("DataRetentionJob starting");
         try {
             purgeDeliveryLogs();
             purgeReadNotifications();
             purgeRevokedFaceEmbeddings();
             purgeOldBiometricPhotos();
-            jobMonitor.recordSuccess(JOB_NAME);
+            jobMonitor.recordSuccess(JOB_NAME, System.currentTimeMillis() - startedAt);
             log.info("DataRetentionJob completed");
         } catch (Exception e) {
             log.error("DataRetentionJob failed: {}", e.getMessage(), e);
-            jobMonitor.recordFailure(JOB_NAME, e);
+            jobMonitor.recordFailure(JOB_NAME, System.currentTimeMillis() - startedAt, e);
         }
     }
 

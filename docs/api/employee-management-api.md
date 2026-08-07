@@ -87,6 +87,16 @@ Test sống xác nhận: tạo 1 nhân viên, thêm vào 1 workspace, tạo 1 as
 
 Test sống xác nhận: tạo thủ công 1 nhân viên (có `position="Mason"`), mời đúng email đó, chấp nhận → chỉ còn **đúng 1** record, cùng `id` ban đầu, giữ nguyên `position="Mason"`, đã có `userId` mới.
 
+### 2.5 [Cập nhật 2026-08-06] Che PII: đổi permission + thêm field `piiMasked`
+
+`email`/`phone` trong `EmployeeResponse` (danh sách) và `EmployeeDetailResponse` (chi tiết) bị **che tự động** (`a***@congty.vn`, `***001`) trừ khi người gọi là `PLATFORM_ADMIN` hoặc giữ quyền **`employees:pii:read`** (permission chuyên biệt mới — trước 2026-08-06 dùng `users:create`, đã đổi theo phản hồi FE về nguyên tắc least-privilege; role nào từng có `users:create` đã được tự động cấp thêm `employees:pii:read` qua migration, không mất quyền đột ngột). File Excel export (`GET /employees/export`) áp dụng **đúng cùng quy tắc** — không còn lệch giữa JSON và Excel như trước.
+
+Cả 2 response giờ có thêm field boolean **`piiMasked`** — `true` nếu `email`/`phone` trong response này đang bị che cho người gọi hiện tại. **Dùng field này để quyết định UI (ví dụ hiện icon "🔒 Cần quyền xem đầy đủ" cạnh field bị che), không tự suy luận bằng cách kiểm tra chuỗi có chứa `***` hay không** — quyết định che/không che luôn nằm ở Backend, field này chỉ là metadata tường minh để FE không phải đoán.
+
+```json
+{ "email": "a***@hoanglong.vn", "phone": "***001", "piiMasked": true, ... }
+```
+
 ## 3. Tính năng mới: Mời nhân viên nền tảng qua email
 
 ### 3.1 Vì sao phải xây tách biệt, không dùng chung bảng với lời mời công ty

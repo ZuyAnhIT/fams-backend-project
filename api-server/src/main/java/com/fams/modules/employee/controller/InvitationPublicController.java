@@ -47,7 +47,7 @@ public class InvitationPublicController {
     @GetMapping("/validate")
     public ResponseEntity<ApiResponse<ValidateInvitationResponse>> validateInvitation(
             @Parameter(description = "Invitation token UUID") @RequestParam UUID token) {
-        log.info("Validate invitation token={}", token);
+        log.info("Validate invitation token={}...", token.toString().substring(0, 8));
         ValidateInvitationResponse response = invitationService.validateInvitation(token);
         return ResponseEntity.ok(ApiResponse.success(response));
     }
@@ -73,7 +73,7 @@ public class InvitationPublicController {
     @PostMapping("/accept")
     public ResponseEntity<ApiResponse<LoginResponse>> acceptInvitation(
             @Valid @RequestBody AcceptInvitationRequest request) {
-        log.info("Accept invitation token={}", request.getToken());
+        log.info("Accept invitation token={}...", request.getToken().toString().substring(0, 8));
         LoginResponse response = invitationService.acceptInvitation(request);
         return ResponseEntity.ok(ApiResponse.success(response));
     }

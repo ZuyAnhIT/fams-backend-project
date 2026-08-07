@@ -32,6 +32,9 @@ public class ScheduledJobStatus {
     @Column(name = "error_message")
     private String errorMessage;
 
+    @Column(name = "last_run_duration_ms")
+    private Long lastRunDurationMs;
+
     @Column(name = "updated_at", nullable = false)
     private OffsetDateTime updatedAt;
 }

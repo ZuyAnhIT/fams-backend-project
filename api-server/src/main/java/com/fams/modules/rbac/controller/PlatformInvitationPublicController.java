@@ -71,7 +71,7 @@ public class PlatformInvitationPublicController {
     @PostMapping("/accept")
     public ResponseEntity<ApiResponse<LoginResponse>> acceptInvitation(
             @Valid @RequestBody AcceptPlatformInvitationRequest request) {
-        log.info("Accept platform invitation token={}", request.getToken());
+        log.info("Accept platform invitation token={}...", request.getToken().toString().substring(0, 8));
         LoginResponse response = invitationService.acceptInvitation(request);
         return ResponseEntity.ok(ApiResponse.success(response));
     }

@@ -2,6 +2,7 @@ package com.fams.modules.employee.dto.response;
 
 import com.fams.modules.assignment.dto.response.AssignmentResponse;
 import com.fams.modules.rbac.dto.response.UserRoleResponse;
+import com.fams.shared.util.Masked;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Builder;
 import lombok.Data;
@@ -34,9 +35,11 @@ public class EmployeeDetailResponse {
     @Schema(description = "Last name", example = "Doe")
     private String lastName;
 
+    @Masked(type = Masked.MaskType.EMAIL)
     @Schema(description = "Work email", example = "john.doe@example.com")
     private String email;
 
+    @Masked(type = Masked.MaskType.PHONE)
     @Schema(description = "Phone number", example = "+84901234567")
     private String phone;
 
@@ -75,4 +78,11 @@ public class EmployeeDetailResponse {
 
     @Schema(description = "Last update timestamp (UTC)")
     private OffsetDateTime updatedAt;
+
+    @Schema(description = "True if email/phone in this response are masked for the calling user "
+            + "(no employees:pii:read permission / not PLATFORM_ADMIN) — explicit flag added "
+            + "2026-08-06 so clients don't have to heuristically detect a \"***\" pattern; the "
+            + "masking decision itself always stays server-side regardless of what a client does "
+            + "with this flag.")
+    private boolean piiMasked;
 }

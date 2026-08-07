@@ -8,6 +8,7 @@ import com.fams.modules.rbac.repository.UserRoleRepository;
 import com.fams.modules.rbac.service.SiteScopeService;
 import com.fams.modules.tenant.repository.TenantRepository;
 import com.fams.shared.exception.ResourceNotFoundException;
+import com.fams.shared.util.MaskingUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.poi.ss.usermodel.*;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
@@ -56,13 +57,24 @@ public class EmployeeExportService {
         tenantRepository.findByIdAndDeletedAtIsNull(tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Tenant not found: " + tenantId));
 
-        if (!callerIsPlatformAdmin) {
-            Set<String> permissions = userRoleRepository
-                    .findPermissionNamesByUserIdAndTenantId(callerUserId, tenantId);
-            if (!permissions.contains("employees:list")) {
-                throw new AccessDeniedException("You do not have permission to export employees in this tenant");
-            }
+        // Fetched regardless of callerIsPlatformAdmin (not just inside the permission-check
+        // branch) because it's also needed below to decide whether email/phone get masked in
+        // the export — found via audit (2026-08-06): this export wrote raw, unmasked email/phone
+        // straight into the .xlsx via POI, entirely bypassing the @Masked/MaskedSerializer
+        // mechanism that already masks those same fields in the JSON list endpoint gated by the
+        // exact same "employees:list" permission — same permission, two different exposure
+        // levels depending on which endpoint you hit. Bypass rule mirrors MaskedSerializer's own
+        // (MaskedSerializer.isAdminCaller): platform admin or "employees:pii:read" holder sees
+        // raw values (dedicated permission since 2026-08-06, was "users:create" — see
+        // MaskedSerializer's comment), everyone else with just "employees:list" gets masked
+        // values in the export too.
+        Set<String> permissions = callerIsPlatformAdmin
+                ? Set.of()
+                : userRoleRepository.findPermissionNamesByUserIdAndTenantId(callerUserId, tenantId);
+        if (!callerIsPlatformAdmin && !permissions.contains("employees:list")) {
+            throw new AccessDeniedException("You do not have permission to export employees in this tenant");
         }
+        boolean bypassMasking = callerIsPlatformAdmin || permissions.contains("employees:pii:read");
 
         // Site-scoped callers (e.g. a SITE_SUPERVISOR restricted to specific sites) must not be
         // able to export employees outside their allowed sites — mirrors the same restriction
@@ -106,8 +118,8 @@ public class EmployeeExportService {
                 row.createCell(0).setCellValue(nullSafe(e.getEmployeeCode()));
                 row.createCell(1).setCellValue(nullSafe(e.getFirstName()));
                 row.createCell(2).setCellValue(nullSafe(e.getLastName()));
-                row.createCell(3).setCellValue(nullSafe(e.getEmail()));
-                row.createCell(4).setCellValue(nullSafe(e.getPhone()));
+                row.createCell(3).setCellValue(bypassMasking ? nullSafe(e.getEmail()) : nullSafe(MaskingUtils.maskEmail(e.getEmail())));
+                row.createCell(4).setCellValue(bypassMasking ? nullSafe(e.getPhone()) : nullSafe(MaskingUtils.maskPhone(e.getPhone())));
                 row.createCell(5).setCellValue(nullSafe(e.getPosition()));
                 row.createCell(6).setCellValue(nullSafe(e.getDepartment()));
                 row.createCell(7).setCellValue(nullSafe(e.getStatus()));

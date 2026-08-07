@@ -27,15 +27,16 @@ public class NoResponseViolationJob {
 
     @Scheduled(fixedRateString = "${fams.randomcheck.noresponse.poll-rate-ms:120000}")
     public void processExpiredChecks() {
+        long startedAt = System.currentTimeMillis();
         try {
             int count = noResponseViolationService.processAllExpired();
             if (count > 0) {
                 log.info("NoResponseViolationJob — created {} no_response violation(s)", count);
             }
-            jobMonitor.recordSuccess(JOB_NAME);
+            jobMonitor.recordSuccess(JOB_NAME, System.currentTimeMillis() - startedAt);
         } catch (Exception e) {
             log.error("NoResponseViolationJob failed: {}", e.getMessage(), e);
-            jobMonitor.recordFailure(JOB_NAME, e);
+            jobMonitor.recordFailure(JOB_NAME, System.currentTimeMillis() - startedAt, e);
         }
     }
 }
