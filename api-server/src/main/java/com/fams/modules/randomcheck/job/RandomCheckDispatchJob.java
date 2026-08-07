@@ -36,10 +36,11 @@ public class RandomCheckDispatchJob {
 
     @Scheduled(fixedRateString = "${fams.randomcheck.dispatch.poll-rate-ms:60000}")
     public void dispatchDueChecks() {
+        long startedAt = System.currentTimeMillis();
         try {
             List<UUID> due = dispatchQueue.dequeueExpired();
             if (due.isEmpty()) {
-                jobMonitor.recordSuccess(JOB_NAME);
+                jobMonitor.recordSuccess(JOB_NAME, System.currentTimeMillis() - startedAt);
                 return;
             }
 
@@ -51,10 +52,10 @@ public class RandomCheckDispatchJob {
                     log.error("Failed to dispatch checkId={}: {}", checkId, e.getMessage(), e);
                 }
             }
-            jobMonitor.recordSuccess(JOB_NAME);
+            jobMonitor.recordSuccess(JOB_NAME, System.currentTimeMillis() - startedAt);
         } catch (Exception e) {
             log.error("RandomCheckDispatchJob failed: {}", e.getMessage(), e);
-            jobMonitor.recordFailure(JOB_NAME, e);
+            jobMonitor.recordFailure(JOB_NAME, System.currentTimeMillis() - startedAt, e);
         }
     }
 }

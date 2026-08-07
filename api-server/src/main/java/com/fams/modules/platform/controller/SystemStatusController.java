@@ -9,6 +9,7 @@ import com.fams.modules.platform.dto.SystemStatusResponse;
 import com.fams.modules.randomcheck.redis.RandomCheckDispatchQueue;
 import com.fams.modules.tenant.repository.TenantRepository;
 import com.fams.shared.pagination.PageResponse;
+import com.fams.shared.monitoring.ScheduledJobCatalog;
 import com.fams.shared.monitoring.ScheduledJobMonitor;
 import com.fams.shared.monitoring.ScheduledJobStatus;
 import com.fams.shared.monitoring.ScheduledJobStatusRepository;
@@ -26,6 +27,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
+import org.springframework.scheduling.support.CronExpression;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -35,6 +37,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -89,16 +92,17 @@ public class SystemStatusController {
     public ResponseEntity<ApiResponse<SystemStatusResponse>> getSystemStatus() {
         HealthComponent health = healthEndpoint.health();
         String overallHealth = health.getStatus().getCode();
-        Map<String, Object> healthComponents = flattenHealth(health);
+        Map<String, SystemStatusResponse.HealthComponentStatus> healthComponents = flattenHealth(health);
 
-        List<ScheduledJobStatus> allJobs = jobStatusRepository.findAll();
-        List<SystemStatusResponse.JobStatusItem> jobItems = allJobs.stream()
-                .map(j -> SystemStatusResponse.JobStatusItem.builder()
-                        .jobName(j.getJobName())
-                        .lastStatus(j.getLastStatus())
-                        .lastRunAt(j.getLastRunAt())
-                        .errorMessage(j.getErrorMessage())
-                        .build())
+        // Union the static catalog (every known @Scheduled job) with whatever rows actually
+        // exist in scheduled_job_status — found via FE feedback (2026-08-06): previously this
+        // only returned jobs that had a DB row, so a job that was misconfigured/never fired since
+        // deploy was simply absent, indistinguishable from "this job doesn't exist".
+        Map<String, ScheduledJobStatus> statusByName = jobStatusRepository.findAll().stream()
+                .collect(java.util.stream.Collectors.toMap(ScheduledJobStatus::getJobName, s -> s));
+        OffsetDateTime now = OffsetDateTime.now();
+        List<SystemStatusResponse.JobStatusItem> jobItems = ScheduledJobCatalog.ALL.stream()
+                .map(catalogEntry -> buildJobStatusItem(catalogEntry, statusByName.get(catalogEntry.jobName()), now))
                 .toList();
 
         long activeTenants = tenantRepository.countByStatusAndDeletedAtIsNull("active");
@@ -216,20 +220,63 @@ public class SystemStatusController {
         return token.length() <= 6 ? token : "…" + token.substring(token.length() - 6);
     }
 
-    private Map<String, Object> flattenHealth(HealthComponent component) {
-        Map<String, Object> map = new LinkedHashMap<>();
-        map.put("status", component.getStatus().getCode());
+    /** FE feedback (2026-08-06): previously stuffed a top-level String "status" key into the
+     *  SAME map as the per-component objects — {"status":"UP","db":{...},"redis":{...}} — a
+     *  client can't tell a component name from a scalar without special-casing "status". That
+     *  top-level value was always redundant anyway (identical to overallHealth, the actual
+     *  aggregate root's own status) — dropped entirely rather than kept as a component, exactly
+     *  as FE suggested. Every remaining entry is now a uniform {status, details} object. */
+    private Map<String, SystemStatusResponse.HealthComponentStatus> flattenHealth(HealthComponent component) {
+        Map<String, SystemStatusResponse.HealthComponentStatus> map = new LinkedHashMap<>();
         if (component instanceof SystemHealth systemHealth) {
             systemHealth.getComponents().forEach((name, comp) -> {
-                Map<String, Object> compMap = new LinkedHashMap<>();
-                compMap.put("status", comp.getStatus().getCode());
+                Map<String, Object> details = null;
                 if (comp instanceof org.springframework.boot.actuate.health.Health h
                         && h.getDetails() != null && !h.getDetails().isEmpty()) {
-                    compMap.put("details", h.getDetails());
+                    details = h.getDetails();
                 }
-                map.put(name, compMap);
+                map.put(name, SystemStatusResponse.HealthComponentStatus.builder()
+                        .status(comp.getStatus().getCode())
+                        .details(details)
+                        .build());
             });
         }
         return map;
+    }
+
+    private SystemStatusResponse.JobStatusItem buildJobStatusItem(
+            ScheduledJobCatalog.ScheduledJobInfo catalogEntry, ScheduledJobStatus dbStatus, OffsetDateTime now) {
+
+        String lastStatus = dbStatus != null ? dbStatus.getLastStatus() : "NEVER_RUN";
+        OffsetDateTime lastRunAt = dbStatus != null ? dbStatus.getLastRunAt() : null;
+
+        boolean stale = false;
+        if (ScheduledJobMonitor.STATUS_OK.equals(lastStatus) && lastRunAt != null) {
+            long minutesSinceLastRun = ChronoUnit.MINUTES.between(lastRunAt, now);
+            stale = minutesSinceLastRun > catalogEntry.staleThresholdMinutes();
+        }
+
+        OffsetDateTime expectedNextRunAt = switch (catalogEntry.scheduleType()) {
+            // Cron next-fire-time is independent of run history (absolute wall-clock triggers),
+            // so this is exact even for a job that has never run — not an estimate.
+            case CRON -> CronExpression.parse(catalogEntry.cronExpression()).next(now);
+            // Fixed-rate has no absolute schedule — the only reference point we have is the last
+            // actual run, so a never-run job's next fire time is genuinely unknown here.
+            case FIXED_RATE -> lastRunAt != null
+                    ? lastRunAt.plus(java.time.Duration.ofMillis(catalogEntry.fixedRateMs()))
+                    : null;
+        };
+
+        return SystemStatusResponse.JobStatusItem.builder()
+                .jobName(catalogEntry.jobName())
+                .description(catalogEntry.description())
+                .lastStatus(lastStatus)
+                .lastRunAt(lastRunAt)
+                .lastRunDurationMs(dbStatus != null ? dbStatus.getLastRunDurationMs() : null)
+                .errorMessage(dbStatus != null ? dbStatus.getErrorMessage() : null)
+                .expectedNextRunAt(expectedNextRunAt)
+                .staleThresholdMinutes(catalogEntry.staleThresholdMinutes())
+                .stale(stale)
+                .build();
     }
 }

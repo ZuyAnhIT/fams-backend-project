@@ -20,8 +20,9 @@ public class ScheduledJobMonitor {
     static final String FIELD_LAST_RUN_AT = "last_run_at";
     static final String FIELD_LAST_STATUS = "last_status";
     static final String FIELD_ERROR_MESSAGE = "error_message";
-    static final String STATUS_OK = "OK";
-    static final String STATUS_ERROR = "ERROR";
+    static final String FIELD_DURATION_MS = "duration_ms";
+    public static final String STATUS_OK = "OK";
+    public static final String STATUS_ERROR = "ERROR";
 
     private final StringRedisTemplate redisTemplate;
     private final ScheduledJobStatusRepository repository;
@@ -40,17 +41,28 @@ public class ScheduledJobMonitor {
     }
 
     public void recordSuccess(String jobName) {
+        recordSuccess(jobName, null);
+    }
+
+    /** @param durationMs how long the run took, or null if the caller didn't time it (found via
+     *  FE feedback 2026-08-06: System Health needs this to tell "healthy and fast" apart from
+     *  "still reporting OK but taking abnormally long", not just last-run-timestamp freshness). */
+    public void recordSuccess(String jobName, Long durationMs) {
         OffsetDateTime now = OffsetDateTime.now();
-        writeToRedis(jobName, now, STATUS_OK, null);
-        writeToDB(jobName, now, STATUS_OK, null);
-        log.debug("Job '{}' completed successfully at {}", jobName, now);
+        writeToRedis(jobName, now, STATUS_OK, null, durationMs);
+        writeToDB(jobName, now, STATUS_OK, null, durationMs);
+        log.debug("Job '{}' completed successfully at {} (durationMs={})", jobName, now, durationMs);
     }
 
     public void recordFailure(String jobName, Throwable t) {
+        recordFailure(jobName, null, t);
+    }
+
+    public void recordFailure(String jobName, Long durationMs, Throwable t) {
         OffsetDateTime now = OffsetDateTime.now();
         String errorMessage = t.getMessage() != null ? t.getMessage() : t.getClass().getSimpleName();
-        writeToRedis(jobName, now, STATUS_ERROR, errorMessage);
-        writeToDB(jobName, now, STATUS_ERROR, errorMessage);
+        writeToRedis(jobName, now, STATUS_ERROR, errorMessage, durationMs);
+        writeToDB(jobName, now, STATUS_ERROR, errorMessage, durationMs);
         log.error("Job '{}' failed at {}: {}", jobName, now, errorMessage);
         notifyPlatformAdmins(jobName, errorMessage);
     }
@@ -69,11 +81,14 @@ public class ScheduledJobMonitor {
                         .get(REDIS_KEY_PREFIX + jobName, FIELD_LAST_STATUS);
                 String errorMessage = (String) redisTemplate.opsForHash()
                         .get(REDIS_KEY_PREFIX + jobName, FIELD_ERROR_MESSAGE);
+                Object durationRaw = redisTemplate.opsForHash().get(REDIS_KEY_PREFIX + jobName, FIELD_DURATION_MS);
+                Long durationMs = (durationRaw instanceof String s && !s.isBlank()) ? Long.parseLong(s) : null;
                 return Optional.of(ScheduledJobStatus.builder()
                         .jobName(jobName)
                         .lastRunAt(OffsetDateTime.parse(lastRunAt))
                         .lastStatus(lastStatus != null ? lastStatus : STATUS_OK)
                         .errorMessage(errorMessage)
+                        .lastRunDurationMs(durationMs)
                         .updatedAt(OffsetDateTime.parse(lastRunAt))
                         .build());
             }
@@ -83,25 +98,28 @@ public class ScheduledJobMonitor {
         return repository.findById(jobName);
     }
 
-    private void writeToRedis(String jobName, OffsetDateTime runAt, String status, String errorMessage) {
+    private void writeToRedis(String jobName, OffsetDateTime runAt, String status, String errorMessage, Long durationMs) {
         try {
             String key = REDIS_KEY_PREFIX + jobName;
             redisTemplate.opsForHash().put(key, FIELD_LAST_RUN_AT, runAt.toString());
             redisTemplate.opsForHash().put(key, FIELD_LAST_STATUS, status);
             redisTemplate.opsForHash().put(key, FIELD_ERROR_MESSAGE,
                     errorMessage != null ? errorMessage : "");
+            redisTemplate.opsForHash().put(key, FIELD_DURATION_MS,
+                    durationMs != null ? durationMs.toString() : "");
         } catch (Exception e) {
             log.warn("Failed to write job status to Redis for '{}': {}", jobName, e.getMessage());
         }
     }
 
-    private void writeToDB(String jobName, OffsetDateTime runAt, String status, String errorMessage) {
+    private void writeToDB(String jobName, OffsetDateTime runAt, String status, String errorMessage, Long durationMs) {
         try {
             ScheduledJobStatus record = ScheduledJobStatus.builder()
                     .jobName(jobName)
                     .lastRunAt(runAt)
                     .lastStatus(status)
                     .errorMessage(errorMessage)
+                    .lastRunDurationMs(durationMs)
                     .updatedAt(runAt)
                     .build();
             repository.save(record);

@@ -912,6 +912,32 @@ Tạo role custom (#25) → gán cho 1 nhân viên (#29) → nhân viên đó lo
 
 Tenant mới ở Trial (#22) → chạm giới hạn nhân viên (#38 TH5) → Platform Admin nâng gói (#22) → tạo thêm nhân viên thành công → (case khác) tenant Trial hết hạn không nâng cấp (`nam-viet-services`) → thử hành động → ghi nhận hành vi thật (cần xác nhận, xem gap đã nêu ở `sample-data-requirements-v2.md` mục 3.3/20.2).
 
+### B.8 [LUỒNG CHÍNH — UAT GO-LIVE] Từ tenant mới hoàn toàn → chấm công → báo cáo → export
+
+**Bổ sung 2026-08-06** theo đúng yêu cầu story "Là một PO/QA, tôi muốn kiểm thử luồng từ tenant đến chấm công và báo cáo để đảm bảo hệ thống sẵn sàng triển khai" — khác B.1 (giả định site/shift đã có sẵn), luồng này bắt đầu từ **tenant chưa tồn tại**, đúng kịch bản triển khai khách hàng mới thật (dùng cho Go-live Checklist, xem `docs/deployment/go-live-checklist.md`).
+
+| Bước | Hành động | Endpoint | Kết quả mong đợi |
+|---|---|---|---|
+| 1 | Platform Admin tạo tenant mới | `POST /api/v1/tenants` — **bắt buộc** `ownerEmail` (thiếu field này là lỗi kịch bản test phổ biến nhất gặp trong session, không phải lỗi hệ thống) | 201, có `tenantId`; chủ sở hữu nhận được tài khoản Owner |
+| 2 | Owner đăng nhập lần đầu | `POST /auth/login` | 200, `accessToken` |
+| 3 | Owner/Admin tạo công trình + geofence + ca làm | `POST /sites`, `POST /sites/{id}/geofences`, `POST /sites/{id}/shifts` | 201 từng bước (= B.1 bước 1-3) |
+| 4 | HR mời nhân viên đầu tiên | `POST /tenants/{id}/invitations` (cần `ownerEmail`/email hợp lệ) | 201, có invitation token (đọc từ response CREATE, không phải từ list) |
+| 5 | Ứng viên chấp nhận lời mời | `POST /invitations/accept` | 200/201, nhận JWT luôn, `Employee` được tạo |
+| 6 | HR phân công vào site + ca | `POST /sites/{id}/assignments` | 201 |
+| 7 | Nhân viên đăng ký Face ID (đồng ý + ảnh thật) | `POST .../faceid/consent`, `POST .../faceid/enroll` | 201, `status=pending_review` |
+| 8 | HR duyệt Face ID | `POST .../faceid/approve` | 200, `status=enrolled` |
+| 9 | Nhân viên check-in trong geofence | `POST /checkin` (site có `checkMode=location_face` để dùng luôn Face ID vừa duyệt) | 201, `status=valid`, `face_verified=true` |
+| 10 | Nhân viên check-out | `POST /checkin/{id}/checkout` | 200, `work_minutes` tính đúng |
+| 11 | HR xem báo cáo chấm công | `GET /reports/attendance/daily` hoặc `/monthly` | Có đúng bản ghi bước 9-10 |
+| 12 | HR export báo cáo | `GET /reports/attendance/export` | 200, file `.xlsx` hợp lệ, mở được, dữ liệu khớp bước 11 |
+| 13 | HR lưu bộ lọc thường dùng cho màn báo cáo | `POST /tenants/{id}/saved-filters` | 201, `isDefault` hoạt động đúng (xem mục Story "Lưu bộ lọc thường dùng") |
+| 14 | Platform Admin trace lại toàn bộ thao tác vừa làm | `GET /audit-logs?tenantId={id}` | Thấy đúng các hành động bước 1-13 có audit (login, TOTP nếu có bật — **lưu ý**: tạo/sửa Employee hiện CHƯA được audit, xem giới hạn đã biết ở báo cáo audit 2026-08-06) |
+| 15 | Platform Admin kiểm tra trạng thái hệ thống trước khi bàn giao | `GET /api/v1/platform/system-status` | `overallHealth=UP`, DB/Redis/FCM/**AI service** (mới 2026-08-06) đều `UP` |
+
+**Case lỗi chèn giữa luồng**: bước 9 đổi thành nhân viên khác gọi check-in hộ (tài khoản B check-in bằng token của A) → xác nhận bị chặn đúng bởi permission guard tự-scope theo `callerUserId` (không dựa vào `@PreAuthorize` mà dựa vào việc mọi service tự tra `userId` từ JWT, xem báo cáo audit "Permission Guard" 2026-08-06).
+
+**Dữ liệu nhạy cảm cần xác nhận trong luồng này (Data Masking, 2026-08-06)**: ở bước 11, gọi lại `GET /employees/{id}` bằng tài khoản KHÔNG có quyền `users:create` → xác nhận `email`/`phone` bị che (`a***@...`, `***xxx`); gọi `GET /employees/export` cùng tài khoản → xác nhận file Excel cũng che giống hệt, không còn lệch giữa JSON và Excel như trước bản vá.
+
 ---
 
 ## Phần C — Tổng hợp: tính năng CHỈ test được thủ công (không tự động hóa hoàn toàn) và lý do

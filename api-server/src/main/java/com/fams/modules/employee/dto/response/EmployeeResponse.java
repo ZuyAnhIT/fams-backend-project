@@ -66,4 +66,11 @@ public class EmployeeResponse {
 
     @Schema(description = "Face ID enrollment status for this employee")
     private FaceIdStatusDto faceId;
+
+    @Schema(description = "True if email/phone in this response are masked for the calling user "
+            + "(no employees:pii:read permission / not PLATFORM_ADMIN) — explicit flag added "
+            + "2026-08-06 so clients don't have to heuristically detect a \"***\" pattern; the "
+            + "masking decision itself always stays server-side regardless of what a client does "
+            + "with this flag.")
+    private boolean piiMasked;
 }

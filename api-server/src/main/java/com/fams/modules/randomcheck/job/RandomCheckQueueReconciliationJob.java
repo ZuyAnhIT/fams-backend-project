@@ -39,16 +39,17 @@ public class RandomCheckQueueReconciliationJob {
 
     @Scheduled(fixedRateString = "${fams.randomcheck.reconciliation.poll-rate-ms:300000}")
     public void reconcile() {
+        long startedAt = System.currentTimeMillis();
         try {
             int count = reconciliationService.reconcile();
             if (count > 0) {
                 log.info("RandomCheckQueueReconciliationJob — re-enqueued {} pending check(s) that were "
                         + "missing from the Redis dispatch queue", count);
             }
-            jobMonitor.recordSuccess(JOB_NAME);
+            jobMonitor.recordSuccess(JOB_NAME, System.currentTimeMillis() - startedAt);
         } catch (Exception e) {
             log.error("RandomCheckQueueReconciliationJob failed: {}", e.getMessage(), e);
-            jobMonitor.recordFailure(JOB_NAME, e);
+            jobMonitor.recordFailure(JOB_NAME, System.currentTimeMillis() - startedAt, e);
         }
     }
 }

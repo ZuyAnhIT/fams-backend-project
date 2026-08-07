@@ -31,15 +31,16 @@ public class AttendanceSummaryJob {
      */
     @Scheduled(cron = "0 0 1 * * *")
     public void computePreviousDaySummaries() {
+        long startedAt = System.currentTimeMillis();
         LocalDate yesterday = LocalDate.now(ZoneOffset.UTC).minusDays(1);
         log.info("Attendance summary job starting for date={}", yesterday);
         try {
             attendanceSummaryService.recomputeForDate(yesterday);
             log.info("Attendance summary job completed for date={}", yesterday);
-            jobMonitor.recordSuccess(JOB_NAME);
+            jobMonitor.recordSuccess(JOB_NAME, System.currentTimeMillis() - startedAt);
         } catch (Exception e) {
             log.error("Attendance summary job failed for date={}: {}", yesterday, e.getMessage(), e);
-            jobMonitor.recordFailure(JOB_NAME, e);
+            jobMonitor.recordFailure(JOB_NAME, System.currentTimeMillis() - startedAt, e);
         }
     }
 }

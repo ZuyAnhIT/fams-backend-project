@@ -68,6 +68,7 @@ public class EmployeeService {
     private final com.fams.modules.assignment.service.AssignmentService assignmentService;
     private final FaceIdService faceIdService;
     private final ScheduledCheckCancelService scheduledCheckCancelService;
+    private final com.fams.modules.audit.service.AuditLogService auditLogService;
 
     public EmployeeService(EmployeeRepository employeeRepository,
                            UserRoleRepository userRoleRepository,
@@ -81,7 +82,8 @@ public class EmployeeService {
                            com.fams.modules.workspace.repository.WorkspaceRepository workspaceRepository,
                            com.fams.modules.assignment.service.AssignmentService assignmentService,
                            FaceIdService faceIdService,
-                           ScheduledCheckCancelService scheduledCheckCancelService) {
+                           ScheduledCheckCancelService scheduledCheckCancelService,
+                           com.fams.modules.audit.service.AuditLogService auditLogService) {
         this.employeeRepository = employeeRepository;
         this.userRoleRepository = userRoleRepository;
         this.tenantRepository = tenantRepository;
@@ -95,6 +97,27 @@ public class EmployeeService {
         this.assignmentService = assignmentService;
         this.faceIdService = faceIdService;
         this.scheduledCheckCancelService = scheduledCheckCancelService;
+        this.auditLogService = auditLogService;
+    }
+
+    /** Subset of Employee fields worth an audit trail — not every column (e.g. avatarUrl churns
+     *  too often, timestamps are redundant with the audit row's own createdAt). email/phone are
+     *  included deliberately: {@code AuditLogService.record} masks any key named "email"/"phone"
+     *  in this map automatically (see MaskingUtils.maskAuditMap), so the PII stays protected in
+     *  the audit trail the same as everywhere else, per the "Data Masking" story's own scope
+     *  ("ẩn dữ liệu nhạy cảm khi trả về HOẶC ghi log"). */
+    private Map<String, Object> employeeAuditSnapshot(Employee e) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("employeeCode", e.getEmployeeCode());
+        m.put("firstName", e.getFirstName());
+        m.put("lastName", e.getLastName());
+        m.put("email", e.getEmail());
+        m.put("phone", e.getPhone());
+        m.put("position", e.getPosition());
+        m.put("department", e.getDepartment());
+        m.put("status", e.getStatus());
+        m.put("hiredDate", e.getHiredDate() != null ? e.getHiredDate().toString() : null);
+        return m;
     }
 
     @Transactional
@@ -153,6 +176,22 @@ public class EmployeeService {
 
         employeeRepository.save(employee);
         log.info("Employee created manually: id={} tenantId={} by={}", employee.getId(), tenantId, callerUserId);
+
+        // Found via audit (2026-08-06): Employee create/update were never audited at all despite
+        // being HR-critical data — every other mutation-heavy module (attendance, random-check)
+        // already writes to AuditLogService. oldValue=null for create (nothing existed before).
+        try {
+            auditLogService.record(
+                    tenantId, callerUserId, null,
+                    "Employee", employee.getId().toString(), "employee_created",
+                    null, employeeAuditSnapshot(employee),
+                    com.fams.shared.security.HttpRequestUtils.currentRequestId(),
+                    com.fams.shared.security.HttpRequestUtils.currentIpAddress(),
+                    com.fams.shared.security.HttpRequestUtils.currentUserAgent());
+        } catch (Exception e) {
+            log.warn("Failed to record audit log for employee create id={}: {}", employee.getId(), e.getMessage());
+        }
+
         return toResponse(employee);
     }
 
@@ -232,6 +271,8 @@ public class EmployeeService {
         Employee employee = employeeRepository.findByIdAndTenantIdAndDeletedAtIsNull(employeeId, tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Employee not found: " + employeeId));
 
+        Map<String, Object> before = employeeAuditSnapshot(employee);
+
         if (org.springframework.util.StringUtils.hasText(request.getEmployeeCode())
                 && !request.getEmployeeCode().equals(employee.getEmployeeCode())
                 && employeeRepository.existsByTenantIdAndEmployeeCodeAndDeletedAtIsNullAndIdNot(
@@ -268,6 +309,19 @@ public class EmployeeService {
 
         employeeRepository.save(employee);
         log.info("Employee updated: id={} tenantId={} by={}", employeeId, tenantId, callerUserId);
+
+        try {
+            auditLogService.record(
+                    tenantId, callerUserId, null,
+                    "Employee", employee.getId().toString(), "employee_updated",
+                    before, employeeAuditSnapshot(employee),
+                    com.fams.shared.security.HttpRequestUtils.currentRequestId(),
+                    com.fams.shared.security.HttpRequestUtils.currentIpAddress(),
+                    com.fams.shared.security.HttpRequestUtils.currentUserAgent());
+        } catch (Exception e) {
+            log.warn("Failed to record audit log for employee update id={}: {}", employeeId, e.getMessage());
+        }
+
         return toResponse(employee);
     }
 
@@ -404,6 +458,7 @@ public class EmployeeService {
                                 .build()))
                 .createdAt(employee.getCreatedAt())
                 .updatedAt(employee.getUpdatedAt())
+                .piiMasked(!com.fams.shared.util.PiiAccess.currentCallerCanViewUnmaskedPii())
                 .build();
     }
 
@@ -617,6 +672,7 @@ public class EmployeeService {
                 .createdAt(e.getCreatedAt())
                 .updatedAt(e.getUpdatedAt())
                 .faceId(faceId)
+                .piiMasked(!com.fams.shared.util.PiiAccess.currentCallerCanViewUnmaskedPii())
                 .build();
     }
 }
