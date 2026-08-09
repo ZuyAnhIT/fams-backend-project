@@ -5,6 +5,8 @@ import lombok.Getter;
 @Getter
 public class AiServiceException extends RuntimeException {
 
+    private static final long serialVersionUID = 1L;
+
     private final int statusCode;
 
     public AiServiceException(String message) {

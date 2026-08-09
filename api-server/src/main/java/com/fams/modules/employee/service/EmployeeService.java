@@ -12,7 +12,6 @@ import com.fams.modules.employee.entity.Employee;
 import com.fams.modules.employee.entity.FaceProfile;
 import com.fams.modules.employee.repository.EmployeeRepository;
 import com.fams.modules.employee.repository.FaceProfileRepository;
-import com.fams.modules.employee.service.FaceIdService;
 import com.fams.modules.assignment.entity.Assignment;
 import com.fams.modules.assignment.repository.AssignmentRepository;
 import com.fams.modules.employee.specification.EmployeeSpecification;

@@ -51,7 +51,10 @@ public class SystemStatusController {
     private static final String FACE_VERIFY_QUEUE_KEY = "fams:ai:face_verify_jobs";
 
     private final HealthEndpoint healthEndpoint;
-    private final ScheduledJobMonitor jobMonitor;
+    // Job status is read directly via jobStatusRepository (unioned with ScheduledJobCatalog) —
+    // no longer goes through ScheduledJobMonitor.getStatus() per job since the 2026-08-06
+    // catalog rework, so no instance of it is needed here anymore (ScheduledJobMonitor.STATUS_OK
+    // below is a static constant reference, not an instance call).
     private final ScheduledJobStatusRepository jobStatusRepository;
     private final TenantRepository tenantRepository;
     private final RandomCheckDispatchQueue dispatchQueue;
@@ -60,7 +63,6 @@ public class SystemStatusController {
     private final NotificationDeliveryLogRepository deliveryLogRepository;
 
     public SystemStatusController(HealthEndpoint healthEndpoint,
-                                   ScheduledJobMonitor jobMonitor,
                                    ScheduledJobStatusRepository jobStatusRepository,
                                    TenantRepository tenantRepository,
                                    RandomCheckDispatchQueue dispatchQueue,
@@ -68,7 +70,6 @@ public class SystemStatusController {
                                    AttendanceSummaryService attendanceSummaryService,
                                    NotificationDeliveryLogRepository deliveryLogRepository) {
         this.healthEndpoint = healthEndpoint;
-        this.jobMonitor = jobMonitor;
         this.jobStatusRepository = jobStatusRepository;
         this.tenantRepository = tenantRepository;
         this.dispatchQueue = dispatchQueue;

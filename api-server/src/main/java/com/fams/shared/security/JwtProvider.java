@@ -23,15 +23,17 @@ public class JwtProvider {
 
     private final SecretKey signingKey;
     private final int accessTtlMinutes;
-    private final int refreshTtlDays;
 
+    // Note: refresh token TTL is NOT handled here — generateRefreshTokenRaw() below only
+    // generates the raw random token; each caller (AuthService, GoogleLoginService,
+    // RefreshTokenService, etc.) injects its own app.jwt.refresh-ttl-days and sets
+    // RefreshToken.expiresAt independently when persisting it. A duplicate refreshTtlDays field
+    // used to be injected here too but was never read — removed (found via unused-field warning).
     public JwtProvider(
             @Value("${app.jwt.secret}") String secret,
-            @Value("${app.jwt.access-ttl-minutes}") int accessTtlMinutes,
-            @Value("${app.jwt.refresh-ttl-days}") int refreshTtlDays) {
+            @Value("${app.jwt.access-ttl-minutes}") int accessTtlMinutes) {
         this.signingKey = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
         this.accessTtlMinutes = accessTtlMinutes;
-        this.refreshTtlDays = refreshTtlDays;
     }
 
     public String generateAccessToken(UUID userId, String email, String deviceId, boolean isPlatformAdmin,

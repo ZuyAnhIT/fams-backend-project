@@ -70,6 +70,15 @@ public class AttendanceSummary {
     @Column(name = "ot_minutes", nullable = false)
     private int otMinutes;
 
+    // #60 (docs/api/backend-feature-audit-2026-08-07.md): warn-only, same non-mutating stance
+    // as hasRandomCheckFailure below — otMinutes itself is never capped, HR reviews and decides
+    // via /adjust. See V88 migration + Shift.maxOtMinutesPerDay/maxOtMinutesPerWeek.
+    @Column(name = "ot_daily_limit_exceeded", nullable = false)
+    private boolean otDailyLimitExceeded;
+
+    @Column(name = "ot_weekly_limit_exceeded", nullable = false)
+    private boolean otWeeklyLimitExceeded;
+
     // Field named 'missingCheckout' so Lombok generates isMissingCheckout() getter
     @Column(name = "missing_checkout", nullable = false)
     private boolean missingCheckout;

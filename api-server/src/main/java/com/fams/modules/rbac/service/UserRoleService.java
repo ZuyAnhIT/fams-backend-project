@@ -14,8 +14,10 @@ import com.fams.modules.site.entity.Site;
 import com.fams.modules.site.repository.SiteRepository;
 import com.fams.modules.tenant.entity.Tenant;
 import com.fams.modules.tenant.repository.TenantRepository;
+import com.fams.modules.audit.service.AuditLogService;
 import com.fams.shared.exception.DuplicateResourceException;
 import com.fams.shared.exception.ResourceNotFoundException;
+import com.fams.shared.security.HttpRequestUtils;
 import com.fams.shared.security.JwtAuthFilter;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -43,19 +45,42 @@ public class UserRoleService {
     private final TenantRepository tenantRepository;
     private final SiteRepository siteRepository;
     private final StringRedisTemplate redis;
+    private final AuditLogService auditLogService;
 
     public UserRoleService(UserRoleRepository userRoleRepository,
                            UserRepository userRepository,
                            RoleRepository roleRepository,
                            TenantRepository tenantRepository,
                            SiteRepository siteRepository,
-                           StringRedisTemplate redis) {
+                           StringRedisTemplate redis,
+                           AuditLogService auditLogService) {
         this.userRoleRepository = userRoleRepository;
         this.userRepository = userRepository;
         this.roleRepository = roleRepository;
         this.tenantRepository = tenantRepository;
         this.siteRepository = siteRepository;
         this.redis = redis;
+        this.auditLogService = auditLogService;
+    }
+
+    /** #31 (docs/api/backend-feature-audit-2026-08-07.md): granting/revoking who holds a role
+     *  is the other half of RBAC's audit trail (see RoleService#recordRoleAudit for the role-
+     *  definition half) — "who can do X" is meaningless for compliance review without "who
+     *  gave/removed that access and when". tenantId is null for platform-scoped assignments,
+     *  same convention TotpService already uses for account-level (not tenant-level) events. */
+    private void recordUserRoleAudit(UUID tenantId, UUID actorId, String action, UUID userRoleId,
+                                      Map<String, Object> oldValue, Map<String, Object> newValue) {
+        try {
+            auditLogService.record(
+                    tenantId, actorId, null,
+                    "UserRole", userRoleId.toString(), action,
+                    oldValue, newValue,
+                    HttpRequestUtils.currentRequestId(),
+                    HttpRequestUtils.currentIpAddress(),
+                    HttpRequestUtils.currentUserAgent());
+        } catch (Exception ex) {
+            log.warn("Failed to record audit log for {} userRoleId={}: {}", action, userRoleId, ex.getMessage());
+        }
     }
 
     /** Validates that every requested site actually belongs to this tenant (and isn't
@@ -218,6 +243,8 @@ public class UserRoleService {
             evictPermissionCache(targetUserId, tenantId);
             log.info("Reactivated role assignment: userRoleId={} userId={} roleId={} tenantId={} siteIds={} by={}",
                     saved.getId(), targetUserId, roleId, tenantId, siteIds, callerUserId);
+            recordUserRoleAudit(tenantId, callerUserId, "role_assigned", saved.getId(), null,
+                    userRoleAuditSnapshot(saved));
             return toResponse(saved);
         }
 
@@ -233,8 +260,19 @@ public class UserRoleService {
         evictPermissionCache(targetUserId, tenantId);
         log.info("Assigned role: userRoleId={} userId={} roleId={} tenantId={} siteIds={} by={}",
                 assignment.getId(), targetUserId, roleId, tenantId, siteIds, callerUserId);
+        recordUserRoleAudit(tenantId, callerUserId, "role_assigned", assignment.getId(), null,
+                userRoleAuditSnapshot(assignment));
 
         return toResponse(assignment);
+    }
+
+    private Map<String, Object> userRoleAuditSnapshot(UserRole ur) {
+        Map<String, Object> m = new java.util.LinkedHashMap<>();
+        m.put("userId", ur.getUserId().toString());
+        m.put("roleId", ur.getRole().getId().toString());
+        m.put("roleName", ur.getRole().getName());
+        m.put("siteIds", ur.getSiteIds().stream().map(UUID::toString).sorted().toList());
+        return m;
     }
 
     /**
@@ -277,6 +315,8 @@ public class UserRoleService {
             evictPlatformPermissionCache(targetUserId);
             log.info("Reactivated platform role assignment: userRoleId={} userId={} roleId={} by={}",
                     saved.getId(), targetUserId, roleId, callerUserId);
+            recordUserRoleAudit(null, callerUserId, "platform_role_assigned", saved.getId(), null,
+                    userRoleAuditSnapshot(saved));
             return toResponse(saved);
         }
 
@@ -291,6 +331,8 @@ public class UserRoleService {
         evictPlatformPermissionCache(targetUserId);
         log.info("Assigned platform role: userRoleId={} userId={} roleId={} by={}",
                 assignment.getId(), targetUserId, roleId, callerUserId);
+        recordUserRoleAudit(null, callerUserId, "platform_role_assigned", assignment.getId(), null,
+                userRoleAuditSnapshot(assignment));
 
         return toResponse(assignment);
     }
@@ -316,6 +358,7 @@ public class UserRoleService {
             }
         }
 
+        Map<String, Object> before = userRoleAuditSnapshot(assignment);
         assignment.setDeletedAt(OffsetDateTime.now());
         userRoleRepository.save(assignment);
         if (tenantId == null) {
@@ -325,6 +368,7 @@ public class UserRoleService {
         }
         log.info("Revoked role assignment: userRoleId={} userId={} role={} tenantId={} by={}",
                 userRoleId, assignment.getUserId(), assignment.getRole().getName(), tenantId, callerUserId);
+        recordUserRoleAudit(tenantId, callerUserId, "role_revoked", userRoleId, before, null);
     }
 
     private UserRoleResponse toResponse(UserRole ur) {

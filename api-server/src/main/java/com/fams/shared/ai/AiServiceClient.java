@@ -146,6 +146,7 @@ public class AiServiceClient {
      *  fams-ai's disk — see ai-service/app/routers/checkin_photo.py's POST /checkins/cleanup for
      *  exactly what's swept (and, just as importantly, what's deliberately NOT swept). System-wide,
      *  no tenant scoping — called weekly by DataRetentionJob. */
+    @SuppressWarnings("unchecked")
     public Map<String, Object> cleanupOldCheckinPhotos(int olderThanDays) {
         try {
             return restClient.post()

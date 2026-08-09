@@ -9,14 +9,18 @@ import com.fams.modules.subscription.entity.TenantSubscription.SubscriptionStatu
 import com.fams.modules.subscription.repository.PlanRepository;
 import com.fams.modules.subscription.repository.TenantSubscriptionRepository;
 import com.fams.modules.tenant.repository.TenantRepository;
+import com.fams.modules.audit.service.AuditLogService;
 import com.fams.shared.exception.DuplicateResourceException;
 import com.fams.shared.exception.ResourceNotFoundException;
+import com.fams.shared.security.HttpRequestUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.UUID;
 
 @Slf4j
@@ -26,13 +30,45 @@ public class TenantSubscriptionService {
     private final TenantRepository tenantRepository;
     private final PlanRepository planRepository;
     private final TenantSubscriptionRepository subscriptionRepository;
+    private final AuditLogService auditLogService;
 
     public TenantSubscriptionService(TenantRepository tenantRepository,
                                      PlanRepository planRepository,
-                                     TenantSubscriptionRepository subscriptionRepository) {
+                                     TenantSubscriptionRepository subscriptionRepository,
+                                     AuditLogService auditLogService) {
         this.tenantRepository = tenantRepository;
         this.planRepository = planRepository;
         this.subscriptionRepository = subscriptionRepository;
+        this.auditLogService = auditLogService;
+    }
+
+    /** #31 (docs/api/backend-feature-audit-2026-08-07.md): which plan a tenant is on and its
+     *  billing status directly drives PlanLimitEnforcementService (how many employees/sites/
+     *  random checks that tenant may use) — a change here has real operational impact and was
+     *  never traced to an actor. Best-effort, same non-blocking stance as every other call site. */
+    private void recordSubscriptionAudit(UUID tenantId, UUID actorId, String action,
+                                          Map<String, Object> oldValue, Map<String, Object> newValue) {
+        try {
+            auditLogService.record(
+                    tenantId, actorId, null,
+                    "TenantSubscription", tenantId.toString(), action,
+                    oldValue, newValue,
+                    HttpRequestUtils.currentRequestId(),
+                    HttpRequestUtils.currentIpAddress(),
+                    HttpRequestUtils.currentUserAgent());
+        } catch (Exception ex) {
+            log.warn("Failed to record audit log for {} tenantId={}: {}", action, tenantId, ex.getMessage());
+        }
+    }
+
+    private Map<String, Object> subscriptionAuditSnapshot(TenantSubscription sub) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("planId", sub.getPlanId() != null ? sub.getPlanId().toString() : null);
+        m.put("status", sub.getStatus() != null ? sub.getStatus().name() : null);
+        m.put("billingCycle", sub.getBillingCycle() != null ? sub.getBillingCycle().name() : null);
+        m.put("startedAt", sub.getStartedAt() != null ? sub.getStartedAt().toString() : null);
+        m.put("expiresAt", sub.getExpiresAt() != null ? sub.getExpiresAt().toString() : null);
+        return m;
     }
 
     @Transactional(readOnly = true)
@@ -45,7 +81,7 @@ public class TenantSubscriptionService {
     }
 
     @Transactional
-    public SubscriptionResponse assignSubscription(UUID tenantId, AssignSubscriptionRequest request) {
+    public SubscriptionResponse assignSubscription(UUID tenantId, AssignSubscriptionRequest request, UUID callerUserId) {
         assertTenantExists(tenantId);
         if (subscriptionRepository.existsByTenantId(tenantId)) {
             throw new DuplicateResourceException("Tenant already has a subscription. Use PATCH to update it.");
@@ -63,14 +99,17 @@ public class TenantSubscriptionService {
 
         subscriptionRepository.save(sub);
         log.info("Subscription assigned: tenantId={} planId={}", tenantId, request.getPlanId());
+        recordSubscriptionAudit(tenantId, callerUserId, "subscription_assigned", null, subscriptionAuditSnapshot(sub));
         return toResponse(sub, plan);
     }
 
     @Transactional
-    public SubscriptionResponse updateSubscription(UUID tenantId, UpdateSubscriptionRequest request) {
+    public SubscriptionResponse updateSubscription(UUID tenantId, UpdateSubscriptionRequest request, UUID callerUserId) {
         assertTenantExists(tenantId);
         TenantSubscription sub = subscriptionRepository.findByTenantId(tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("No subscription found for tenant: " + tenantId));
+
+        Map<String, Object> before = subscriptionAuditSnapshot(sub);
 
         if (request.getPlanId() != null) {
             getPlan(request.getPlanId()); // validate plan exists
@@ -96,6 +135,7 @@ public class TenantSubscriptionService {
 
         subscriptionRepository.save(sub);
         log.info("Subscription updated: tenantId={}", tenantId);
+        recordSubscriptionAudit(tenantId, callerUserId, "subscription_updated", before, subscriptionAuditSnapshot(sub));
         Plan plan = getPlan(sub.getPlanId());
         return toResponse(sub, plan);
     }

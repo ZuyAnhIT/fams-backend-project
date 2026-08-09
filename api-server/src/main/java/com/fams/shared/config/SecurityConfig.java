@@ -67,8 +67,11 @@ public class SecurityConfig {
 
     @Bean
     public DaoAuthenticationProvider authenticationProvider() {
-        DaoAuthenticationProvider provider = new DaoAuthenticationProvider();
-        provider.setUserDetailsService(userDetailsService);
+        // Constructor injection (Spring Security 6.3+) — the no-arg constructor +
+        // setUserDetailsService() pair used before this was deprecated in favor of passing
+        // the UserDetailsService directly, since a provider without one is a misconfiguration
+        // that used to only surface at runtime instead of at construction time.
+        DaoAuthenticationProvider provider = new DaoAuthenticationProvider(userDetailsService);
         provider.setPasswordEncoder(passwordEncoder());
         return provider;
     }

@@ -53,6 +53,14 @@ public class CheckinRecord {
     @Column(name = "shift_late_checkout_minutes")
     private Integer shiftLateCheckoutMinutes;
 
+    /** #60 (docs/api/backend-feature-audit-2026-08-07.md): same snapshot-at-check-in
+     *  invariant as the other shift_* fields above. */
+    @Column(name = "shift_max_ot_minutes_per_day")
+    private Integer shiftMaxOtMinutesPerDay;
+
+    @Column(name = "shift_max_ot_minutes_per_week")
+    private Integer shiftMaxOtMinutesPerWeek;
+
     @Column(nullable = false, length = 20)
     private String status;
 

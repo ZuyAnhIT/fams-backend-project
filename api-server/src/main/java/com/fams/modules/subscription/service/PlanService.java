@@ -10,10 +10,12 @@ import com.fams.modules.subscription.repository.PlanRepository;
 import com.fams.modules.subscription.repository.TenantSubscriptionRepository;
 import com.fams.modules.tenant.entity.Tenant;
 import com.fams.modules.tenant.repository.TenantRepository;
+import com.fams.modules.audit.service.AuditLogService;
 import com.fams.shared.exception.DuplicateResourceException;
 import com.fams.shared.exception.PlanDeactivationBlockedException;
 import com.fams.shared.exception.ResourceNotFoundException;
 import com.fams.shared.pagination.PageResponse;
+import com.fams.shared.security.HttpRequestUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -40,15 +42,48 @@ public class PlanService {
     private final TenantSubscriptionRepository tenantSubscriptionRepository;
     private final TenantRepository tenantRepository;
     private final PlanLimitEnforcementService planLimitEnforcementService;
+    private final AuditLogService auditLogService;
 
     public PlanService(PlanRepository planRepository,
                         TenantSubscriptionRepository tenantSubscriptionRepository,
                         TenantRepository tenantRepository,
-                        PlanLimitEnforcementService planLimitEnforcementService) {
+                        PlanLimitEnforcementService planLimitEnforcementService,
+                        AuditLogService auditLogService) {
         this.planRepository = planRepository;
         this.tenantSubscriptionRepository = tenantSubscriptionRepository;
         this.tenantRepository = tenantRepository;
         this.planLimitEnforcementService = planLimitEnforcementService;
+        this.auditLogService = auditLogService;
+    }
+
+    /** #31 (docs/api/backend-feature-audit-2026-08-07.md): plans are platform-wide (no single
+     *  tenant "owns" one), so tenantId is null here — same convention as TotpService's
+     *  account-level events. A plan's price/limits change affects every tenant subscribed to
+     *  it, which is exactly the kind of blast-radius action that belongs in the audit trail. */
+    private void recordPlanAudit(UUID actorId, String action, UUID planId,
+                                  Map<String, Object> oldValue, Map<String, Object> newValue) {
+        try {
+            auditLogService.record(
+                    null, actorId, null,
+                    "Plan", planId.toString(), action,
+                    oldValue, newValue,
+                    HttpRequestUtils.currentRequestId(),
+                    HttpRequestUtils.currentIpAddress(),
+                    HttpRequestUtils.currentUserAgent());
+        } catch (Exception ex) {
+            log.warn("Failed to record audit log for {} planId={}: {}", action, planId, ex.getMessage());
+        }
+    }
+
+    private Map<String, Object> planAuditSnapshot(Plan plan) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("name", plan.getName());
+        m.put("displayName", plan.getDisplayName());
+        m.put("priceMonthly", plan.getPriceMonthly());
+        m.put("priceYearly", plan.getPriceYearly());
+        m.put("sortOrder", plan.getSortOrder());
+        m.put("isActive", plan.isActive());
+        return m;
     }
 
     @Transactional(readOnly = true)
@@ -72,7 +107,7 @@ public class PlanService {
     }
 
     @Transactional
-    public PlanResponse createPlan(CreatePlanRequest request) {
+    public PlanResponse createPlan(CreatePlanRequest request, UUID callerUserId) {
         if (planRepository.findByNameAndDeletedAtIsNull(request.getName()).isPresent()) {
             throw new DuplicateResourceException("Plan name '" + request.getName() + "' already exists");
         }
@@ -88,13 +123,16 @@ public class PlanService {
 
         planRepository.save(plan);
         log.info("Plan created: id={} name={}", plan.getId(), plan.getName());
+        recordPlanAudit(callerUserId, "plan_created", plan.getId(), null, planAuditSnapshot(plan));
         return toResponse(plan);
     }
 
     @Transactional
-    public PlanResponse updatePlan(UUID id, UpdatePlanRequest request) {
+    public PlanResponse updatePlan(UUID id, UpdatePlanRequest request, UUID callerUserId) {
         Plan plan = planRepository.findByIdAndDeletedAtIsNull(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Plan not found: " + id));
+
+        Map<String, Object> before = planAuditSnapshot(plan);
 
         if (StringUtils.hasText(request.getDisplayName())) plan.setDisplayName(request.getDisplayName());
         if (request.getDescription() != null)              plan.setDescription(request.getDescription().isBlank() ? null : request.getDescription());
@@ -110,6 +148,7 @@ public class PlanService {
 
         planRepository.save(plan);
         log.info("Plan updated: id={} name={}", id, plan.getName());
+        recordPlanAudit(callerUserId, "plan_updated", plan.getId(), before, planAuditSnapshot(plan));
         return toResponse(plan);
     }
 

@@ -35,6 +35,12 @@ public class SupervisorDashboardResponse {
 
         @Schema(description = "Employees currently on-site with their check-in details")
         private List<OnSiteEmployee> onSiteEmployees;
+
+        @Schema(description = "Site center latitude, for centering a map view (#130, docs/api/backend-feature-audit-2026-08-07.md)")
+        private Double siteLatitude;
+
+        @Schema(description = "Site center longitude")
+        private Double siteLongitude;
     }
 
     @Data
@@ -59,5 +65,13 @@ public class SupervisorDashboardResponse {
 
         @Schema(description = "When the employee checked in")
         private OffsetDateTime checkInAt;
+
+        @Schema(description = "Check-in GPS latitude — where this employee last checked in " +
+                "(#130, docs/api/backend-feature-audit-2026-08-07.md: this is the check-in point, " +
+                "not a continuously-tracked live position — FAMS has no background location tracking)")
+        private Double checkInLat;
+
+        @Schema(description = "Check-in GPS longitude")
+        private Double checkInLon;
     }
 }

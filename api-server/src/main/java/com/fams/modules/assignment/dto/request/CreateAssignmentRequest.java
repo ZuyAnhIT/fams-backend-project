@@ -15,14 +15,14 @@ import java.util.UUID;
 @Schema(description = "Request body for assigning an employee to a site")
 public class CreateAssignmentRequest {
 
-    @Schema(description = "Employee UUID to assign", required = true)
+    @Schema(description = "Employee UUID to assign", requiredMode = Schema.RequiredMode.REQUIRED)
     @NotNull(message = "employeeId is required")
     private UUID employeeId;
 
     @Schema(description = "Shift template UUID — optional; links the assignment to a specific shift schedule")
     private UUID shiftId;
 
-    @Schema(description = "Assignment start date (yyyy-MM-dd)", example = "2026-07-01", required = true)
+    @Schema(description = "Assignment start date (yyyy-MM-dd)", example = "2026-07-01", requiredMode = Schema.RequiredMode.REQUIRED)
     @NotNull(message = "startDate is required")
     @JsonFormat(pattern = "yyyy-MM-dd")
     private LocalDate startDate;

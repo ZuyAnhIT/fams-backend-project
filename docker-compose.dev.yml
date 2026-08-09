@@ -26,6 +26,20 @@ services:
     volumes:
       - ./api-server:/workspace          # host source → container
       - maven_cache:/root/.m2            # persist downloaded deps
+      # Found via IDE-side investigation (2026-08-07): the maven:3.9-eclipse-temurin-21 base
+      # image runs as root by default, and with no `user:` override here, every file `mvn`
+      # writes under /workspace/target ends up root-owned ON THE HOST TOO (bind-mount, not a
+      # Docker-managed volume) — the host user can't write there anymore. That silently breaks
+      # any LOCAL (non-Docker) Maven/IDE build (VSCode's Java Language Server needs to write/read
+      # target/generated-sources for Lombok-processed types), which cascades into hundreds of
+      # false "cannot find symbol" errors for Lombok-generated getters/setters/builders across
+      # nearly every file — NOT a real code problem, confirmed by dozens of clean Docker builds.
+      # Fix: give the container's target/ its own named volume instead of bind-mounting it —
+      # the container still writes there as root, but that root-owned data now lives inside
+      # Docker's own storage, invisible to the host filesystem. The host's own `target/` (from a
+      # local `mvn compile` or the IDE) stays entirely separate and host-owned. No UID-matching
+      # needed, safe regardless of which host UID any given dev machine uses.
+      - api_target:/workspace/target
     command: mvn spring-boot:run -Dspring-boot.run.jvmArguments="-Xms256m -Xmx512m"
     env_file: .env
     environment:
@@ -92,3 +106,4 @@ services:
 volumes:
   maven_cache:
   minio_data:
+  api_target:

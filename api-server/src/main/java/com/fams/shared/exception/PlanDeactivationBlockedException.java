@@ -6,6 +6,8 @@ package com.fams.shared.exception;
  * violate the target plan's limits.
  */
 public class PlanDeactivationBlockedException extends RuntimeException {
+    private static final long serialVersionUID = 1L;
+
     public PlanDeactivationBlockedException(String message) {
         super(message);
     }

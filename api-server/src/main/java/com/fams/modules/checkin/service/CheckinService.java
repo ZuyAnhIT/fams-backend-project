@@ -14,7 +14,6 @@ import com.fams.modules.checkin.dto.response.CheckinResponse;
 import com.fams.modules.checkin.entity.CheckinRecord;
 import com.fams.modules.checkin.repository.CheckinRepository;
 import com.fams.modules.employee.entity.Employee;
-import com.fams.modules.employee.entity.FaceProfile;
 import com.fams.modules.employee.entity.LivenessChallenge;
 import com.fams.modules.employee.repository.EmployeeRepository;
 import com.fams.modules.employee.repository.FaceProfileRepository;
@@ -223,6 +222,8 @@ public class CheckinService {
                 .shiftAllowOvernight(resolvedShift != null ? resolvedShift.isAllowOvernight() : null)
                 .shiftAllowOvertime(resolvedShift != null ? resolvedShift.isAllowOvertime() : null)
                 .shiftLateCheckoutMinutes(resolvedShift != null ? resolvedShift.getLateCheckoutMinutes() : null)
+                .shiftMaxOtMinutesPerDay(resolvedShift != null ? resolvedShift.getMaxOtMinutesPerDay() : null)
+                .shiftMaxOtMinutesPerWeek(resolvedShift != null ? resolvedShift.getMaxOtMinutesPerWeek() : null)
                 .status(status)
                 .checkInAt(OffsetDateTime.now())
                 .checkInLat(request.getLatitude())
@@ -678,7 +679,12 @@ public class CheckinService {
                     "Check-in record does not belong to this employee");
         }
 
-        if (org.springframework.util.StringUtils.hasText(request.getPhotoUrl())) {
+        // getPhotoUrl() is @Deprecated on purpose — this check exists specifically to catch
+        // clients still sending the old field and tell them to switch to multipart, not to
+        // actually read the value.
+        @SuppressWarnings("deprecation")
+        String legacyPhotoUrl = request.getPhotoUrl();
+        if (org.springframework.util.StringUtils.hasText(legacyPhotoUrl)) {
             throw new IllegalArgumentException(
                     "photoUrl is no longer accepted; upload photo using multipart/form-data");
         }

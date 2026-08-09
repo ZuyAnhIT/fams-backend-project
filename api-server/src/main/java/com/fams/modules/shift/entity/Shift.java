@@ -47,6 +47,16 @@ public class Shift {
     @Column(name = "late_checkout_minutes", nullable = false)
     private int lateCheckoutMinutes;
 
+    /** #60 (docs/api/backend-feature-audit-2026-08-07.md): null = unlimited. Warn-only — never
+     *  caps otMinutes itself, only sets AttendanceSummary.otDailyLimitExceeded for HR review. */
+    @Column(name = "max_ot_minutes_per_day")
+    private Integer maxOtMinutesPerDay;
+
+    /** Null = unlimited. Compared against the employee's summed otMinutes across the ISO week
+     *  (Mon-Sun) containing the attendance date — see AttendanceSummaryService#recompute. */
+    @Column(name = "max_ot_minutes_per_week")
+    private Integer maxOtMinutesPerWeek;
+
     /** gps_only | gps_face | gps_face_liveness | null (null = inherit the Site's policy). */
     @Column(name = "checkin_policy_override", length = 20)
     private String checkinPolicyOverride;

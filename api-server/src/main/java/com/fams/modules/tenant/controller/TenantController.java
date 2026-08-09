@@ -320,9 +320,10 @@ public class TenantController {
     @PreAuthorize("hasRole('PLATFORM_ADMIN')")
     public ResponseEntity<ApiResponse<SubscriptionResponse>> assignSubscription(
             @Parameter(description = "Tenant UUID") @PathVariable UUID id,
-            @Valid @RequestBody AssignSubscriptionRequest request) {
+            @Valid @RequestBody AssignSubscriptionRequest request,
+            @AuthenticationPrincipal FamsUserDetails userDetails) {
         log.info("Assign subscription tenantId={} planId={}", id, request.getPlanId());
-        SubscriptionResponse response = subscriptionService.assignSubscription(id, request);
+        SubscriptionResponse response = subscriptionService.assignSubscription(id, request, userDetails.getUserId());
         return ResponseEntity.status(201).body(ApiResponse.success(response));
     }
 
@@ -342,7 +343,7 @@ public class TenantController {
             @Parameter(description = "Tenant UUID") @PathVariable UUID id,
             @AuthenticationPrincipal FamsUserDetails userDetails) {
         log.info("Suspend tenant id={} by userId={}", id, userDetails.getUserId());
-        TenantResponse response = tenantService.suspendTenant(id);
+        TenantResponse response = tenantService.suspendTenant(id, userDetails.getUserId());
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 
@@ -362,7 +363,7 @@ public class TenantController {
             @Parameter(description = "Tenant UUID") @PathVariable UUID id,
             @AuthenticationPrincipal FamsUserDetails userDetails) {
         log.info("Reactivate tenant id={} by userId={}", id, userDetails.getUserId());
-        TenantResponse response = tenantService.reactivateTenant(id);
+        TenantResponse response = tenantService.reactivateTenant(id, userDetails.getUserId());
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 
@@ -382,7 +383,7 @@ public class TenantController {
             @Parameter(description = "Tenant UUID") @PathVariable UUID id,
             @AuthenticationPrincipal FamsUserDetails userDetails) {
         log.info("Cancel tenant id={} by userId={}", id, userDetails.getUserId());
-        TenantResponse response = tenantService.cancelTenant(id);
+        TenantResponse response = tenantService.cancelTenant(id, userDetails.getUserId());
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 
@@ -400,9 +401,10 @@ public class TenantController {
     @PreAuthorize("hasRole('PLATFORM_ADMIN')")
     public ResponseEntity<ApiResponse<SubscriptionResponse>> updateSubscription(
             @Parameter(description = "Tenant UUID") @PathVariable UUID id,
-            @Valid @RequestBody UpdateSubscriptionRequest request) {
+            @Valid @RequestBody UpdateSubscriptionRequest request,
+            @AuthenticationPrincipal FamsUserDetails userDetails) {
         log.info("Update subscription tenantId={}", id);
-        SubscriptionResponse response = subscriptionService.updateSubscription(id, request);
+        SubscriptionResponse response = subscriptionService.updateSubscription(id, request, userDetails.getUserId());
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 }

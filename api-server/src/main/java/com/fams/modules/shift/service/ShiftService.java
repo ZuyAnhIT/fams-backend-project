@@ -122,14 +122,32 @@ public class ShiftService {
 
         if (request.getAllowOvertime() == null
                 && request.getEarlyCheckinMinutes() == null
-                && request.getLateCheckoutMinutes() == null) {
+                && request.getLateCheckoutMinutes() == null
+                && request.getMaxOtMinutesPerDay() == null && !request.isClearMaxOtMinutesPerDay()
+                && request.getMaxOtMinutesPerWeek() == null && !request.isClearMaxOtMinutesPerWeek()) {
             throw new IllegalArgumentException(
-                    "At least one of allowOvertime, earlyCheckinMinutes, or lateCheckoutMinutes must be provided");
+                    "At least one of allowOvertime, earlyCheckinMinutes, lateCheckoutMinutes, "
+                    + "maxOtMinutesPerDay/clearMaxOtMinutesPerDay, or maxOtMinutesPerWeek/clearMaxOtMinutesPerWeek "
+                    + "must be provided");
         }
 
         if (request.getAllowOvertime() != null)       shift.setAllowOvertime(request.getAllowOvertime());
         if (request.getEarlyCheckinMinutes() != null) shift.setEarlyCheckinMinutes(request.getEarlyCheckinMinutes());
         if (request.getLateCheckoutMinutes() != null) shift.setLateCheckoutMinutes(request.getLateCheckoutMinutes());
+
+        // #60 (docs/api/backend-feature-audit-2026-08-07.md): clear-flag takes a back seat to an
+        // explicit value in the same request — same "clearX wins only when no value given"
+        // convention as UpdatePlanLimitsRequest/UpdateSubscriptionRequest.
+        if (request.getMaxOtMinutesPerDay() != null) {
+            shift.setMaxOtMinutesPerDay(request.getMaxOtMinutesPerDay());
+        } else if (request.isClearMaxOtMinutesPerDay()) {
+            shift.setMaxOtMinutesPerDay(null);
+        }
+        if (request.getMaxOtMinutesPerWeek() != null) {
+            shift.setMaxOtMinutesPerWeek(request.getMaxOtMinutesPerWeek());
+        } else if (request.isClearMaxOtMinutesPerWeek()) {
+            shift.setMaxOtMinutesPerWeek(null);
+        }
 
         shiftRepository.save(shift);
         log.info("Shift OT configured: shiftId={} siteId={} tenantId={} by={}", shiftId, siteId, tenantId, callerUserId);
@@ -309,6 +327,8 @@ public class ShiftService {
                 .allowOvertime(s.isAllowOvertime())
                 .earlyCheckinMinutes(s.getEarlyCheckinMinutes())
                 .lateCheckoutMinutes(s.getLateCheckoutMinutes())
+                .maxOtMinutesPerDay(s.getMaxOtMinutesPerDay())
+                .maxOtMinutesPerWeek(s.getMaxOtMinutesPerWeek())
                 .status(s.getStatus())
                 .checkinPolicyOverride(s.getCheckinPolicyOverride())
                 .assignmentHistoryCount(assignmentHistoryCount)

@@ -193,18 +193,25 @@ FE đề xuất thêm 1 endpoint liệt kê Assignment trên toàn bộ tenant (
 ```json
 {
   "allowOvertime": true,
-  "earlyCheckinMinutes": 15,   // >= 0 — cho phép check-in sớm hơn startTime bao nhiêu phút
-  "lateCheckoutMinutes": 30    // >= 0 — cho phép check-out muộn hơn endTime bao nhiêu phút
+  "earlyCheckinMinutes": 15,       // >= 0 — cho phép check-in sớm hơn startTime bao nhiêu phút
+  "lateCheckoutMinutes": 30,       // >= 0 — cho phép check-out muộn hơn endTime bao nhiêu phút
+  "maxOtMinutesPerDay": 120,       // MỚI (2026-08-07, #60) — >= 0, omit = giữ nguyên. Chỉ CẢNH BÁO
+                                    //   (set AttendanceSummary.otDailyLimitExceeded), KHÔNG chặn checkout,
+                                    //   KHÔNG cap otMinutes thực tế. null = không giới hạn.
+  "clearMaxOtMinutesPerDay": false, // MỚI — true để xoá giới hạn ngày (về unlimited); bị bỏ qua nếu maxOtMinutesPerDay cũng có giá trị
+  "maxOtMinutesPerWeek": 600,      // MỚI — cùng cơ chế cảnh báo, tính theo ISO week (Thứ 2 - CN), theo employee (không theo site)
+  "clearMaxOtMinutesPerWeek": false // MỚI — tương tự clearMaxOtMinutesPerDay
 }
 ```
 
-**`ShiftResponse`** (đầy đủ, **2 field cuối mới bổ sung**):
+**`ShiftResponse`** (đầy đủ, **4 field cuối mới bổ sung**):
 ```json
 {
   "id": "uuid", "siteId": "uuid", "tenantId": "uuid", "name": "Morning Shift",
   "startTime": "08:00:00", "endTime": "17:00:00",
   "allowOvernight": false, "allowOvertime": true,
   "earlyCheckinMinutes": 15, "lateCheckoutMinutes": 30,
+  "maxOtMinutesPerDay": 120, "maxOtMinutesPerWeek": 600,  // MỚI (2026-08-07, #60) — null = không giới hạn
   "status": "active", "createdBy": "uuid", "createdAt": "...", "updatedAt": "...",
   "assignmentHistoryCount": 3,   // MỚI — số phân công (active hoặc đã hủy) từng dùng ca này
   "canDelete": false             // MỚI — = (assignmentHistoryCount == 0); dùng để bật/tắt nút Xóa mà không cần thử-và-lỗi

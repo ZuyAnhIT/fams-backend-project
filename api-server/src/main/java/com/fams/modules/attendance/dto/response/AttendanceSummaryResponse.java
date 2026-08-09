@@ -93,6 +93,16 @@ public class AttendanceSummaryResponse {
             + "manually if warranted.", example = "false")
     private boolean hasRandomCheckFailure;
 
+    @Schema(description = "True if otMinutes this day exceeded the shift's maxOtMinutesPerDay limit "
+            + "(#60, docs/api/backend-feature-audit-2026-08-07.md). Warn-only — does NOT cap otMinutes "
+            + "above; HR reviews and decides via /adjust.", example = "false")
+    private boolean otDailyLimitExceeded;
+
+    @Schema(description = "True if the employee's summed otMinutes across the ISO week (Mon-Sun) containing "
+            + "this date exceeded the shift's maxOtMinutesPerWeek limit. Warn-only, same as otDailyLimitExceeded.",
+            example = "false")
+    private boolean otWeeklyLimitExceeded;
+
     @Schema(description = "Record creation timestamp")
     private OffsetDateTime createdAt;
 

@@ -13,6 +13,6 @@ public class BulkUpsertSettingsRequest {
 
     @NotEmpty
     @Valid
-    @Schema(description = "List of notification settings to upsert", required = true)
+    @Schema(description = "List of notification settings to upsert", requiredMode = Schema.RequiredMode.REQUIRED)
     private List<UpsertNotificationSettingRequest> settings;
 }
