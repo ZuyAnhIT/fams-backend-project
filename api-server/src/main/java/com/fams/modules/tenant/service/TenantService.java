@@ -18,9 +18,11 @@ import com.fams.modules.tenant.dto.response.TenantResponse;
 import com.fams.modules.tenant.entity.Tenant;
 import com.fams.modules.tenant.repository.TenantRepository;
 import com.fams.modules.tenant.specification.TenantSpecification;
+import com.fams.modules.audit.service.AuditLogService;
 import com.fams.shared.exception.DuplicateResourceException;
 import com.fams.shared.exception.ResourceNotFoundException;
 import com.fams.shared.pagination.PageResponse;
+import com.fams.shared.security.HttpRequestUtils;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.security.access.AccessDeniedException;
 import lombok.extern.slf4j.Slf4j;
@@ -52,13 +54,15 @@ public class TenantService {
     private final RoleRepository roleRepository;
     private final UserRoleRepository userRoleRepository;
     private final StringRedisTemplate redis;
+    private final AuditLogService auditLogService;
 
     public TenantService(TenantRepository tenantRepository, UserRepository userRepository,
                          PlanRepository planRepository,
                          TenantSubscriptionRepository subscriptionRepository,
                          RoleRepository roleRepository,
                          UserRoleRepository userRoleRepository,
-                         StringRedisTemplate redis) {
+                         StringRedisTemplate redis,
+                         AuditLogService auditLogService) {
         this.tenantRepository = tenantRepository;
         this.userRepository = userRepository;
         this.planRepository = planRepository;
@@ -66,6 +70,42 @@ public class TenantService {
         this.roleRepository = roleRepository;
         this.userRoleRepository = userRoleRepository;
         this.redis = redis;
+        this.auditLogService = auditLogService;
+    }
+
+    /** #31 (docs/api/backend-feature-audit-2026-08-07.md): tenant lifecycle actions are
+     *  platform-admin-level and compliance-sensitive (who suspended/created/renamed a
+     *  customer's tenant) but were never audited, unlike every other mutation-heavy module.
+     *  Best-effort like every other call site in the codebase — an audit-log failure must
+     *  never roll back the real tenant change. */
+    private void recordTenantAudit(UUID tenantId, UUID actorId, String action,
+                                    Map<String, Object> oldValue, Map<String, Object> newValue) {
+        try {
+            auditLogService.record(
+                    tenantId, actorId, null,
+                    "Tenant", tenantId.toString(), action,
+                    oldValue, newValue,
+                    HttpRequestUtils.currentRequestId(),
+                    HttpRequestUtils.currentIpAddress(),
+                    HttpRequestUtils.currentUserAgent());
+        } catch (Exception ex) {
+            log.warn("Failed to record audit log for {} tenantId={}: {}", action, tenantId, ex.getMessage());
+        }
+    }
+
+    private Map<String, Object> tenantAuditSnapshot(Tenant tenant) {
+        Map<String, Object> m = new java.util.LinkedHashMap<>();
+        m.put("name", tenant.getName());
+        m.put("slug", tenant.getSlug());
+        m.put("domain", tenant.getDomain());
+        m.put("industry", tenant.getIndustry());
+        m.put("countryCode", tenant.getCountryCode());
+        m.put("timezone", tenant.getTimezone());
+        m.put("locale", tenant.getLocale());
+        m.put("currencyCode", tenant.getCurrencyCode());
+        m.put("status", tenant.getStatus());
+        m.put("ownerId", tenant.getOwnerId() != null ? tenant.getOwnerId().toString() : null);
+        return m;
     }
 
     /**
@@ -170,6 +210,8 @@ public class TenantService {
                     ownerId, tenant.getId(), createdByUserId);
         }
 
+        recordTenantAudit(tenant.getId(), createdByUserId, "tenant_created", null, tenantAuditSnapshot(tenant));
+
         return toResponse(tenant);
     }
 
@@ -207,6 +249,8 @@ public class TenantService {
             throw new DuplicateResourceException("Domain '" + request.getDomain() + "' is already registered");
         }
 
+        Map<String, Object> before = tenantAuditSnapshot(tenant);
+
         if (StringUtils.hasText(request.getName()))        tenant.setName(request.getName());
         if (request.getDomain() != null)                   tenant.setDomain(request.getDomain().isBlank() ? null : request.getDomain());
         if (request.getLogoUrl() != null)                  tenant.setLogoUrl(request.getLogoUrl().isBlank() ? null : request.getLogoUrl());
@@ -218,6 +262,7 @@ public class TenantService {
 
         tenantRepository.save(tenant);
         log.info("Tenant updated: id={} by userId={}", tenantId, userId);
+        recordTenantAudit(tenantId, userId, "tenant_updated", before, tenantAuditSnapshot(tenant));
 
         return toResponse(tenant);
     }
@@ -251,7 +296,7 @@ public class TenantService {
     }
 
     @Transactional
-    public TenantResponse cancelTenant(UUID tenantId) {
+    public TenantResponse cancelTenant(UUID tenantId, UUID callerUserId) {
         Tenant tenant = tenantRepository.findByIdAndDeletedAtIsNull(tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Tenant not found: " + tenantId));
 
@@ -259,16 +304,19 @@ public class TenantService {
             throw new IllegalStateException("Tenant is already cancelled");
         }
 
+        String previousStatus = tenant.getStatus();
         tenant.setStatus("cancelled");
         tenant.setPreSuspensionStatus(null);
         tenantRepository.save(tenant);
         redis.opsForValue().set(TENANT_SUSPENDED_PREFIX + tenantId, "1");
         log.info("Tenant cancelled: id={}", tenantId);
+        recordTenantAudit(tenantId, callerUserId, "tenant_cancelled",
+                Map.of("status", previousStatus), Map.of("status", "cancelled"));
         return toResponse(tenant);
     }
 
     @Transactional
-    public TenantResponse suspendTenant(UUID tenantId) {
+    public TenantResponse suspendTenant(UUID tenantId, UUID callerUserId) {
         Tenant tenant = tenantRepository.findByIdAndDeletedAtIsNull(tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Tenant not found: " + tenantId));
 
@@ -279,16 +327,19 @@ public class TenantService {
             throw new IllegalStateException("Cannot suspend a cancelled tenant");
         }
 
-        tenant.setPreSuspensionStatus(tenant.getStatus());
+        String previousStatus = tenant.getStatus();
+        tenant.setPreSuspensionStatus(previousStatus);
         tenant.setStatus("suspended");
         tenantRepository.save(tenant);
         redis.opsForValue().set(TENANT_SUSPENDED_PREFIX + tenantId, "1");
         log.info("Tenant suspended: id={} previousStatus={}", tenantId, tenant.getPreSuspensionStatus());
+        recordTenantAudit(tenantId, callerUserId, "tenant_suspended",
+                Map.of("status", previousStatus), Map.of("status", "suspended"));
         return toResponse(tenant);
     }
 
     @Transactional
-    public TenantResponse reactivateTenant(UUID tenantId) {
+    public TenantResponse reactivateTenant(UUID tenantId, UUID callerUserId) {
         Tenant tenant = tenantRepository.findByIdAndDeletedAtIsNull(tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Tenant not found: " + tenantId));
 
@@ -303,6 +354,8 @@ public class TenantService {
         tenantRepository.save(tenant);
         redis.delete(TENANT_SUSPENDED_PREFIX + tenantId);
         log.info("Tenant reactivated: id={} restoredStatus={}", tenantId, restoreStatus);
+        recordTenantAudit(tenantId, callerUserId, "tenant_reactivated",
+                Map.of("status", "suspended"), Map.of("status", restoreStatus));
         return toResponse(tenant);
     }
 

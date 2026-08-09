@@ -13,8 +13,7 @@ public class AttendanceSummarySpecification {
     public static Specification<AttendanceSummary> build(UUID tenantId, UUID employeeId,
                                                           UUID siteId, String status,
                                                           LocalDate from, LocalDate to) {
-        return Specification
-                .where(tenantEq(tenantId))
+        return tenantEq(tenantId)
                 .and(notDeleted())
                 .and(employeeEq(employeeId))
                 .and(siteEq(siteId))

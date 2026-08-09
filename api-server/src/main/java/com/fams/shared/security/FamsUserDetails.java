@@ -11,7 +11,15 @@ import java.util.HashSet;
 import java.util.Set;
 import java.util.UUID;
 
+// Implements Serializable only because the UserDetails interface requires it (Spring Security
+// contract) — this app is stateless JWT auth, this object is never actually serialized/put in an
+// HTTP session, so the "authorities" field's declared type (Set, not Serializable) is a non-issue
+// in practice. Suppressed rather than adding transient, since marking it transient would silently
+// drop authorities on the (currently theoretical) day this DOES get serialized somewhere.
+@SuppressWarnings("serial")
 public class FamsUserDetails implements UserDetails {
+
+    private static final long serialVersionUID = 1L;
 
     private final UUID userId;
     private final String email;

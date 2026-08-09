@@ -93,6 +93,7 @@ public class AttendanceSummaryService {
     /** Marker thrown internally by resolveSiteFilter to signal "no sites allowed at all" —
      *  caught by each caller to short-circuit into an empty result instead of querying. */
     private static final class NoSitesAllowed extends RuntimeException {
+        private static final long serialVersionUID = 1L;
     }
 
     /** Shared by listSummaries/listMonthlyAttendance: resolves the caller's allowed sites and
@@ -404,6 +405,36 @@ public class AttendanceSummaryService {
             }
         }
 
+        // #60 (docs/api/backend-feature-audit-2026-08-07.md): warn-only OT hour limits. Uses the
+        // SAME session snapshot as Task 83 above (never a live Shift re-fetch — a limit edited
+        // later must not retroactively flag/unflag an already-computed day, same invariant as
+        // every other shift_* snapshot field). null limit = unlimited, never flags.
+        boolean otDailyLimitExceeded = false;
+        boolean otWeeklyLimitExceeded = false;
+        if (shiftSnapshotSource != null) {
+            Integer maxOtPerDay = shiftSnapshotSource.getShiftMaxOtMinutesPerDay();
+            if (maxOtPerDay != null && otMinutes > maxOtPerDay) {
+                otDailyLimitExceeded = true;
+            }
+
+            Integer maxOtPerWeek = shiftSnapshotSource.getShiftMaxOtMinutesPerWeek();
+            if (maxOtPerWeek != null) {
+                // ISO week (Mon-Sun), same default most WFM systems (Deputy/ADP) use for a
+                // weekly OT cutoff. Employee-scoped, not site-scoped — a person's weekly OT
+                // exposure doesn't reset just because they moved sites mid-week.
+                LocalDate weekStart = date.with(java.time.DayOfWeek.MONDAY);
+                LocalDate weekEndExclusive = weekStart.plusDays(7);
+                int weeklyOtMinutes = otMinutes; // today's freshly computed value, not yet persisted
+                for (AttendanceSummary row : summaryRepository.findByTenantIdAndEmployeeIdAndDateRange(
+                        tenantId, employeeId, weekStart, weekEndExclusive)) {
+                    if (!row.getAttendanceDate().equals(date)) {
+                        weeklyOtMinutes += row.getOtMinutes();
+                    }
+                }
+                otWeeklyLimitExceeded = weeklyOtMinutes > maxOtPerWeek;
+            }
+        }
+
         // Task 84: missing_checkout — only flagged for past days with open sessions.
         // A session open on today's date is still in progress, not yet "missing".
         boolean missingCheckout = hasOpenSession && date.isBefore(LocalDate.now(zone));
@@ -444,6 +475,8 @@ public class AttendanceSummaryService {
         summary.setEarlyLeave(isEarlyLeave);
         summary.setEarlyLeaveMinutes(earlyLeaveMinutes);
         summary.setOtMinutes(otMinutes);
+        summary.setOtDailyLimitExceeded(otDailyLimitExceeded);
+        summary.setOtWeeklyLimitExceeded(otWeeklyLimitExceeded);
         summary.setMissingCheckout(missingCheckout);
         summary.setHasPendingReviewSession(hasPendingReviewSession);
         summary.setHasRejectedSession(hasRejectedSession);
@@ -814,6 +847,8 @@ public class AttendanceSummaryService {
                 .hasPendingReviewSession(a.isHasPendingReviewSession())
                 .hasRejectedSession(a.isHasRejectedSession())
                 .hasRandomCheckFailure(a.isHasRandomCheckFailure())
+                .otDailyLimitExceeded(a.isOtDailyLimitExceeded())
+                .otWeeklyLimitExceeded(a.isOtWeeklyLimitExceeded())
                 .createdAt(a.getCreatedAt())
                 .updatedAt(a.getUpdatedAt())
                 .adjustmentReason(a.getAdjustmentReason())

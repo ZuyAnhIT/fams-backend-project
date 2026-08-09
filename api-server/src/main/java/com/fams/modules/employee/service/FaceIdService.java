@@ -343,8 +343,8 @@ public class FaceIdService {
     @Transactional
     public FaceIdStatusDto approveEnrollment(UUID tenantId, UUID employeeId,
                                              UUID callerUserId, boolean callerIsPlatformAdmin) {
-        Employee employee = employeeRepository
-                .findByIdAndTenantIdAndDeletedAtIsNull(employeeId, tenantId)
+        // Existence + tenant-scope guard only — the fetched Employee itself isn't needed below.
+        employeeRepository.findByIdAndTenantIdAndDeletedAtIsNull(employeeId, tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Employee not found: " + employeeId));
 
         // Deliberately NOT self-callable: approving your OWN enrollment defeats the entire
@@ -377,8 +377,8 @@ public class FaceIdService {
     public FaceIdStatusDto rejectEnrollment(UUID tenantId, UUID employeeId,
                                             RejectFaceEnrollmentRequest request,
                                             UUID callerUserId, boolean callerIsPlatformAdmin) {
-        Employee employee = employeeRepository
-                .findByIdAndTenantIdAndDeletedAtIsNull(employeeId, tenantId)
+        // Existence + tenant-scope guard only — the fetched Employee itself isn't needed below.
+        employeeRepository.findByIdAndTenantIdAndDeletedAtIsNull(employeeId, tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Employee not found: " + employeeId));
 
         if (!callerIsPlatformAdmin) {
@@ -569,8 +569,9 @@ public class FaceIdService {
 
         requireManageOrSelf(employee, tenantId, callerUserId, callerIsPlatformAdmin);
 
-        FaceProfile profile = faceProfileRepository
-                .findByEmployeeIdAndTenantId(employeeId, tenantId)
+        // Existence + status guard only ("must have an active enrolled profile") — no field of
+        // the fetched FaceProfile itself is needed below.
+        faceProfileRepository.findByEmployeeIdAndTenantId(employeeId, tenantId)
                 .filter(p -> "enrolled".equals(p.getStatus()))
                 .orElseThrow(() -> new ResourceNotFoundException(
                         "Employee has no active Face ID enrollment: " + employeeId));

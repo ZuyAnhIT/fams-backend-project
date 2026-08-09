@@ -12,19 +12,19 @@ import java.util.UUID;
 public class CreateNotificationRequest {
 
   @NotNull
-  @Schema(description = "Tenant UUID", required = true)
+  @Schema(description = "Tenant UUID", requiredMode = Schema.RequiredMode.REQUIRED)
   private UUID tenantId;
 
   @NotNull
-  @Schema(description = "User UUID", required = true)
+  @Schema(description = "User UUID", requiredMode = Schema.RequiredMode.REQUIRED)
   private UUID userId;
 
   @NotBlank
-  @Schema(description = "Event type identifier", example = "RANDOM_CHECK_SENT", required = true)
+  @Schema(description = "Event type identifier", example = "RANDOM_CHECK_SENT", requiredMode = Schema.RequiredMode.REQUIRED)
   private String eventType;
 
   @NotBlank
-  @Schema(description = "Notification title", example = "Random check requested", required = true)
+  @Schema(description = "Notification title", example = "Random check requested", requiredMode = Schema.RequiredMode.REQUIRED)
   private String title;
 
   @Schema(description = "Notification body text")

@@ -2,7 +2,6 @@ package com.fams.modules.site.service;
 
 import com.fams.modules.assignment.service.AssignmentService;
 import com.fams.modules.geofence.service.GeofenceService;
-import com.fams.modules.randomcheck.entity.RandomCheckConfig;
 import com.fams.modules.randomcheck.repository.RandomCheckConfigRepository;
 import com.fams.modules.rbac.repository.UserRoleRepository;
 import com.fams.modules.rbac.service.SiteScopeService;

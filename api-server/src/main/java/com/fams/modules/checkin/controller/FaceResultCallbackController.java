@@ -1,7 +1,6 @@
 package com.fams.modules.checkin.controller;
 
 import com.fams.modules.checkin.dto.request.FaceResultCallbackRequest;
-import com.fams.modules.checkin.entity.CheckinRecord;
 import com.fams.modules.checkin.repository.CheckinRepository;
 import com.fams.modules.employee.repository.FaceProfileRepository;
 import com.fams.modules.employee.service.FaceIdService;

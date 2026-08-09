@@ -8,6 +8,8 @@ import org.springframework.http.HttpStatus;
  */
 public class BusinessException extends RuntimeException {
 
+    private static final long serialVersionUID = 1L;
+
     private final String errorCode;
     private final String userMessage;
     private final HttpStatus httpStatus;

@@ -12,9 +12,11 @@ import com.fams.modules.rbac.repository.RoleRepository;
 import com.fams.modules.rbac.repository.UserRoleRepository;
 import com.fams.modules.rbac.specification.RoleSpecification;
 import com.fams.modules.tenant.repository.TenantRepository;
+import com.fams.modules.audit.service.AuditLogService;
 import com.fams.shared.exception.DuplicateResourceException;
 import com.fams.shared.exception.ResourceNotFoundException;
 import com.fams.shared.pagination.PageResponse;
+import com.fams.shared.security.HttpRequestUtils;
 import com.fams.shared.security.JwtAuthFilter;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -46,17 +48,49 @@ public class RoleService {
     private final PermissionRepository permissionRepository;
     private final UserRoleRepository userRoleRepository;
     private final StringRedisTemplate redis;
+    private final AuditLogService auditLogService;
 
     public RoleService(RoleRepository roleRepository,
                        TenantRepository tenantRepository,
                        PermissionRepository permissionRepository,
                        UserRoleRepository userRoleRepository,
-                       StringRedisTemplate redis) {
+                       StringRedisTemplate redis,
+                       AuditLogService auditLogService) {
         this.roleRepository = roleRepository;
         this.tenantRepository = tenantRepository;
         this.permissionRepository = permissionRepository;
         this.userRoleRepository = userRoleRepository;
         this.redis = redis;
+        this.auditLogService = auditLogService;
+    }
+
+    /** #31 (docs/api/backend-feature-audit-2026-08-07.md): role create/edit/delete changes
+     *  what every holder of that role can do — a textbook compliance-audited action (SOC2/
+     *  ISO 27001 access-control review) that was never traced to an actor before this fix.
+     *  Best-effort, same non-blocking stance as every other AuditLogService call site. */
+    private void recordRoleAudit(UUID tenantId, UUID actorId, String action, UUID roleId,
+                                  Map<String, Object> oldValue, Map<String, Object> newValue) {
+        try {
+            auditLogService.record(
+                    tenantId, actorId, null,
+                    "Role", roleId.toString(), action,
+                    oldValue, newValue,
+                    HttpRequestUtils.currentRequestId(),
+                    HttpRequestUtils.currentIpAddress(),
+                    HttpRequestUtils.currentUserAgent());
+        } catch (Exception ex) {
+            log.warn("Failed to record audit log for {} roleId={}: {}", action, roleId, ex.getMessage());
+        }
+    }
+
+    private Map<String, Object> roleAuditSnapshot(Role role) {
+        Map<String, Object> m = new java.util.LinkedHashMap<>();
+        m.put("name", role.getName());
+        m.put("description", role.getDescription());
+        m.put("tenantId", role.getTenantId() != null ? role.getTenantId().toString() : null);
+        m.put("isActive", role.isActive());
+        m.put("permissions", role.getPermissions().stream().map(Permission::getName).sorted().toList());
+        return m;
     }
 
     /** Evicts the cached permission set of every user currently holding this role, so an
@@ -216,6 +250,7 @@ public class RoleService {
 
         log.info("Created custom role: id={} name={} tenantId={} permissionCount={} by userId={}",
                 role.getId(), role.getName(), tenantId, permissions.size(), callerUserId);
+        recordRoleAudit(tenantId, callerUserId, "role_created", role.getId(), null, roleAuditSnapshot(role));
 
         return toDetailResponse(role, 0L);
     }
@@ -251,6 +286,7 @@ public class RoleService {
                     "Role name '" + request.getName() + "' already exists in tenant " + tenantId);
         }
 
+        Map<String, Object> before = roleAuditSnapshot(role);
         Set<Permission> permissions = new HashSet<>();
         if (!request.getPermissionIds().isEmpty()) {
             List<Permission> found = permissionRepository.findAllById(request.getPermissionIds());
@@ -277,6 +313,7 @@ public class RoleService {
 
         log.info("Updated custom role: id={} name={} tenantId={} permissionCount={} by userId={}",
                 role.getId(), role.getName(), tenantId, permissions.size(), callerUserId);
+        recordRoleAudit(tenantId, callerUserId, "role_updated", role.getId(), before, roleAuditSnapshot(role));
 
         long assignmentCount = userRoleRepository.countByRoleIdAndDeletedAtIsNull(role.getId());
         return toDetailResponse(role, assignmentCount);
@@ -309,11 +346,13 @@ public class RoleService {
                     "Role is still assigned to one or more users. Revoke all assignments before deleting.");
         }
 
+        Map<String, Object> before = roleAuditSnapshot(role);
         role.setDeletedAt(OffsetDateTime.now());
         roleRepository.save(role);
 
         log.info("Deleted custom role: id={} name={} tenantId={} by userId={}",
                 role.getId(), role.getName(), tenantId, callerUserId);
+        recordRoleAudit(tenantId, callerUserId, "role_deleted", role.getId(), before, null);
     }
 
     /** Batch-fetches active-assignment counts for a page of roles in one query, instead of

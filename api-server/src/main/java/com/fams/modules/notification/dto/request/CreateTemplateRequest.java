@@ -9,17 +9,17 @@ import lombok.Data;
 public class CreateTemplateRequest {
 
   @NotBlank
-  @Schema(description = "Event type identifier", example = "RANDOM_CHECK_SENT", required = true)
+  @Schema(description = "Event type identifier", example = "RANDOM_CHECK_SENT", requiredMode = Schema.RequiredMode.REQUIRED)
   private String eventType;
 
   @Schema(description = "Locale code (default 'vi')", example = "vi")
   private String locale = "vi";
 
   @NotBlank
-  @Schema(description = "Title template with {variable} placeholders", example = "Check requested for {studentName}", required = true)
+  @Schema(description = "Title template with {variable} placeholders", example = "Check requested for {studentName}", requiredMode = Schema.RequiredMode.REQUIRED)
   private String titleTemplate;
 
   @NotBlank
-  @Schema(description = "Body template with {variable} placeholders", example = "Dear {studentName}, a random check has been dispatched.", required = true)
+  @Schema(description = "Body template with {variable} placeholders", example = "Dear {studentName}, a random check has been dispatched.", requiredMode = Schema.RequiredMode.REQUIRED)
   private String bodyTemplate;
 }

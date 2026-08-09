@@ -147,6 +147,11 @@ public class ShiftController {
                       "allowOvertime enables overtime tracking for employees on this shift. " +
                       "earlyCheckinMinutes and lateCheckoutMinutes define the tolerance window " +
                       "around the scheduled start and end times. " +
+                      "maxOtMinutesPerDay/maxOtMinutesPerWeek (#60, docs/api/backend-feature-audit-2026-08-07.md) " +
+                      "set warn-only OT hour caps — exceeding them flags AttendanceSummary.otDailyLimitExceeded/" +
+                      "otWeeklyLimitExceeded for HR review but never blocks a checkout or caps otMinutes itself; " +
+                      "omit to leave unchanged, or pass clearMaxOtMinutesPerDay/clearMaxOtMinutesPerWeek=true to " +
+                      "remove a limit (unlimited). " +
                       "Requires shifts:update permission. Callable by TENANT_ADMIN or HR_MANAGER."
     )
     @ApiResponses({

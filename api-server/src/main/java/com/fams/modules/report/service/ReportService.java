@@ -302,7 +302,6 @@ public class ReportService {
         }
 
         Set<UUID> empIds = aggregated.stream().map(AttendanceHrMonthlyResponse::getEmployeeId).collect(Collectors.toSet());
-        Set<UUID> siteIds = aggregated.stream().map(AttendanceHrMonthlyResponse::getSiteId).collect(Collectors.toSet());
         Map<UUID, String> empCodes = employeeRepository.findAllByTenantIdAndIdInAndDeletedAtIsNull(tenantId, empIds)
                 .stream().collect(Collectors.toMap(Employee::getId, Employee::getEmployeeCode, (a, b) -> a));
 
@@ -429,6 +428,7 @@ public class ReportService {
     /** Marker for "caller has zero allowed sites" — mirrors AttendanceSummaryService's identical
      *  pattern (not shared cross-service; small enough not to warrant the coupling). */
     private static final class NoSitesAllowedForReport extends RuntimeException {
+        private static final long serialVersionUID = 1L;
     }
 
     /** Resolves the effective siteId to query with, enforcing site-scope for a restricted caller

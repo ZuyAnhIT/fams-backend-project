@@ -251,6 +251,8 @@ public class OfflineSyncService {
                 .shiftAllowOvernight(shift != null ? shift.isAllowOvernight() : null)
                 .shiftAllowOvertime(shift != null ? shift.isAllowOvertime() : null)
                 .shiftLateCheckoutMinutes(shift != null ? shift.getLateCheckoutMinutes() : null)
+                .shiftMaxOtMinutesPerDay(shift != null ? shift.getMaxOtMinutesPerDay() : null)
+                .shiftMaxOtMinutesPerWeek(shift != null ? shift.getMaxOtMinutesPerWeek() : null)
                 .status(status)
                 .checkInAt(req.getCheckinAt())
                 .checkInLat(req.getLat())

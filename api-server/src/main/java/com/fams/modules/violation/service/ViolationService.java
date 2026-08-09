@@ -3,8 +3,6 @@ package com.fams.modules.violation.service;
 import com.fams.modules.attendance.service.AttendanceSummaryService;
 import com.fams.modules.employee.entity.Employee;
 import com.fams.modules.employee.repository.EmployeeRepository;
-import com.fams.modules.randomcheck.entity.CheckResponse;
-import com.fams.modules.randomcheck.entity.ScheduledCheck;
 import com.fams.modules.randomcheck.repository.CheckResponseRepository;
 import com.fams.modules.randomcheck.repository.ScheduledCheckRepository;
 import com.fams.modules.rbac.repository.UserRoleRepository;
@@ -90,7 +88,12 @@ public class ViolationService {
                     "Violation does not belong to this employee");
         }
 
-        if (org.springframework.util.StringUtils.hasText(request.getPhotoUrl())) {
+        // getPhotoUrl() is @Deprecated on purpose — this check exists specifically to catch
+        // clients still sending the old field and tell them to switch to multipart, not to
+        // actually read the value.
+        @SuppressWarnings("deprecation")
+        String legacyPhotoUrl = request.getPhotoUrl();
+        if (org.springframework.util.StringUtils.hasText(legacyPhotoUrl)) {
             throw new IllegalArgumentException(
                     "photoUrl is no longer accepted; upload photo using multipart/form-data");
         }
@@ -399,6 +402,13 @@ public class ViolationService {
 
         violation.setAffectsAttendance(request.getAffectsAttendance());
         violationRepository.save(violation);
+
+        // #118 (docs/api/backend-feature-audit-2026-08-07.md): confirm/dismiss already refresh
+        // the day's AttendanceSummary (see recomputeIfSummaryExists callers above) so the flag
+        // change is reflected immediately instead of waiting for the next unrelated recompute
+        // trigger — this endpoint was the one HR-facing violation mutation that didn't.
+        attendanceSummaryService.recomputeIfSummaryExists(
+                tenantId, violation.getEmployeeId(), violation.getSiteId(), violation.getCheckDate());
 
         log.info("Attendance impact updated: tenantId={} violationId={} affectsAttendance={} by userId={}",
                 tenantId, violationId, request.getAffectsAttendance(), callerUserId);

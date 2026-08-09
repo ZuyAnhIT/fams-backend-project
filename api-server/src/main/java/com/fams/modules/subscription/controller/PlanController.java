@@ -9,6 +9,7 @@ import com.fams.modules.subscription.service.PlanLimitsService;
 import com.fams.modules.subscription.service.PlanService;
 import com.fams.shared.pagination.PageResponse;
 import com.fams.shared.response.ApiResponse;
+import com.fams.shared.security.FamsUserDetails;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -21,6 +22,7 @@ import jakarta.validation.constraints.Min;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.UUID;
@@ -82,9 +84,10 @@ public class PlanController {
     })
     @PostMapping
     @PreAuthorize("hasRole('PLATFORM_ADMIN')")
-    public ResponseEntity<ApiResponse<PlanResponse>> createPlan(@Valid @RequestBody CreatePlanRequest request) {
+    public ResponseEntity<ApiResponse<PlanResponse>> createPlan(@Valid @RequestBody CreatePlanRequest request,
+            @AuthenticationPrincipal FamsUserDetails userDetails) {
         log.info("Create plan name={}", request.getName());
-        return ResponseEntity.status(201).body(ApiResponse.success(planService.createPlan(request)));
+        return ResponseEntity.status(201).body(ApiResponse.success(planService.createPlan(request, userDetails.getUserId())));
     }
 
     @Operation(summary = "Update a subscription plan",
@@ -104,9 +107,10 @@ public class PlanController {
     @PreAuthorize("hasRole('PLATFORM_ADMIN')")
     public ResponseEntity<ApiResponse<PlanResponse>> updatePlan(
             @Parameter(description = "Plan UUID") @PathVariable UUID id,
-            @Valid @RequestBody UpdatePlanRequest request) {
+            @Valid @RequestBody UpdatePlanRequest request,
+            @AuthenticationPrincipal FamsUserDetails userDetails) {
         log.info("Update plan id={}", id);
-        return ResponseEntity.ok(ApiResponse.success(planService.updatePlan(id, request)));
+        return ResponseEntity.ok(ApiResponse.success(planService.updatePlan(id, request, userDetails.getUserId())));
     }
 
     @Operation(summary = "Get plan limits",
@@ -137,8 +141,9 @@ public class PlanController {
     @PreAuthorize("hasRole('PLATFORM_ADMIN')")
     public ResponseEntity<ApiResponse<PlanLimitsResponse>> updateLimits(
             @Parameter(description = "Plan UUID") @PathVariable UUID id,
-            @Valid @RequestBody UpdatePlanLimitsRequest request) {
+            @Valid @RequestBody UpdatePlanLimitsRequest request,
+            @AuthenticationPrincipal FamsUserDetails userDetails) {
         log.info("Update limits planId={}", id);
-        return ResponseEntity.ok(ApiResponse.success(planLimitsService.updateLimits(id, request)));
+        return ResponseEntity.ok(ApiResponse.success(planLimitsService.updateLimits(id, request, userDetails.getUserId())));
     }
 }

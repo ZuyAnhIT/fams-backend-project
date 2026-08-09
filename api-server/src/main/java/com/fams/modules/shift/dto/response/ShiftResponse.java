@@ -46,6 +46,14 @@ public class ShiftResponse {
     @Schema(description = "Minutes after endTime that a checkout is accepted", example = "30")
     private int lateCheckoutMinutes;
 
+    @Schema(description = "Max OT minutes allowed per day before AttendanceSummary.otDailyLimitExceeded is "
+            + "flagged; null = unlimited (#60, docs/api/backend-feature-audit-2026-08-07.md)", nullable = true)
+    private Integer maxOtMinutesPerDay;
+
+    @Schema(description = "Max OT minutes allowed per ISO week (Mon-Sun) before "
+            + "AttendanceSummary.otWeeklyLimitExceeded is flagged; null = unlimited", nullable = true)
+    private Integer maxOtMinutesPerWeek;
+
     @Schema(description = "Status: active or inactive", example = "active")
     private String status;
 

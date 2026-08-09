@@ -10,7 +10,6 @@ import com.fams.modules.randomcheck.entity.RandomCheckConfig;
 import com.fams.modules.randomcheck.entity.ScheduledCheck;
 import com.fams.modules.randomcheck.repository.RandomCheckConfigRepository;
 import com.fams.modules.randomcheck.repository.ScheduledCheckRepository;
-import com.fams.modules.site.entity.Site;
 import com.fams.modules.site.repository.SiteRepository;
 import com.fams.modules.subscription.service.PlanLimitEnforcementService;
 import com.fams.shared.exception.ResourceNotFoundException;

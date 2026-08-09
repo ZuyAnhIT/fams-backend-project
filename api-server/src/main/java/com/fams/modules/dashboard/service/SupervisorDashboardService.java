@@ -102,15 +102,24 @@ public class SupervisorDashboardService {
                     .employeeCode(emp != null ? emp.getEmployeeCode() : null)
                     .checkinId(record.getId())
                     .checkInAt(record.getCheckInAt())
+                    .checkInLat(record.getCheckInLat())
+                    .checkInLon(record.getCheckInLon())
                     .build());
         }
 
+        // #130 (docs/api/backend-feature-audit-2026-08-07.md): before this fix, a site's
+        // coordinates and its on-site employees' check-in coordinates were only ever available
+        // from two separate calls (GET /sites and GET /checkin) — no single response could
+        // drive a "site map with who's on it" screen. This is the natural home for that: the
+        // supervisor dashboard already aggregates open sessions per supervised site.
         return SupervisorDashboardResponse.SiteStatus.builder()
                 .siteId(siteId)
                 .siteName(siteName)
                 .expectedToday(expected)
                 .onSiteNow(openSessions.size())
                 .onSiteEmployees(onSiteEmployees)
+                .siteLatitude(site != null ? site.getLatitude() : null)
+                .siteLongitude(site != null ? site.getLongitude() : null)
                 .build();
     }
 }

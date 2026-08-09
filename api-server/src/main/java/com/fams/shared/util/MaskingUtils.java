@@ -6,9 +6,16 @@ import java.util.Set;
 
 public final class MaskingUtils {
 
+    /** #145 (docs/api/backend-feature-audit-2026-08-07.md): redact-at-write-layer, same stance
+     *  Stripe/GitHub take for audit logs — a field name landing in an oldValue/newValue map gets
+     *  masked automatically, so a future call site doesn't have to remember to do it itself.
+     *  totpSecret/backupCodes/nationalId aren't populated by any current audit call (verified:
+     *  no service passes them today), but are listed defensively so the day someone dumps a
+     *  User/Employee entity wholesale into an audit map, these can't leak by accident. */
     private static final Set<String> PII_KEYS = Set.of(
             "email", "phone", "deviceToken", "token", "password", "passwordHash",
-            "refreshToken", "accessToken"
+            "refreshToken", "accessToken", "totpSecret", "backupCodes", "backupCode",
+            "nationalId", "identityNumber", "idNumber"
     );
 
     private MaskingUtils() {}

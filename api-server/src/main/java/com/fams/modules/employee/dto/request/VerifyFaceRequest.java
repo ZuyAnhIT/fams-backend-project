@@ -8,7 +8,7 @@ import lombok.Data;
 public class VerifyFaceRequest {
 
     @NotBlank(message = "photoBase64 is required")
-    @Schema(description = "Base64-encoded face photo (JPEG or PNG)", required = true)
+    @Schema(description = "Base64-encoded face photo (JPEG or PNG)", requiredMode = Schema.RequiredMode.REQUIRED)
     private String photoBase64;
 
     @Schema(description = "Whether liveness detection is required", defaultValue = "false")

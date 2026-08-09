@@ -28,8 +28,6 @@ import com.fams.shared.response.ApiResponse;
 import com.fams.shared.security.FamsUserDetails;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
-import io.swagger.v3.oas.annotations.media.Content;
-import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.extern.slf4j.Slf4j;
@@ -781,6 +779,7 @@ public class ScheduledCheckController {
     /** Thrown internally by resolveSiteFilter to signal "caller is restricted to zero sites" —
      *  callers catch this and return an empty result instead of querying. */
     private static final class NoSitesAllowed extends RuntimeException {
+        private static final long serialVersionUID = 1L;
     }
 
     /** Resolves the caller's site scope against an explicitly requested siteId filter (if
@@ -883,10 +882,6 @@ public class ScheduledCheckController {
                 .hasPhotoEvidence(r.isPhotoSubmitted())
                 .createdAt(r.getCreatedAt())
                 .build();
-    }
-
-    private ScheduledCheckResponse toResponse(ScheduledCheck s) {
-        return toResponse(s, null, null, null, null);
     }
 
     private ScheduledCheckResponse toResponse(ScheduledCheck s, Integer manualTriggerCountToday) {

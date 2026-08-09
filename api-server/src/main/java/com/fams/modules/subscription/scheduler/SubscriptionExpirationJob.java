@@ -71,7 +71,9 @@ public class SubscriptionExpirationJob {
                 sub.getTenantId(), sub.getPlanId(), sub.getId());
 
         try {
-            tenantService.suspendTenant(sub.getTenantId());
+            // System-initiated (cron), no human actor — audit log records actorId=null, same
+            // convention as every other nightly job that writes to AuditLogService.
+            tenantService.suspendTenant(sub.getTenantId(), null);
             log.info("SubscriptionExpirationJob: tenant suspended — tenantId={}", sub.getTenantId());
         } catch (IllegalStateException e) {
             log.warn("SubscriptionExpirationJob: tenant {} already suspended or cancelled, skipping suspend: {}",
