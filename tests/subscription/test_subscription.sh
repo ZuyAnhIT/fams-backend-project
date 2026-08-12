@@ -46,7 +46,7 @@ echo "Regular user token obtained."
 tenant_body=$(curl -s -X POST "$BASE_URL/api/v1/tenants" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"name\":\"Sub Test Corp $TS\",\"slug\":\"sub-test-$TS\"}")
+    -d "{\"ownerEmail\":\"admin@fams.com\",\"name\":\"Sub Test Corp $TS\",\"slug\":\"sub-test-$TS\"}")
 TENANT_ID=$(echo "$tenant_body" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4 || true)
 [ -z "$TENANT_ID" ] && echo "SETUP FAILED: no tenant id" && exit 1
 echo "Tenant id: $TENANT_ID"

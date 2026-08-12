@@ -13,6 +13,17 @@ PASS=0
 FAIL=0
 TS=$(date +%s)
 
+# S3_PUBLIC_URL (see .env / docker-compose.dev.yml) is deliberately a real LAN IP so physical
+# phones/browsers on the same network can load avatars during real device testing — not every
+# environment this test suite runs in (e.g. a sandboxed CI/agent container) can route to an
+# arbitrary LAN IP even though the same MinIO is reachable via localhost's published port. Rather
+# than assert against a network path that's only sometimes available, rewrite host:port to
+# localhost:${MINIO_EXPOSE_PORT:-9000} purely for the fetchability check — same bucket/object
+# path, same MinIO instance, just addressed the way this test's own environment can reach it.
+local_fetch_url() {
+    echo "$1" | sed -E "s#https?://[^/]+#http://localhost:${MINIO_EXPOSE_PORT:-9000}#"
+}
+
 run_test() {
     local name="$1"
     local expected_status="$2"
@@ -82,7 +93,7 @@ upload_body=$(echo "$upload_response" | head -n -1)
 upload_status=$(echo "$upload_response" | tail -n 1)
 avatar_url=$(echo "$upload_body" | grep -o '"avatarUrl":"[^"]*"' | cut -d'"' -f4)
 if [ "$upload_status" -eq 200 ] && [ -n "$avatar_url" ]; then
-    fetch_status=$(curl -s -o /dev/null -w "%{http_code}" "$avatar_url")
+    fetch_status=$(curl -s -o /dev/null -w "%{http_code}" "$(local_fetch_url "$avatar_url")")
     if [ "$fetch_status" -eq 200 ]; then
         echo "PASS: Avatar uploaded (HTTP 200) and publicly fetchable (HTTP 200)"
         PASS=$((PASS + 1))
@@ -101,8 +112,8 @@ echo "--- Test 4: Re-upload replaces old avatar (old URL 404s) ---"
 upload_response2=$(curl -s -X POST "$BASE_URL/api/v1/auth/profile/avatar" \
     -H "Authorization: Bearer $TOKEN" -F "file=@${TMP_PNG};type=image/png")
 avatar_url2=$(echo "$upload_response2" | grep -o '"avatarUrl":"[^"]*"' | cut -d'"' -f4)
-old_status=$(curl -s -o /dev/null -w "%{http_code}" "$avatar_url")
-new_status=$(curl -s -o /dev/null -w "%{http_code}" "$avatar_url2")
+old_status=$(curl -s -o /dev/null -w "%{http_code}" "$(local_fetch_url "$avatar_url")")
+new_status=$(curl -s -o /dev/null -w "%{http_code}" "$(local_fetch_url "$avatar_url2")")
 if [ "$old_status" -eq 404 ] && [ "$new_status" -eq 200 ]; then
     echo "PASS: Old avatar file cleaned up (404), new one served (200)"
     PASS=$((PASS + 1))
@@ -151,7 +162,7 @@ del_response=$(curl -s -w "\n%{http_code}" -X DELETE "$BASE_URL/api/v1/auth/prof
     -H "Authorization: Bearer $TOKEN")
 del_status=$(echo "$del_response" | tail -n 1)
 del_body=$(echo "$del_response" | head -n -1)
-gone_status=$(curl -s -o /dev/null -w "%{http_code}" "$avatar_url2")
+gone_status=$(curl -s -o /dev/null -w "%{http_code}" "$(local_fetch_url "$avatar_url2")")
 if [ "$del_status" -eq 200 ] && echo "$del_body" | grep -q '"avatarUrl":null' && [ "$gone_status" -eq 404 ]; then
     echo "PASS: Avatar deleted (avatarUrl:null, file removed from storage — HTTP 404)"
     PASS=$((PASS + 1))

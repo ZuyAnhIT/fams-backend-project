@@ -2,6 +2,8 @@ package com.fams.modules.auth.service;
 
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
@@ -46,6 +48,7 @@ public class AvatarStorageService {
     private final S3Client s3Client;
     private final String bucket;
     private final String publicUrl;
+    private final boolean isLocalS3;
 
     public AvatarStorageService(@Value("${app.s3.endpoint:}") String endpoint,
                                  @Value("${app.s3.region}") String region,
@@ -61,7 +64,7 @@ public class AvatarStorageService {
                 .credentialsProvider(StaticCredentialsProvider.create(
                         AwsBasicCredentials.create(accessKey, secretKey)));
 
-        boolean isLocalS3 = StringUtils.hasText(endpoint);
+        this.isLocalS3 = StringUtils.hasText(endpoint);
         if (isLocalS3) {
             // MinIO/other self-hosted S3-compatible endpoints need path-style addressing
             // (bucket.example.com virtual-hosted style doesn't work without real DNS/TLS setup).
@@ -69,8 +72,28 @@ public class AvatarStorageService {
         }
         this.s3Client = builder.build();
 
-        if (isLocalS3) {
-            ensureBucketExists(); // convenience for local dev only — real AWS buckets are provisioned separately
+        // Found live (2026-08-12): ensureBucketExists() used to run HERE, synchronously in the
+        // constructor — a network call to MinIO made during Spring bean creation. When MinIO was
+        // unreachable (container crashed, no restart policy — see docker-compose.dev.yml), this
+        // threw and took down the ENTIRE ApplicationContext (every controller depends transitively
+        // on AuthController -> UserProfileService -> this bean), not just avatar upload. Moved to
+        // an ApplicationReadyEvent listener below so a MinIO outage degrades gracefully — the app
+        // boots and serves everything else; only avatar upload/delete fail until MinIO recovers.
+        // Matches the resilience pattern already used by AiServiceClient (lazy, request-time only)
+        // and FcmConfig (try/catch around @PostConstruct Firebase init).
+    }
+
+    @EventListener(ApplicationReadyEvent.class)
+    public void initBucketOnStartup() {
+        if (!isLocalS3) {
+            return; // real AWS buckets are provisioned separately, not auto-created
+        }
+        try {
+            ensureBucketExists();
+        } catch (Exception e) {
+            log.error("Could not verify/create avatar storage bucket '{}' at startup — avatar upload/delete "
+                    + "will fail until object storage is reachable. App continues starting normally. Cause: {}",
+                    bucket, e.getMessage());
         }
     }
 

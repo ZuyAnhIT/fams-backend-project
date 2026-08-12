@@ -14,6 +14,8 @@ public class AttendanceImpactResponse {
     @Schema(description = "Violation UUID")
     private UUID id;
 
-    @Schema(description = "Whether this violation now affects the employee's attendance record")
+    @Schema(description = "Whether this violation now affects the employee's attendance record — "
+            + "authoritative for AttendanceSummary.hasRandomCheckFailure now that it has been reviewed "
+            + "(2026-08-12 fix), overriding the default resolution-based auto-detection")
     private boolean affectsAttendance;
 }

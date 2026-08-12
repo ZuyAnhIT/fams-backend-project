@@ -66,6 +66,12 @@ services:
   minio:
     image: minio/minio:latest
     container_name: fams-minio
+    # Found live (2026-08-12): this had no restart policy (defaults to "no") — when the
+    # container exited once, it stayed down permanently with no operator signal, and every
+    # subsequent fams-api boot then crashed the whole ApplicationContext trying to reach it
+    # (see AvatarStorageService — now fixed to degrade gracefully instead of crashing, but
+    # MinIO itself should still come back on its own rather than needing a manual restart).
+    restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${S3_ACCESS_KEY:-fams_minio_admin}

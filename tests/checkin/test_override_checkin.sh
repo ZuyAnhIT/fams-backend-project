@@ -257,7 +257,7 @@ curl -s -o /dev/null -X POST "$BASE_URL/api/v1/invitations/accept" \
 noauth_login=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d "{\"email\":\"$noauth_email\",\"password\":\"Employee@1234\"}")
+    -d "{\"identifier\":\"$noauth_email\",\"password\":\"Employee@1234\"}")
 NOAUTH_TOKEN=$(echo "$noauth_login" | head -n -1 | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4)
 run_test "No permission returns 403" 403 \
     -X PATCH "$OVERRIDE_URL" \

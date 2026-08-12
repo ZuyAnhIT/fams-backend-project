@@ -215,8 +215,12 @@ public class AttendanceSummaryController {
         description = "Allows HR/Admin to manually override fields on a daily attendance summary record. " +
                       "All fields are optional — only supplied fields are updated. " +
                       "A reason is required and stored on the record for auditing. " +
-                      "Note: the nightly recompute job will overwrite adjustments for the current day; " +
-                      "adjustments to past dates are safe. Requires attendance:list permission."
+                      "Note: once adjusted, this record is protected from ANY automatic recompute — " +
+                      "checkin/checkout, violation resolution, and the nightly job all skip it — for " +
+                      "every date, not just past ones (2026-08-12: corrected, this previously and " +
+                      "incorrectly said only past-date adjustments were protected). Use " +
+                      "POST .../unlock-and-recompute to clear the adjustment and let automatic " +
+                      "recompute resume for this record. Requires attendance:list permission."
     )
     @ApiResponses({
         @io.swagger.v3.oas.annotations.responses.ApiResponse(

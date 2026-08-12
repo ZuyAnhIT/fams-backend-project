@@ -82,15 +82,14 @@ echo "Tenant created: $TENANT_ID"
 
 # Invite + accept an employee to create a non-admin user
 EMP_EMAIL="audit.emp.${TS}@example.com"
-curl -s -o /dev/null \
+inv_create_resp=$(curl -s \
     -X POST "$BASE_URL/api/v1/tenants/$TENANT_ID/invitations" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"email\":\"$EMP_EMAIL\",\"firstName\":\"Audit\",\"lastName\":\"Emp\"}"
-
-inv_page=$(curl -s "$BASE_URL/api/v1/tenants/$TENANT_ID/invitations" \
-    -H "Authorization: Bearer $ADMIN_TOKEN")
-INV_TOKEN=$(echo "$inv_page" | grep -o '"token":"[^"]*"' | head -1 | cut -d'"' -f4)
+    -d "{\"email\":\"$EMP_EMAIL\",\"firstName\":\"Audit\",\"lastName\":\"Emp\"}")
+# Token is only ever present in the POST /invitations (create) response — deliberately null
+# everywhere else including GET .../invitations (list), see InvitationResponse.token javadoc.
+INV_TOKEN=$(echo "$inv_create_resp" | grep -o '"token":"[^"]*"' | head -1 | cut -d'"' -f4)
 
 accept_resp=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/invitations/accept" \
@@ -105,7 +104,7 @@ fi
 emp_login=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d "{\"email\":\"$EMP_EMAIL\",\"password\":\"Employee@1234\"}")
+    -d "{\"identifier\":\"$EMP_EMAIL\",\"password\":\"Employee@1234\"}")
 EMP_TOKEN=$(echo "$emp_login" | head -n -1 | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4)
 echo "Employee logged in."
 echo ""

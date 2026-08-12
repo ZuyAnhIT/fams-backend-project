@@ -251,7 +251,7 @@ if [ "$reg_status" -eq 201 ]; then
 elif [ "$reg_status" -eq 409 ]; then
     l2=$(curl -s -X POST "$BASE_URL/api/v1/auth/login" \
         -H "Content-Type: application/json" \
-        -d "{\"email\":\"noperm.emplist.${TS}@fams.com\",\"password\":\"Regular@1234\"}")
+        -d "{\"identifier\":\"noperm.emplist.${TS}@fams.com\",\"password\":\"Regular@1234\"}")
     NO_PERM_TOKEN=$(echo "$l2" | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4 || true)
 else
     NO_PERM_TOKEN=""

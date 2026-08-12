@@ -158,6 +158,20 @@ Active-liveness challenge về bản chất là **thời gian thực** (quay đ�
 
 `clientNonce` trùng → trả lại `status="accepted"` của lần trước (không tạo lại). Có `CheckinRecord` khác đè lên cùng khung giờ của assignment (`findOverlappingSession`) → `status="conflict"`, không tạo mới, không lỗi.
 
+### 3.3 Giới hạn tuổi bản ghi offline và chống giả mạo thời gian
+
+Backend không còn tin vô hạn vào đồng hồ thiết bị:
+
+- mặc định chỉ nhận bản ghi offline trong vòng **24 giờ**;
+- chỉ cho phép timestamp đi trước giờ server tối đa **5 phút** để dung sai lệch đồng hồ;
+- cấu hình bằng `OFFLINE_CHECKIN_MAX_AGE_HOURS` và
+  `OFFLINE_CHECKIN_MAX_FUTURE_SKEW_MINUTES`;
+- kiểm tra idempotency bằng `clientNonce` chạy trước giới hạn này, nên retry của
+  bản ghi đã được server nhận trước đó vẫn trả đúng kết quả cũ.
+
+App dùng cùng TTL 24 giờ, xóa ảnh Face cục bộ khi quá hạn và giữ lại một dòng
+`expired` không còn ảnh để nhân viên biết cần liên hệ HR; không xóa dữ liệu âm thầm.
+
 ## 4. [Lỗi nghiêm trọng phát hiện qua test sống] Race condition mất dữ liệu check-out
 
 ### 4.1 Phát hiện

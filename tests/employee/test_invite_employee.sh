@@ -92,7 +92,7 @@ if [ "$REG_STATUS" -eq 201 ] || [ "$REG_STATUS" -eq 409 ]; then
         login2=$(curl -s \
             -X POST "$BASE_URL/api/v1/auth/login" \
             -H "Content-Type: application/json" \
-            -d '{"email":"noperm_invite_test@fams.com","password":"Regular@1234"}')
+            -d '{"identifier":"noperm_invite_test@fams.com","password":"Regular@1234"}')
         REGULAR_TOKEN=$(echo "$login2" | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4 || true)
     fi
     echo "Regular user token obtained."

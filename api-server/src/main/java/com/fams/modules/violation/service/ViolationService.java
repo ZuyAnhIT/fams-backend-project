@@ -401,6 +401,10 @@ public class ViolationService {
                 .orElseThrow(() -> new ResourceNotFoundException("Violation not found: " + violationId));
 
         violation.setAffectsAttendance(request.getAffectsAttendance());
+        // 2026-08-12 backend readiness assessment: marks this violation as explicitly reviewed
+        // for attendance impact, so ScheduledCheckRepository#existsFailedOrNoResponseCheck treats
+        // affectsAttendance as authoritative from now on instead of silently ignoring it (see V89).
+        violation.setAttendanceImpactReviewed(true);
         violationRepository.save(violation);
 
         // #118 (docs/api/backend-feature-audit-2026-08-07.md): confirm/dismiss already refresh

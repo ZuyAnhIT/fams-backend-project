@@ -95,7 +95,7 @@ echo "--- Step 3: Logging in with new password ---"
 login_response=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d "{\"email\":\"$USER_EMAIL\",\"password\":\"$NEW_PASSWORD\"}")
+    -d "{\"identifier\":\"$USER_EMAIL\",\"password\":\"$NEW_PASSWORD\"}")
 login_body=$(echo "$login_response" | head -n -1)
 login_status=$(echo "$login_response" | tail -n 1)
 

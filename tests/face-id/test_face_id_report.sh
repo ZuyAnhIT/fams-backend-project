@@ -65,7 +65,7 @@ curl -s -o /dev/null -X POST "$BASE_URL/api/v1/invitations/accept" \
 
 EMP_LOGIN=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d "{\"email\":\"emp.report.${TS}@example.com\",\"password\":\"Employee@1234\"}")
+    -d "{\"identifier\":\"emp.report.${TS}@example.com\",\"password\":\"Employee@1234\"}")
 [ "$(echo "$EMP_LOGIN" | tail -n 1)" -ne 200 ] && { echo "SETUP FAILED: emp login"; exit 1; }
 EMP_TOKEN=$(echo "$EMP_LOGIN" | head -n -1 | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4)
 

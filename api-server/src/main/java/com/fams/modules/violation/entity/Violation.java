@@ -61,6 +61,13 @@ public class Violation {
     @Column(name = "affects_attendance", nullable = false)
     private boolean affectsAttendance;
 
+    /** True once HR has explicitly called PATCH .../attendance-impact on this violation — lets
+     *  AttendanceSummaryService distinguish "never reviewed" (affectsAttendance defaults false,
+     *  falls back to resolution-based auto-detection) from "HR reviewed and explicitly decided
+     *  false" (affectsAttendance becomes authoritative). See V89 migration. */
+    @Column(name = "attendance_impact_reviewed")
+    private boolean attendanceImpactReviewed;
+
     @Column(name = "resolution", length = 20)
     private String resolution;
 

@@ -42,7 +42,7 @@ public class ViolationReportResponse {
     @Schema(description = "Number of violations flagged as affecting attendance", example = "5")
     private int affectsAttendanceCount;
 
-    @Schema(description = "Violation count grouped by violation type (no_response, location_fail, face_fail, liveness_fail)")
+    @Schema(description = "Violation count grouped by violation type (no_response, location_fail, face_fail, liveness_fail, face_verify_timeout)")
     private Map<String, Long> byViolationType;
 
     @Schema(description = "Violation count grouped by severity (HIGH/MEDIUM/LOW), derived from violationType — "

@@ -51,7 +51,7 @@ SITE_ID=$(echo "$s_resp" | head -n -1 | grep -o '"id":"[^"]*"' | head -1 | cut -
 
 sh_resp=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/tenants/$TENANT_ID/sites/$SITE_ID/shifts" \
     -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d '{"name":"Day","startTime":"08:00","endTime":"17:00"}')
+    -d '{"name":"Day","startTime":"00:00","endTime":"23:59"}')
 if [ "$(echo "$sh_resp" | tail -n 1)" -ne 201 ]; then echo "SETUP FAILED: shift"; exit 1; fi
 SHIFT_ID=$(echo "$sh_resp" | head -n -1 | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 

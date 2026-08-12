@@ -15,15 +15,19 @@ public interface ScheduledCheckRepository extends JpaRepository<ScheduledCheck, 
 
     /** Used by AttendanceSummaryService.recompute() to set hasRandomCheckFailure — true if this
      *  employee/site/date had >=1 random check that ended in no_response, or was responded to
-     *  with outcome='fail' (location/face/liveness). Read-only signal, never touches pay fields.
+     *  with outcome='fail' (location/face/liveness/face_verify_timeout). Read-only signal, never
+     *  touches pay fields.
      *
-     *  Excludes a check whose failure HR has fully dismissed (found via audit 2026-08-02: this
-     *  previously ignored violation resolution entirely — a no_response/failed check kept
-     *  flagging the day forever even after HR proved it was a false positive and dismissed every
-     *  violation tied to it, e.g. "phone died, legitimate reason"). A check only drops out of
-     *  this flag when EVERY violation linked to it is dismissed; if no violation row exists yet
-     *  (the no_response job hasn't run) or any violation is still unresolved/confirmed, it still
-     *  counts — this only ever makes the flag MORE lenient, never hides an unreviewed failure. */
+     *  A check is excluded when EVERY violation linked to it is "resolved as not counting":
+     *  either dismissed (default auto-detection), OR — once HR has explicitly reviewed it via
+     *  PATCH .../attendance-impact (attendance_impact_reviewed=true) — affects_attendance=false
+     *  takes over as the authoritative signal instead, even if the violation is still
+     *  'confirmed'/unresolved (found in the 2026-08-12 backend readiness assessment: HR could
+     *  confirm a violation as real but explicitly mark it as not counting toward attendance —
+     *  e.g. documented extenuating circumstances — and this flag was silently ignored here
+     *  until this fix). If no violation row exists yet (the no_response job hasn't run) or any
+     *  never-reviewed violation is still unresolved/confirmed, it still counts — this only ever
+     *  makes the flag MORE lenient, never hides an unreviewed failure. */
     @Query(value = "SELECT EXISTS (" +
                   "SELECT 1 FROM scheduled_checks sc " +
                   "LEFT JOIN check_responses cr ON cr.scheduled_check_id = sc.id " +
@@ -33,7 +37,12 @@ public interface ScheduledCheckRepository extends JpaRepository<ScheduledCheck, 
                   "AND NOT (" +
                   "  EXISTS (SELECT 1 FROM violations v WHERE v.scheduled_check_id = sc.id AND v.deleted_at IS NULL)" +
                   "  AND NOT EXISTS (SELECT 1 FROM violations v WHERE v.scheduled_check_id = sc.id " +
-                  "                  AND v.deleted_at IS NULL AND (v.resolution IS NULL OR v.resolution <> 'dismissed'))" +
+                  "                  AND v.deleted_at IS NULL " +
+                  "                  AND (" +
+                  "                    (v.attendance_impact_reviewed = TRUE AND v.affects_attendance = TRUE)" +
+                  "                    OR (v.attendance_impact_reviewed = FALSE " +
+                  "                        AND (v.resolution IS NULL OR v.resolution <> 'dismissed'))" +
+                  "                  ))" +
                   "))",
            nativeQuery = true)
     boolean existsFailedOrNoResponseCheck(@Param("tenantId") UUID tenantId,

@@ -21,6 +21,15 @@ lazy_loader
 PyWavelets
 tqdm
 requests
+# Pinned to the last NumPy 1.x line deliberately (2026-08-12 backend readiness assessment):
+# onnxruntime==1.28.0/scipy==1.17.1 above are recent enough that their own newer releases
+# generally prefer/require NumPy 2.x, so this pin risks a resolver conflict or a silent ABI
+# mismatch on a from-clean-cache rebuild. Verified live in the running fams-ai container
+# (`pip install --dry-run -r requirements.txt`) that the CURRENT install resolves cleanly with
+# this exact combination — not touched here since bumping it can't be safety-verified without
+# re-running real face-match/liveness accuracy checks against a known dataset, which this
+# session has no way to do. If onnxruntime/scipy/insightface are ever upgraded, re-verify numpy
+# compatibility explicitly rather than assuming this pin still holds.
 numpy==1.26.4
 Pillow==10.3.0
 # opencv-python-headless conflicts with deepface's opencv-python dependency.

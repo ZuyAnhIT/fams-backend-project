@@ -26,7 +26,10 @@ public enum ViolationSeverity {
         return switch (violationType) {
             case "face_fail", "liveness_fail" -> HIGH;
             case "location_fail" -> MEDIUM;
-            case "no_response" -> LOW;
+            // face_verify_timeout (2026-08-12): the AI callback never arrived — this is likely an
+            // infra hiccup, not a confirmed identity mismatch, so it gets the same low-confidence
+            // treatment as no_response rather than being lumped in with a real face/liveness fail.
+            case "no_response", "face_verify_timeout" -> LOW;
             default -> LOW;
         };
     }
