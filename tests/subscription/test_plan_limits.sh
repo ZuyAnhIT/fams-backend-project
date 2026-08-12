@@ -53,6 +53,34 @@ fi
 echo "Trial plan id: $TRIAL_PLAN_ID"
 echo ""
 
+# Found via cross-test pollution (2026-08-12): this script PATCHes the real seeded "trial"
+# plan's limits (Tests 2-3 below) with no restoration afterward — every past run permanently
+# changed maxEmployees/maxSites on the platform's actual default plan, silently breaking any
+# other test that assumes trial's originally-seeded limits (e.g. tests/tenant/test_plan_limits.sh,
+# which expects maxEmployees=5/maxSites=1 and got 10/unlimited instead after this ran once).
+# Capture the real values now and restore them on exit (even on failure/Ctrl-C) via trap, so this
+# script's own CRUD tests still exercise the real "trial" plan (that's the point) without leaving
+# permanent side effects on shared platform state.
+orig_limits_body=$(curl -s "$BASE_URL/api/v1/plans/$TRIAL_PLAN_ID/limits" -H "Authorization: Bearer $ADMIN_TOKEN")
+ORIG_MAX_EMPLOYEES=$(echo "$orig_limits_body" | grep -o '"maxEmployees":[0-9]*' | cut -d: -f2 || true)
+ORIG_MAX_SITES=$(echo "$orig_limits_body" | grep -o '"maxSites":[0-9]*' | cut -d: -f2 || true)
+ORIG_MAX_STORAGE=$(echo "$orig_limits_body" | grep -o '"maxStorageGb":[0-9]*' | cut -d: -f2 || true)
+ORIG_MAX_RANDOM_CHECKS=$(echo "$orig_limits_body" | grep -o '"maxRandomChecksPerMonth":[0-9]*' | cut -d: -f2 || true)
+
+restore_trial_limits() {
+    local body="{"
+    if [ -n "$ORIG_MAX_EMPLOYEES" ]; then body="${body}\"maxEmployees\":$ORIG_MAX_EMPLOYEES,"; else body="${body}\"clearMaxEmployees\":true,"; fi
+    if [ -n "$ORIG_MAX_SITES" ]; then body="${body}\"maxSites\":$ORIG_MAX_SITES,"; else body="${body}\"clearMaxSites\":true,"; fi
+    if [ -n "$ORIG_MAX_STORAGE" ]; then body="${body}\"maxStorageGb\":$ORIG_MAX_STORAGE,"; else body="${body}\"clearMaxStorageGb\":true,"; fi
+    if [ -n "$ORIG_MAX_RANDOM_CHECKS" ]; then body="${body}\"maxRandomChecksPerMonth\":$ORIG_MAX_RANDOM_CHECKS"; else body="${body}\"clearMaxRandomChecksPerMonth\":true"; fi
+    body="${body}}"
+    curl -s -o /dev/null -X PATCH "$BASE_URL/api/v1/plans/$TRIAL_PLAN_ID/limits" \
+        -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" \
+        -d "$body"
+    echo "Restored trial plan limits: $body"
+}
+trap restore_trial_limits EXIT
+
 # Test 1: GET limits for trial plan — seeded values
 echo "--- Test 1: GET limits returns seeded values (trial plan) ---"
 get_response=$(curl -s -w "\n%{http_code}" \
@@ -211,11 +239,18 @@ run_test "Regular user cannot PATCH limits" 403 \
 # Test 9: Auto-create defaults for plan without limits row
 echo ""
 echo "--- Test 9: Auto-create unlimited defaults for new plan ---"
+# sortOrder=9999 (found via cross-test pollution, 2026-08-12): omitting sortOrder defaults it
+# to 0, which beat every real seeded plan (trial=1, basic=2, ...) for "lowest sortOrder" — the
+# exact field TenantService.createTenant() uses to pick a new tenant's default plan. Every past
+# run of this test left one of these plans behind (see cleanup below, which used to be missing
+# entirely), so tenant creation across the WHOLE test suite started silently defaulting to
+# whichever leftover "custom-limits-*" plan happened to sort first, breaking any test that
+# assumed "new tenant -> trial plan" (e.g. tests/tenant/test_plan_limits.sh).
 new_plan_body=$(curl -s \
     -X POST "$BASE_URL/api/v1/plans" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"name\":\"custom-limits-$TS\",\"displayName\":\"Custom\",\"priceMonthly\":0,\"priceYearly\":0}")
+    -d "{\"name\":\"custom-limits-$TS\",\"displayName\":\"Custom\",\"priceMonthly\":0,\"priceYearly\":0,\"sortOrder\":9999}")
 NEW_PLAN_ID=$(echo "$new_plan_body" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4 || true)
 
 if [ -n "$NEW_PLAN_ID" ]; then
@@ -242,6 +277,16 @@ if [ -n "$NEW_PLAN_ID" ]; then
     fi
 else
     echo "SKIP: Auto-create defaults (could not create test plan)"
+fi
+
+# Cleanup: deactivate the plan created above — it has zero tenants subscribed so this never
+# needs a migrateToPlanId, and prevents it from permanently polluting global plan state for
+# every other test that runs after this one (see sortOrder comment above).
+if [ -n "$NEW_PLAN_ID" ]; then
+    curl -s -o /dev/null -X PATCH "$BASE_URL/api/v1/plans/$NEW_PLAN_ID" \
+        -H "Content-Type: application/json" \
+        -H "Authorization: Bearer $ADMIN_TOKEN" \
+        -d '{"isActive":false}'
 fi
 
 echo ""

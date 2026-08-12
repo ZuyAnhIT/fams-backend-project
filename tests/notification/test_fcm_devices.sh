@@ -136,19 +136,18 @@ t_resp=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/tenants" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $TOKEN" \
-    -d "{\"name\":\"FCM Corp ${TS2}\",\"slug\":\"fcm-corp-${TS2}\"}")
+    -d "{\"ownerEmail\":\"admin@fams.com\",\"name\":\"FCM Corp ${TS2}\",\"slug\":\"fcm-corp-${TS2}\"}")
 TENANT_ID=$(echo "$t_resp" | head -n -1 | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 
 EMP_EMAIL="fcm.emp.${TS2}@example.com"
-curl -s -o /dev/null \
+# Token is only ever present in the POST /invitations (create) response — deliberately null
+# everywhere else including GET .../invitations (list), see InvitationResponse.token javadoc.
+inv_create_resp=$(curl -s \
     -X POST "$BASE_URL/api/v1/tenants/$TENANT_ID/invitations" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $TOKEN" \
-    -d "{\"email\":\"$EMP_EMAIL\",\"firstName\":\"FCM\",\"lastName\":\"Emp\"}"
-
-inv_page=$(curl -s "$BASE_URL/api/v1/tenants/$TENANT_ID/invitations" \
-    -H "Authorization: Bearer $TOKEN")
-INV_TOKEN=$(echo "$inv_page" | grep -o '"token":"[^"]*"' | head -1 | cut -d'"' -f4)
+    -d "{\"email\":\"$EMP_EMAIL\",\"firstName\":\"FCM\",\"lastName\":\"Emp\"}")
+INV_TOKEN=$(echo "$inv_create_resp" | grep -o '"token":"[^"]*"' | head -1 | cut -d'"' -f4)
 
 curl -s -o /dev/null \
     -X POST "$BASE_URL/api/v1/invitations/accept" \

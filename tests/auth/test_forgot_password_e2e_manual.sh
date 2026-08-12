@@ -169,7 +169,7 @@ step "Step 7: Login with new password"
 login_resp=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d "{\"email\":\"$USER_EMAIL\",\"password\":\"$NEW_PASSWORD\"}")
+    -d "{\"identifier\":\"$USER_EMAIL\",\"password\":\"$NEW_PASSWORD\"}")
 login_body=$(echo "$login_resp" | head -n -1)
 login_status=$(echo "$login_resp" | tail -n 1)
 

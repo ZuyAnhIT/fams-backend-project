@@ -40,7 +40,9 @@ jwt_sub() {
     decode_jwt_payload "$payload_b64" | grep -o '"sub":"[^"]*"' | head -1 | sed 's/"sub":"//;s/"//' || true
 }
 
-# ─── Setup: Login as platform admin ──────────────────────────────────────────
+# ─── Setup: Login as platform admin (used only for admin-side setup actions — creating the
+# tenant, looking up role ids, assigning roles — NEVER as the subject whose JWT claims we
+# assert on, see below) ─────────────────────────────────────────────────────────
 echo "--- Setup: Login as platform admin ---"
 login_resp=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/auth/login" \
@@ -53,14 +55,36 @@ if [ "$login_status" -ne 200 ]; then
     exit 1
 fi
 ADMIN_TOKEN=$(echo "$login_body" | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4)
-ADMIN_USER_ID=$(jwt_sub "$ADMIN_TOKEN")
-echo "Admin userId: $ADMIN_USER_ID"
 echo ""
 
-# ─── Test 1: Admin JWT before any role assignment — tenantId and role absent ─
+# ─── Setup: Register a FRESH throwaway user as the actual JWT-claims test subject ──────────
+# admin@fams.com is a shared demo account other test runs (and manual testing) legitimately
+# grant tenant roles to via ownerEmail — asserting "no tenantId/role yet" against it is
+# inherently flaky. A brand-new user is guaranteed to start with zero tenant memberships.
+echo "--- Setup: Register subject user ---"
+TS0=$(date +%s)
+SUBJECT_EMAIL="jwt_claim_subject_${TS0}@fams.com"
+curl -s -o /dev/null -X POST "$BASE_URL/api/v1/auth/register" -H "Content-Type: application/json" \
+    -d "{\"email\":\"$SUBJECT_EMAIL\",\"password\":\"TestPass1\",\"displayName\":\"JWT Claim Subject\"}"
+docker exec fams-postgres psql -U fams_user -d fams_db -q -c \
+    "UPDATE users SET email_verified = true WHERE email = '$SUBJECT_EMAIL';" > /dev/null
+
+subject_login=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/auth/login" \
+    -H "Content-Type: application/json" \
+    -d "{\"identifier\":\"$SUBJECT_EMAIL\",\"password\":\"TestPass1\"}")
+if [ "$(echo "$subject_login" | tail -n 1)" -ne 200 ]; then
+    echo "SETUP FAILED: subject login"
+    exit 1
+fi
+SUBJECT_TOKEN=$(echo "$subject_login" | head -n -1 | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4)
+SUBJECT_USER_ID=$(jwt_sub "$SUBJECT_TOKEN")
+echo "Subject userId: $SUBJECT_USER_ID"
+echo ""
+
+# ─── Test 1: Subject JWT before any role assignment — tenantId and role absent ─
 echo "--- Test 1: Token before role assignment has no tenantId/role ---"
-TENANT_BEFORE=$(jwt_claim "$ADMIN_TOKEN" "tenantId")
-ROLE_BEFORE=$(jwt_claim "$ADMIN_TOKEN" "role")
+TENANT_BEFORE=$(jwt_claim "$SUBJECT_TOKEN" "tenantId")
+ROLE_BEFORE=$(jwt_claim "$SUBJECT_TOKEN" "role")
 
 if [ -z "$TENANT_BEFORE" ] || [ "$TENANT_BEFORE" = "null" ]; then
     echo "PASS: tenantId absent before role assignment"
@@ -113,13 +137,13 @@ if [ -z "$EMPLOYEE_ROLE_ID" ]; then
 fi
 echo "EMPLOYEE role id: $EMPLOYEE_ROLE_ID"
 
-# ─── Setup: Assign admin user an EMPLOYEE role in the test tenant ─────────────
-echo "--- Setup: Assign admin user role in tenant ---"
+# ─── Setup: Assign the subject user an EMPLOYEE role in the test tenant ───────
+echo "--- Setup: Assign subject user role in tenant ---"
 assign_resp=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/user-roles" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"userId\":\"$ADMIN_USER_ID\",\"roleId\":\"$EMPLOYEE_ROLE_ID\",\"tenantId\":\"$TENANT_ID\"}")
+    -d "{\"userId\":\"$SUBJECT_USER_ID\",\"roleId\":\"$EMPLOYEE_ROLE_ID\",\"tenantId\":\"$TENANT_ID\"}")
 assign_status=$(echo "$assign_resp" | tail -n 1)
 if [ "$assign_status" -ne 201 ] && [ "$assign_status" -ne 200 ] && [ "$assign_status" -ne 409 ]; then
     echo "SETUP FAILED: Could not assign role (HTTP $assign_status)"
@@ -134,7 +158,7 @@ echo "--- Test 2: Token after role assignment has tenantId ---"
 login2_resp=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d '{"identifier":"admin@fams.com","password":"Admin@1234"}')
+    -d "{\"identifier\":\"$SUBJECT_EMAIL\",\"password\":\"TestPass1\"}")
 login2_body=$(echo "$login2_resp" | head -n -1)
 login2_status=$(echo "$login2_resp" | tail -n 1)
 if [ "$login2_status" -ne 200 ]; then
@@ -185,11 +209,12 @@ else
         echo "FAIL: email claim missing"
         FAIL=$((FAIL + 1))
     fi
-    if [ "$IS_ADMIN" = "true" ]; then
-        echo "PASS: isPlatformAdmin=true preserved"
+    # Subject is a regular (non-admin) user — isPlatformAdmin must be false/absent, not true.
+    if [ "$IS_ADMIN" = "false" ] || [ -z "$IS_ADMIN" ] || [ "$IS_ADMIN" = "null" ]; then
+        echo "PASS: isPlatformAdmin=false for regular user"
         PASS=$((PASS + 1))
     else
-        echo "FAIL: isPlatformAdmin expected 'true', got '$IS_ADMIN'"
+        echo "FAIL: isPlatformAdmin expected 'false', got '$IS_ADMIN'"
         FAIL=$((FAIL + 1))
     fi
 fi
@@ -199,7 +224,7 @@ echo ""
 echo "--- Cleanup: Revoke test role assignment ---"
 # Find the assignment id
 assignments_resp=$(curl -s \
-    -X GET "$BASE_URL/api/v1/user-roles?userId=$ADMIN_USER_ID&tenantId=$TENANT_ID" \
+    -X GET "$BASE_URL/api/v1/user-roles?userId=$SUBJECT_USER_ID&tenantId=$TENANT_ID" \
     -H "Authorization: Bearer $ADMIN_TOKEN" 2>/dev/null || true)
 ASSIGN_ID=$(echo "$assignments_resp" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4 || true)
 if [ -n "$ASSIGN_ID" ]; then

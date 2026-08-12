@@ -58,7 +58,7 @@ echo "--- Step 2: Confirming login is blocked before verification ---"
 pre_verify_status=$(curl -s -o /dev/null -w "%{http_code}" \
     -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d "{\"email\":\"$USER_EMAIL\",\"password\":\"$TEST_PASS\"}")
+    -d "{\"identifier\":\"$USER_EMAIL\",\"password\":\"$TEST_PASS\"}")
 
 if [ "$pre_verify_status" -eq 403 ]; then
     echo "PASS: Login correctly blocked before verification (HTTP 403)."
@@ -81,7 +81,7 @@ echo "--- Step 3: Logging in after verification ---"
 login_response=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d "{\"email\":\"$USER_EMAIL\",\"password\":\"$TEST_PASS\"}")
+    -d "{\"identifier\":\"$USER_EMAIL\",\"password\":\"$TEST_PASS\"}")
 login_body=$(echo "$login_response" | head -n -1)
 login_status=$(echo "$login_response" | tail -n 1)
 

@@ -69,7 +69,7 @@ add_response=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/tenants/$TENANT_ID/ip-whitelists" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d '{"ipAddress":"192.168.1.100","label":"Office IP","scope":"api"}')
+    -d '{"ipAddress":"192.168.1.150","label":"Office IP","scope":"api"}')
 add_body=$(echo "$add_response" | head -n -1)
 add_status=$(echo "$add_response" | tail -n 1)
 
@@ -77,7 +77,7 @@ if [ "$add_status" -eq 201 ]; then
     ENTRY_ID=$(echo "$add_body" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
     ip=$(echo "$add_body" | grep -o '"ipAddress":"[^"]*"' | cut -d'"' -f4)
     scope=$(echo "$add_body" | grep -o '"scope":"[^"]*"' | cut -d'"' -f4)
-    if [ "$ip" = "192.168.1.100" ] && [ "$scope" = "api" ] && [ -n "$ENTRY_ID" ]; then
+    if [ "$ip" = "192.168.1.150" ] && [ "$scope" = "api" ] && [ -n "$ENTRY_ID" ]; then
         echo "PASS: Add IPv4 entry (HTTP 201, id=$ENTRY_ID ip=$ip scope=$scope)"
         PASS=$((PASS + 1))
     else

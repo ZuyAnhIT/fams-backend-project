@@ -37,7 +37,7 @@ public class ViolationDetailResponse {
     private UUID checkinId;
 
     @Schema(description = "Violation type",
-            allowableValues = {"no_response", "location_fail", "face_fail", "liveness_fail"})
+            allowableValues = {"no_response", "location_fail", "face_fail", "liveness_fail", "face_verify_timeout"})
     private String violationType;
 
     @Schema(description = "Date of the check that triggered the violation")

@@ -81,6 +81,11 @@ app:
     # /auth/otp/verify — Firebase itself gates the actual OTP code, this just
     # throttles abuse of the verify endpoint (see FirebasePhoneLoginService).
     rate-limit-max: ${OTP_RATE_LIMIT_MAX:10}
+  checkin:
+    # Offline evidence is accepted only for a short recovery window. The App
+    # uses the same 24-hour TTL and deletes local biometric evidence afterward.
+    offline-max-age-hours: ${OFFLINE_CHECKIN_MAX_AGE_HOURS:24}
+    offline-max-future-skew-minutes: ${OFFLINE_CHECKIN_MAX_FUTURE_SKEW_MINUTES:5}
   email:
     verification-ttl-hours: ${EMAIL_VERIFICATION_TTL_HOURS:24}
     resend-rate-limit-max: ${EMAIL_RESEND_RATE_LIMIT_MAX:3}

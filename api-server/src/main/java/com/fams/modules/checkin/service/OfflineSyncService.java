@@ -21,10 +21,12 @@ import com.fams.shared.ai.FaceVerifyJobPublisher;
 import com.fams.shared.exception.ResourceNotFoundException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
+import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.ArrayList;
@@ -59,6 +61,8 @@ public class OfflineSyncService {
     private final FaceProfileRepository faceProfileRepository;
     private final AttendanceSummaryService attendanceSummaryService;
     private final FaceVerifyJobPublisher faceVerifyJobPublisher;
+    private final int maxOfflineAgeHours;
+    private final int maxFutureSkewMinutes;
 
     public OfflineSyncService(EmployeeRepository employeeRepository,
                                AssignmentRepository assignmentRepository,
@@ -68,7 +72,9 @@ public class OfflineSyncService {
                                CheckinRepository checkinRepository,
                                FaceProfileRepository faceProfileRepository,
                                AttendanceSummaryService attendanceSummaryService,
-                               FaceVerifyJobPublisher faceVerifyJobPublisher) {
+                               FaceVerifyJobPublisher faceVerifyJobPublisher,
+                               @Value("${app.checkin.offline-max-age-hours:24}") int maxOfflineAgeHours,
+                               @Value("${app.checkin.offline-max-future-skew-minutes:5}") int maxFutureSkewMinutes) {
         this.employeeRepository = employeeRepository;
         this.assignmentRepository = assignmentRepository;
         this.siteRepository = siteRepository;
@@ -78,6 +84,8 @@ public class OfflineSyncService {
         this.faceProfileRepository = faceProfileRepository;
         this.attendanceSummaryService = attendanceSummaryService;
         this.faceVerifyJobPublisher = faceVerifyJobPublisher;
+        this.maxOfflineAgeHours = maxOfflineAgeHours;
+        this.maxFutureSkewMinutes = maxFutureSkewMinutes;
     }
 
     @Transactional
@@ -109,6 +117,14 @@ public class OfflineSyncService {
                     .reason("duplicate nonce — previously accepted")
                     .checkinRecordId(existing.get().getId())
                     .build();
+        }
+
+        // Never trust an arbitrary device clock. Idempotency is checked first so a
+        // previously accepted record can still be retried safely after this window.
+        String timestampError = validateOfflineTimestamp(
+                req.getCheckinAt(), OffsetDateTime.now(), maxOfflineAgeHours, maxFutureSkewMinutes);
+        if (timestampError != null) {
+            return reject(req.getClientNonce(), timestampError);
         }
 
         // An offline device could easily be carrying a stale session for an employee who was
@@ -311,6 +327,19 @@ public class OfflineSyncService {
             return shift.getCheckinPolicyOverride();
         }
         return site.getCheckinPolicy();
+    }
+
+    static String validateOfflineTimestamp(OffsetDateTime checkinAt,
+                                           OffsetDateTime serverNow,
+                                           int maxAgeHours,
+                                           int maxFutureSkewMinutes) {
+        if (checkinAt.isBefore(serverNow.minusHours(maxAgeHours))) {
+            return "Offline check-in is older than the allowed " + maxAgeHours + " hour sync window";
+        }
+        if (checkinAt.isAfter(serverNow.plusMinutes(maxFutureSkewMinutes))) {
+            return "Offline check-in timestamp is more than " + maxFutureSkewMinutes + " minutes in the future";
+        }
+        return null;
     }
 
     private SyncResultItem reject(UUID clientNonce, String reason) {

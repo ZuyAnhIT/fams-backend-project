@@ -68,7 +68,7 @@ public class ViolationController {
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
             @Parameter(description = "Filter by employee UUID") @RequestParam(required = false) UUID employeeId,
             @Parameter(description = "Filter by site UUID") @RequestParam(required = false) UUID siteId,
-            @Parameter(description = "Filter by violation type (no_response | location_fail | face_fail | liveness_fail)")
+            @Parameter(description = "Filter by violation type (no_response | location_fail | face_fail | liveness_fail | face_verify_timeout)")
                 @RequestParam(required = false) String violationType,
             @Parameter(description = "Filter by resolved status (true | false)")
                 @RequestParam(required = false) Boolean resolved,

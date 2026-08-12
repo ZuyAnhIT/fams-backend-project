@@ -23,7 +23,7 @@ public class ViolationListResponse {
     private UUID siteId;
 
     @Schema(description = "Violation type", example = "no_response",
-            allowableValues = {"no_response", "location_fail", "face_fail", "liveness_fail"})
+            allowableValues = {"no_response", "location_fail", "face_fail", "liveness_fail", "face_verify_timeout"})
     private String violationType;
 
     @Schema(description = "Date of the check that triggered the violation", example = "2026-07-04")

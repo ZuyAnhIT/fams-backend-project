@@ -90,22 +90,19 @@ t_resp=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/tenants" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"name\":\"Notif Corp ${TS}\",\"slug\":\"notif-${TS}\"}")
+    -d "{\"ownerEmail\":\"admin@fams.com\",\"name\":\"Notif Corp ${TS}\",\"slug\":\"notif-${TS}\"}")
 if [ "$(echo "$t_resp" | tail -n 1)" -ne 201 ]; then echo "SETUP FAILED: tenant"; exit 1; fi
 TENANT_ID=$(echo "$t_resp" | head -n -1 | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 
 # Invite employee 1 and accept
 EMP1_EMAIL="notif.emp1.${TS}@example.com"
-curl -s -o /dev/null -X POST "$BASE_URL/api/v1/tenants/$TENANT_ID/invitations" \
+# Token is only ever present in the POST /invitations (create) response — deliberately null
+# everywhere else including GET .../invitations (list), see InvitationResponse.token javadoc.
+inv1_create_resp=$(curl -s -X POST "$BASE_URL/api/v1/tenants/$TENANT_ID/invitations" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"email\":\"$EMP1_EMAIL\",\"firstName\":\"Notif\",\"lastName\":\"One\"}"
-
-# Get invitation token from the admin list endpoint
-inv_page=$(curl -s \
-    "$BASE_URL/api/v1/tenants/$TENANT_ID/invitations" \
-    -H "Authorization: Bearer $ADMIN_TOKEN")
-INV_TOKEN1=$(echo "$inv_page" | grep -o '"token":"[^"]*"' | head -1 | cut -d'"' -f4)
+    -d "{\"email\":\"$EMP1_EMAIL\",\"firstName\":\"Notif\",\"lastName\":\"One\"}")
+INV_TOKEN1=$(echo "$inv1_create_resp" | grep -o '"token":"[^"]*"' | head -1 | cut -d'"' -f4)
 
 accept_resp=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/invitations/accept" \
@@ -120,7 +117,7 @@ fi
 emp1_login=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d "{\"email\":\"$EMP1_EMAIL\",\"password\":\"Employee@1234\"}")
+    -d "{\"identifier\":\"$EMP1_EMAIL\",\"password\":\"Employee@1234\"}")
 if [ "$(echo "$emp1_login" | tail -n 1)" -ne 200 ]; then
     echo "SETUP FAILED: emp1 login"
     exit 1
@@ -130,23 +127,11 @@ EMP1_USER_ID=$(get_user_id "$EMP1_TOKEN")
 
 # Invite employee 2 (for isolation test)
 EMP2_EMAIL="notif.emp2.${TS}@example.com"
-curl -s -o /dev/null -X POST "$BASE_URL/api/v1/tenants/$TENANT_ID/invitations" \
+inv2_create_resp=$(curl -s -X POST "$BASE_URL/api/v1/tenants/$TENANT_ID/invitations" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"email\":\"$EMP2_EMAIL\",\"firstName\":\"Notif\",\"lastName\":\"Two\"}"
-
-inv_page2=$(curl -s \
-    "$BASE_URL/api/v1/tenants/$TENANT_ID/invitations" \
-    -H "Authorization: Bearer $ADMIN_TOKEN")
-# Get the token for emp2 (last pending token in the list, or filter by email)
-INV_TOKEN2=$(echo "$inv_page2" \
-    | grep -o '"email":"[^"]*","status":"pending"[^}]*"token":"[^"]*"' \
-    | grep "$EMP2_EMAIL" \
-    | grep -o '"token":"[^"]*"' | cut -d'"' -f4 || true)
-if [ -z "$INV_TOKEN2" ]; then
-    # Fallback: get all tokens and pick the second one
-    INV_TOKEN2=$(echo "$inv_page2" | grep -o '"token":"[^"]*"' | tail -1 | cut -d'"' -f4)
-fi
+    -d "{\"email\":\"$EMP2_EMAIL\",\"firstName\":\"Notif\",\"lastName\":\"Two\"}")
+INV_TOKEN2=$(echo "$inv2_create_resp" | grep -o '"token":"[^"]*"' | head -1 | cut -d'"' -f4)
 
 curl -s -o /dev/null -X POST "$BASE_URL/api/v1/invitations/accept" \
     -H "Content-Type: application/json" \
@@ -155,7 +140,7 @@ curl -s -o /dev/null -X POST "$BASE_URL/api/v1/invitations/accept" \
 emp2_login=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d "{\"email\":\"$EMP2_EMAIL\",\"password\":\"Employee@1234\"}")
+    -d "{\"identifier\":\"$EMP2_EMAIL\",\"password\":\"Employee@1234\"}")
 EMP2_LOGIN_STATUS=$(echo "$emp2_login" | tail -n 1)
 EMP2_TOKEN=""
 EMP2_USER_ID=""

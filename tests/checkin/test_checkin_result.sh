@@ -64,7 +64,7 @@ curl -s -o /dev/null -X POST "$BASE_URL/api/v1/invitations/accept" \
 
 emp_login=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d "{\"email\":\"$INVITE_EMAIL\",\"password\":\"Employee@1234\"}")
+    -d "{\"identifier\":\"$INVITE_EMAIL\",\"password\":\"Employee@1234\"}")
 if [ "$(echo "$emp_login" | tail -n 1)" -ne 200 ]; then echo "SETUP FAILED: employee login"; exit 1; fi
 EMP_TOKEN=$(echo "$emp_login" | head -n -1 | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4)
 
@@ -179,8 +179,10 @@ after_status=$(echo "$after_resp" | tail -n 1)
 if [ "$after_status" -eq 200 ]; then
     # Use tail -1 to get data.message (the outer ApiResponse.message="Success" is first)
     msg_after=$(echo "$after_body" | grep -o '"message":"[^"]*"' | tail -1 | cut -d'"' -f4)
-    # After checkout the message should mention work minutes
-    if echo "$msg_after" | grep -qi "check-out\|worked\|minutes"; then
+    # After checkout the message should mention work minutes — resolveDisplayMessage()
+    # returns Vietnamese-first UX copy by design (e.g. "Chấm công ra thành công. Bạn đã
+    # làm việc 0 phút."), so check for the Vietnamese wording too, not just English.
+    if echo "$msg_after" | grep -qi "check-out\|worked\|minutes\|chấm công ra\|phút"; then
         echo "PASS: message updated after checkout (\"$msg_after\")"
         PASS=$((PASS + 1))
     else
@@ -208,7 +210,7 @@ if [ "$(echo "$inv2_resp" | tail -n 1)" -eq 201 ]; then
         -d "{\"token\":\"$INV_TOKEN2\",\"password\":\"Employee@1234\"}"
     emp2_login=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/auth/login" \
         -H "Content-Type: application/json" \
-        -d "{\"email\":\"$INVITE_EMAIL2\",\"password\":\"Employee@1234\"}")
+        -d "{\"identifier\":\"$INVITE_EMAIL2\",\"password\":\"Employee@1234\"}")
     EMP2_TOKEN=$(echo "$emp2_login" | head -n -1 | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4)
     run_test "Other employee forbidden" 403 -s \
         -H "Authorization: Bearer $EMP2_TOKEN" "$RESULT_URL"

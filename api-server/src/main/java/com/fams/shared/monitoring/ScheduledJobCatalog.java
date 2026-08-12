@@ -39,6 +39,11 @@ public final class ScheduledJobCatalog {
                     ScheduleType.CRON, "0 0 1 * * *", null,
                     26 * 60),
             new ScheduledJobInfo(
+                    "AttendanceSummarySameDayCatchUpJob",
+                    "Every-2-hours safety net recompute of TODAY's attendance summaries, self-healing a transient failed recompute at checkin/checkout without waiting for the nightly job.",
+                    ScheduleType.CRON, "0 15 */2 * * *", null,
+                    3 * 60),
+            new ScheduledJobInfo(
                     "RandomCheckSchedulerJob",
                     "Generates the day's scheduled random checks for every active assignment.",
                     ScheduleType.CRON, "0 1 0 * * *", null,
@@ -58,6 +63,11 @@ public final class ScheduledJobCatalog {
                     "Periodic self-heal: re-enqueues any 'pending' check missing from the Redis dispatch queue.",
                     ScheduleType.FIXED_RATE, null, 300_000L,
                     15),
+            new ScheduledJobInfo(
+                    "FaceVerifyTimeoutJob",
+                    "Resolves check_responses stuck waiting on an async face/liveness AI callback that never arrived.",
+                    ScheduleType.FIXED_RATE, null, 120_000L,
+                    10),
             new ScheduledJobInfo(
                     "DataRetentionJob",
                     "Weekly purge of old delivery logs, read notifications, revoked face embeddings, and old biometric photos.",

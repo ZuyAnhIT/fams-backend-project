@@ -63,7 +63,7 @@ SITE_ID=$(echo "$s_resp" | head -n -1 | grep -o '"id":"[^"]*"' | head -1 | cut -
 
 sh_resp=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/tenants/$TENANT_ID/sites/$SITE_ID/shifts" \
     -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d '{"name":"Day","startTime":"08:00","endTime":"17:00"}')
+    -d '{"name":"Day","startTime":"00:00","endTime":"23:59"}')
 if [ "$(echo "$sh_resp" | tail -n 1)" -ne 201 ]; then echo "SETUP FAILED: shift"; exit 1; fi
 SHIFT_ID=$(echo "$sh_resp" | head -n -1 | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 
@@ -83,7 +83,7 @@ EMP_ID=$(docker exec fams-postgres psql -U fams_user -d fams_db -t -c \
     | tr -d ' \n')
 emp_login=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d "{\"email\":\"$EMP_EMAIL\",\"password\":\"Employee@1234\"}")
+    -d "{\"identifier\":\"$EMP_EMAIL\",\"password\":\"Employee@1234\"}")
 EMP_TOKEN=$(echo "$emp_login" | head -n -1 | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4)
 
 # Employee 2 (different employee — to test cross-employee guard)
@@ -99,7 +99,7 @@ curl -s -o /dev/null -X POST "$BASE_URL/api/v1/invitations/accept" \
     -d "{\"token\":\"$INV2_TOKEN\",\"password\":\"Employee@1234\"}"
 emp2_login=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/auth/login" \
     -H "Content-Type: application/json" \
-    -d "{\"email\":\"$EMP2_EMAIL\",\"password\":\"Employee@1234\"}")
+    -d "{\"identifier\":\"$EMP2_EMAIL\",\"password\":\"Employee@1234\"}")
 EMP2_TOKEN=$(echo "$emp2_login" | head -n -1 | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4)
 
 asgn_resp=$(curl -s -w "\n%{http_code}" \
@@ -147,12 +147,28 @@ echo ""
 echo "=== Check-in explanation ==="
 echo ""
 
-# ── Test 1: Employee submits explanation returns 200 ──────────────────────────
-echo "--- Test 1: POST /{checkinId}/explain returns 200 ---"
+# Small real PNG for the multipart photo tests — the JSON+photoUrl contract was retired
+# (CheckinService.explainCheckin now rejects any request carrying photoUrl with 400, telling
+# the caller to use multipart instead) — POST /{checkinId}/explain dispatches on Content-Type:
+# application/json → note-only (CheckinController.explainCheckin), multipart/form-data →
+# note+photo (CheckinController.explainCheckinWithPhoto, evidenceStorageService.store()).
+EXPLAIN_PNG=$(mktemp /tmp/test_explain_XXXX.png)
+python3 -c "
+import struct, zlib
+def chunk(tag, data):
+    return struct.pack('>I', len(data)) + tag + data + struct.pack('>I', zlib.crc32(tag+data))
+raw = b''.join(b'\x00' + b'\xff\x00\x00' * 2 for _ in range(2))
+ihdr = struct.pack('>IIBBBBB', 2, 2, 8, 2, 0, 0, 0)
+open('$EXPLAIN_PNG','wb').write(b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', ihdr) + chunk(b'IDAT', zlib.compress(raw)) + chunk(b'IEND', b''))
+"
+
+# ── Test 1: Employee submits explanation (multipart, note+photo) returns 200 ──
+echo "--- Test 1: POST /{checkinId}/explain (multipart) returns 200 ---"
 run_test "Submit checkin explanation returns 200" 200 \
     -X POST "$CHECKIN_EXPLAIN_URL" \
-    -H "Content-Type: application/json" -H "Authorization: Bearer $EMP_TOKEN" \
-    -d '{"note":"I was at the site entrance — GPS drifted outside the polygon","photoUrl":"https://cdn.example.com/evidence/photo1.jpg"}'
+    -H "Authorization: Bearer $EMP_TOKEN" \
+    -F "note=I was at the site entrance — GPS drifted outside the polygon" \
+    -F "photo=@${EXPLAIN_PNG};type=image/png"
 
 # ── Test 2: employee_note stored in DB ────────────────────────────────────────
 echo ""
@@ -167,16 +183,16 @@ else
     FAIL=$((FAIL + 1))
 fi
 
-# ── Test 3: employee_photo_url stored in DB ───────────────────────────────────
+# ── Test 3: employee_photo_url (evidence marker) stored in DB ─────────────────
 echo ""
 echo "--- Test 3: employee_photo_url stored in DB ---"
 db_photo=$(docker exec fams-postgres psql -U fams_user -d fams_db -t -c \
     "SELECT employee_photo_url FROM checkins WHERE id='$CHECKIN_ID';" | tr -d ' \n')
-if echo "$db_photo" | grep -q "cdn.example.com"; then
-    echo "PASS: employee_photo_url stored correctly"
+if [ -n "$db_photo" ]; then
+    echo "PASS: employee_photo_url stored correctly ($db_photo)"
     PASS=$((PASS + 1))
 else
-    echo "FAIL: employee_photo_url='$db_photo'"
+    echo "FAIL: employee_photo_url is empty after multipart upload"
     FAIL=$((FAIL + 1))
 fi
 
@@ -230,12 +246,13 @@ echo ""
 echo "=== Violation explanation ==="
 echo ""
 
-# ── Test 9: Employee submits violation explanation returns 200 ────────────────
-echo "--- Test 9: POST /{violationId}/explain returns 200 ---"
+# ── Test 9: Employee submits violation explanation (multipart) returns 200 ────
+echo "--- Test 9: POST /{violationId}/explain (multipart) returns 200 ---"
 run_test "Submit violation explanation returns 200" 200 \
     -X POST "$VIOLATION_EXPLAIN_URL" \
-    -H "Content-Type: application/json" -H "Authorization: Bearer $EMP_TOKEN" \
-    -d '{"note":"My phone had no signal during the check window","photoUrl":"https://cdn.example.com/signal.jpg"}'
+    -H "Authorization: Bearer $EMP_TOKEN" \
+    -F "note=My phone had no signal during the check window" \
+    -F "photo=@${EXPLAIN_PNG};type=image/png"
 
 # ── Test 10: employee_note stored in violations table ────────────────────────
 echo ""
@@ -250,16 +267,16 @@ else
     FAIL=$((FAIL + 1))
 fi
 
-# ── Test 11: employee_photo_url stored in violations table ───────────────────
+# ── Test 11: employee_photo_url (evidence marker) stored in violations table ──
 echo ""
 echo "--- Test 11: employee_photo_url stored in violations table ---"
 db_v_photo=$(docker exec fams-postgres psql -U fams_user -d fams_db -t -c \
     "SELECT employee_photo_url FROM violations WHERE id='$VIOLATION_ID';" | tr -d ' \n')
-if echo "$db_v_photo" | grep -q "cdn.example.com"; then
-    echo "PASS: violation employee_photo_url stored correctly"
+if [ -n "$db_v_photo" ]; then
+    echo "PASS: violation employee_photo_url stored correctly ($db_v_photo)"
     PASS=$((PASS + 1))
 else
-    echo "FAIL: violation employee_photo_url='$db_v_photo'"
+    echo "FAIL: violation employee_photo_url is empty after multipart upload"
     FAIL=$((FAIL + 1))
 fi
 

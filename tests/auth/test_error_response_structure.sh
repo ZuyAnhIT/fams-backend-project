@@ -103,15 +103,14 @@ if [ "$(echo "$t_resp" | tail -n 1)" -ne 201 ]; then echo "SETUP FAILED: create 
 TENANT_ID=$(echo "$t_resp" | head -n -1 | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 
 EMP_EMAIL="err.emp.${TS}@example.com"
-curl -s -o /dev/null \
+# Token is only ever present in the POST /invitations (create) response — deliberately null
+# everywhere else including GET .../invitations (list), see InvitationResponse.token javadoc.
+inv_create_resp=$(curl -s \
     -X POST "$BASE_URL/api/v1/tenants/$TENANT_ID/invitations" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"email\":\"$EMP_EMAIL\",\"firstName\":\"Err\",\"lastName\":\"Emp\"}"
-
-inv_page=$(curl -s "$BASE_URL/api/v1/tenants/$TENANT_ID/invitations" \
-    -H "Authorization: Bearer $ADMIN_TOKEN")
-INV_TOKEN=$(echo "$inv_page" | grep -o '"token":"[^"]*"' | head -1 | cut -d'"' -f4)
+    -d "{\"email\":\"$EMP_EMAIL\",\"firstName\":\"Err\",\"lastName\":\"Emp\"}")
+INV_TOKEN=$(echo "$inv_create_resp" | grep -o '"token":"[^"]*"' | head -1 | cut -d'"' -f4)
 
 curl -s -o /dev/null \
     -X POST "$BASE_URL/api/v1/invitations/accept" \

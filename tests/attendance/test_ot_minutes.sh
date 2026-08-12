@@ -49,19 +49,27 @@ s_resp=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/tenants/$TENANT_I
 if [ "$(echo "$s_resp" | tail -n 1)" -ne 201 ]; then echo "SETUP FAILED: site"; exit 1; fi
 SITE_ID=$(echo "$s_resp" | head -n -1 | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 
-# OT shift: starts 00:00, ends 00:01. allowOvertime and lateCheckoutMinutes set via ot-config endpoint.
-# Any checkout after 00:01 UTC generates OT. Tests run well after midnight UTC so this is reliable.
+# OT shift: check-in itself must land within [startTime, endTime] with no live wall-clock
+# tolerance beyond earlyCheckinMinutes (endTime is a hard ceiling for check-in, unrelated to
+# lateCheckoutMinutes — see AssignmentService#resolveIfRelevantNow: checkinAllowedUntil ==
+# shiftEnd exactly). A narrow shift (e.g. 00:00-00:01) can only ever accept a live check-in
+# during that exact 1-minute window each day, which made this test fail whenever it happened to
+# run outside it. Fixed: use a wide-open shift so check-in always succeeds regardless of time of
+# day, then directly snapshot-edit the resulting checkin row (same fields CheckinService itself
+# snapshots at check-in time) to simulate a checkout past shift end, and trigger a real recompute
+# via POST .../attendance/recompute — exercises the exact same OT-computation code path
+# (AttendanceSummaryService#recompute) without depending on real wall-clock timing.
 sh_resp=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/tenants/$TENANT_ID/sites/$SITE_ID/shifts" \
     -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d '{"name":"OT Shift","startTime":"00:00","endTime":"00:01"}')
+    -d '{"name":"OT Shift","startTime":"00:00","endTime":"23:59"}')
 if [ "$(echo "$sh_resp" | tail -n 1)" -ne 201 ]; then echo "SETUP FAILED: OT shift"; exit 1; fi
 SHIFT_ID=$(echo "$sh_resp" | head -n -1 | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 
-# Enable OT on shift: lateCheckoutMinutes=1440 (24h cap) so any checkout after 00:01 counts as OT
+# lateCheckoutMinutes=1440 (24h cap) — generous enough that the simulated OT below is never capped.
 ot_cfg=$(curl -s -o /dev/null -w "%{http_code}" -X PUT \
     "$BASE_URL/api/v1/tenants/$TENANT_ID/sites/$SITE_ID/shifts/$SHIFT_ID/ot-config" \
     -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d '{"allowOvertime":true,"lateCheckoutMinutes":1440,"earlyCheckinMinutes":0}')
+    -d '{"allowOvertime":true,"lateCheckoutMinutes":1440}')
 if [ "$ot_cfg" -ne 200 ]; then echo "SETUP FAILED: OT config (HTTP $ot_cfg)"; exit 1; fi
 
 # No-OT shift: allowOvertime stays false (default) — no OT regardless of checkout time
@@ -118,6 +126,25 @@ co1_resp=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/tenants/$TENANT
     -H "Content-Type: application/json" -H "Authorization: Bearer $EMP1_TOKEN" \
     -d '{"latitude":21.0285,"longitude":105.8542,"gpsAccuracy":10.0}')
 if [ "$(echo "$co1_resp" | tail -n 1)" -ne 200 ]; then echo "SETUP FAILED: check-out 1"; exit 1; fi
+
+# Simulate a real workday's worth of OT by rewriting this checkin's OWN snapshot fields —
+# everything derived from check_in_at's own calendar day (date_trunc), never a hardcoded
+# clock time, so this is correct no matter what real time the test happens to run at:
+# shift 08:00-17:00, checkout at 19:00 → exactly 120 minutes of OT.
+docker exec fams-postgres psql -U fams_user -d fams_db -c "
+UPDATE checkins SET
+  shift_start_time = (date_trunc('day', check_in_at) + interval '8 hours')::time,
+  shift_end_time   = (date_trunc('day', check_in_at) + interval '17 hours')::time,
+  shift_allow_overtime = true,
+  shift_late_checkout_minutes = 1440,
+  check_out_at = date_trunc('day', check_in_at) + interval '19 hours',
+  work_minutes = 660
+WHERE id = '$CI1_ID';" > /dev/null
+
+recompute_status=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+    "$BASE_URL/api/v1/tenants/$TENANT_ID/attendance/recompute?date=$(date -u +%Y-%m-%d)&siteId=$SITE_ID" \
+    -H "Authorization: Bearer $ADMIN_TOKEN")
+if [ "$recompute_status" -ne 200 ]; then echo "SETUP FAILED: recompute (HTTP $recompute_status)"; exit 1; fi
 
 # ── Employee 2: no-OT shift ────────────────────────────────────────────────────
 EMP2_EMAIL="ot.emp2.${TS}@example.com"

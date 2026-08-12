@@ -64,7 +64,7 @@ echo ""
 echo "--- Setup: Create a tenant, move it onto the source plan, add 3 employees ---"
 SLUG="plan-migration-test-$TS"
 TENANT_ID=$(curl -s -X POST "$BASE_URL/api/v1/tenants" -H "Authorization: Bearer $ADMIN_TOKEN" -H "Content-Type: application/json" \
-    -d "{\"name\":\"Plan Migration Test $TS\",\"slug\":\"$SLUG\",\"industry\":\"tech\",\"countryCode\":\"VN\"}" \
+    -d "{\"ownerEmail\":\"admin@fams.com\",\"name\":\"Plan Migration Test $TS\",\"slug\":\"$SLUG\",\"industry\":\"tech\",\"countryCode\":\"VN\"}" \
     | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['id'])")
 [ -z "$TENANT_ID" ] && echo "SETUP FAILED: no tenant id" && exit 1
 

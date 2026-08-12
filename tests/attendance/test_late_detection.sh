@@ -60,7 +60,7 @@ SHIFT_ID=$(echo "$sh_resp" | head -n -1 | grep -o '"id":"[^"]*"' | head -1 | cut
 # Second shift: starts at 23:59 (almost end of day) so check-ins are not late
 sh2_resp=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/tenants/$TENANT_ID/sites/$SITE_ID/shifts" \
     -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d '{"name":"LateStart","startTime":"23:59","endTime":"23:59","earlyCheckinMinutes":0,"lateCheckoutMinutes":0,"allowOvertime":false}')
+    -d '{"name":"LateStart","startTime":"23:58","endTime":"23:59","earlyCheckinMinutes":0,"lateCheckoutMinutes":0,"allowOvertime":false}')
 if [ "$(echo "$sh2_resp" | tail -n 1)" -ne 201 ]; then echo "SETUP FAILED: shift (late-start)"; exit 1; fi
 SHIFT2_ID=$(echo "$sh2_resp" | head -n -1 | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 
