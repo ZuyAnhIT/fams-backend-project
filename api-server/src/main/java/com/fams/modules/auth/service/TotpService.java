@@ -9,6 +9,7 @@ import com.fams.modules.auth.entity.User;
 import com.fams.modules.auth.repository.TotpBackupCodeRepository;
 import com.fams.modules.auth.repository.UserRepository;
 import com.fams.modules.audit.service.AuditLogService;
+import com.fams.shared.exception.DuplicateResourceException;
 import com.fams.shared.exception.InvalidCredentialsException;
 import com.fams.shared.exception.ResourceNotFoundException;
 import com.fams.shared.security.HttpRequestUtils;
@@ -34,6 +35,12 @@ import java.util.concurrent.TimeUnit;
 public class TotpService {
 
     private static final String SETUP_PREFIX  = "totp:setup:";
+    // Reverse index (userId -> current setupToken) so a repeat /totp/setup call can invalidate
+    // the previous pending session — added 2026-08-12 (FE contract update): without this, calling
+    // setup twice left TWO valid secrets alive at once (whichever QR/manual key the user scans
+    // first still works), which is exactly the "multiple secrets coexisting" state the new
+    // contract's security rules call out to avoid.
+    private static final String SETUP_USER_INDEX_PREFIX = "totp:setup:user:";
     private static final int    SETUP_TTL_MIN = 10;
     private static final String BASE32_ALPHA  = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
     private static final String ISSUER        = "FAMS";
@@ -65,26 +72,81 @@ public class TotpService {
         this.auditLogService = auditLogService;
     }
 
+    // qrCodeUrl on the builder below is @Deprecated on the DTO (external clients shouldn't rely
+    // on it going forward) but this is the one legitimate internal producer of it, kept for
+    // backward compatibility on purpose — suppressed rather than silenced by removing the field.
+    @SuppressWarnings("deprecation")
     public TotpSetupResponse initiateSetup(UUID userId) {
         User user = userRepository.findByIdAndDeletedAtIsNull(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found"));
 
+        // FE contract update (2026-08-12): an already-2FA'd account calling setup again must be
+        // rejected, not silently issued a fresh secret — the account already has one enabled.
+        if (user.isTotpEnabled()) {
+            throw new DuplicateResourceException("TOTP is already enabled for this account");
+        }
+
+        // Invalidate any prior pending setup for this user before creating a new one — otherwise
+        // two valid secrets could exist at once (an earlier QR/manual key the user never
+        // finished scanning would silently still work after they reopened the setup screen and
+        // got what looks like a fresh one).
+        String userIndexKey = SETUP_USER_INDEX_PREFIX + userId;
+        String priorToken = redis.opsForValue().get(userIndexKey);
+        if (priorToken != null) {
+            redis.delete(SETUP_PREFIX + priorToken);
+        }
+
         String secret = generateSecret();
         String setupToken = UUID.randomUUID().toString();
 
-        // Store "{userId}|{email}|{secret}" so the QR endpoint can build the provisioning URI
-        String emailOrId = (user.getEmail() != null) ? user.getEmail() : userId.toString();
-        String redisValue = userId + "|" + emailOrId + "|" + secret;
+        // account: email, else phone, else userId — in that priority order, per contract.
+        String account = StringUtils.hasText(user.getEmail()) ? user.getEmail()
+                : StringUtils.hasText(user.getPhone()) ? user.getPhone()
+                : userId.toString();
+
+        // Store "{userId}|{account}|{secret}" — read back by both the QR page and enableTotp().
+        String redisValue = userId + "|" + account + "|" + secret;
         redis.opsForValue().set(SETUP_PREFIX + setupToken, redisValue, SETUP_TTL_MIN, TimeUnit.MINUTES);
+        redis.opsForValue().set(userIndexKey, setupToken, SETUP_TTL_MIN, TimeUnit.MINUTES);
 
         String qrCodeUrl = baseUrl + "/api/v1/auth/totp/qr?token=" + setupToken;
+        String otpauthUri = buildOtpauthUri(account, secret);
+        // Computed immediately before/after the Redis writes above with the same TTL constant,
+        // so this reflects the real expiry rather than an independently-guessed value.
+        OffsetDateTime expiresAt = OffsetDateTime.now().plusMinutes(SETUP_TTL_MIN);
+
         log.info("TOTP setup initiated for user id={}", userId);
 
         return TotpSetupResponse.builder()
                 .setupToken(setupToken)
-                .qrCodeUrl(qrCodeUrl)
+                .otpauthUri(otpauthUri)
                 .manualEntryKey(secret)
+                .qrCodeUrl(qrCodeUrl)
+                .expiresAt(expiresAt)
                 .build();
+    }
+
+    /** Builds the otpauth:// provisioning URI — shared by initiateSetup (new otpauthUri field)
+     *  and buildQrPageHtml (the deprecated HTML QR page), so both are guaranteed to encode the
+     *  same account/secret the same way rather than risking two slightly different
+     *  implementations drifting apart. Label = "{issuer}:{account}", each URL-encoded separately
+     *  and joined with a literal colon (colon is a valid unencoded path character per RFC 3986,
+     *  and every otpauth-compatible authenticator app treats it as the issuer/account separator).
+     *  secret is base32 and never needs encoding. */
+    private String buildOtpauthUri(String account, String secret) {
+        String encodedIssuer = uriEncode(ISSUER);
+        String encodedAccount = uriEncode(account);
+        return "otpauth://totp/" + encodedIssuer + ":" + encodedAccount
+                + "?secret=" + secret
+                + "&issuer=" + encodedIssuer
+                + "&algorithm=SHA1&digits=6&period=30";
+    }
+
+    /** Percent-encodes for use in a URI path/query — URLEncoder alone encodes spaces as "+"
+     *  (application/x-www-form-urlencoded), which is wrong outside an actual form body; "%20" is
+     *  the correct encoding here and what every otpauth URI example in the wild uses. */
+    private static String uriEncode(String value) {
+        return java.net.URLEncoder.encode(value, java.nio.charset.StandardCharsets.UTF_8).replace("+", "%20");
     }
 
     public String buildQrPageHtml(String setupToken) {
@@ -97,9 +159,7 @@ public class TotpService {
         String account = parts[1];
         String secret  = parts[2];
 
-        String otpauthUri = "otpauth://totp/" + ISSUER + ":" + account
-                + "?secret=" + secret + "&issuer=" + ISSUER
-                + "&algorithm=SHA1&digits=6&period=30";
+        String otpauthUri = buildOtpauthUri(account, secret);
 
         return """
                 <!DOCTYPE html>
@@ -175,6 +235,7 @@ public class TotpService {
         user.setTotpEnabled(true);
         userRepository.save(user);
         redis.delete(key);
+        redis.delete(SETUP_USER_INDEX_PREFIX + userId);
 
         List<String> backupCodes = regenerateBackupCodes(userId);
 
