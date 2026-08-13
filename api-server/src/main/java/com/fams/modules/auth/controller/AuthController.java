@@ -567,7 +567,7 @@ public class AuthController {
         String rawAccessToken = (StringUtils.hasText(authHeader) && authHeader.startsWith("Bearer "))
                 ? authHeader.substring(7) : "";
         log.info("Logout-all requested by user {}", userDetails.getUserId());
-        logoutService.logoutAll(rawAccessToken, userDetails.getUserId());
+        logoutService.logoutAll(rawAccessToken, userDetails.getUserId(), userDetails.getEmail());
         return ResponseEntity.ok(ApiResponse.success(null));
     }
 

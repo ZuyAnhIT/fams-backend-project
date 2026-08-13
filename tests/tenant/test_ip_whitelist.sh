@@ -69,19 +69,19 @@ add_response=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/tenants/$TENANT_ID/ip-whitelists" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d '{"ipAddress":"192.168.1.150","label":"Office IP","scope":"api"}')
+    -d '{"ipAddress":"192.168.1.150","label":"Office IP","applicableRoleNames":["TENANT_ADMIN"]}')
 add_body=$(echo "$add_response" | head -n -1)
 add_status=$(echo "$add_response" | tail -n 1)
 
 if [ "$add_status" -eq 201 ]; then
     ENTRY_ID=$(echo "$add_body" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
     ip=$(echo "$add_body" | grep -o '"ipAddress":"[^"]*"' | cut -d'"' -f4)
-    scope=$(echo "$add_body" | grep -o '"scope":"[^"]*"' | cut -d'"' -f4)
-    if [ "$ip" = "192.168.1.150" ] && [ "$scope" = "api" ] && [ -n "$ENTRY_ID" ]; then
-        echo "PASS: Add IPv4 entry (HTTP 201, id=$ENTRY_ID ip=$ip scope=$scope)"
+    has_role=$(echo "$add_body" | grep -c '"TENANT_ADMIN"' || true)
+    if [ "$ip" = "192.168.1.150" ] && [ "$has_role" -ge 1 ] && [ -n "$ENTRY_ID" ]; then
+        echo "PASS: Add IPv4 entry (HTTP 201, id=$ENTRY_ID ip=$ip applicableRoleNames=[TENANT_ADMIN])"
         PASS=$((PASS + 1))
     else
-        echo "FAIL: Add IPv4 entry — unexpected values ip=$ip scope=$scope"
+        echo "FAIL: Add IPv4 entry — unexpected values ip=$ip has_role=$has_role"
         FAIL=$((FAIL + 1))
     fi
 else
@@ -98,7 +98,7 @@ cidr_response=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/tenants/$TENANT_ID/ip-whitelists" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d '{"ipAddress":"10.0.0.0/24","label":"Internal network","scope":"all"}')
+    -d '{"ipAddress":"10.0.0.0/24","label":"Internal network"}')
 cidr_status=$(echo "$cidr_response" | tail -n 1)
 if [ "$cidr_status" -eq 201 ]; then
     CIDR_ENTRY_ID=$(echo "$cidr_response" | head -n -1 | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
@@ -196,14 +196,14 @@ run_test "Invalid IP format" 400 \
     -H "Authorization: Bearer $ADMIN_TOKEN" \
     -d '{"ipAddress":"not-an-ip"}'
 
-# Test 7: Invalid scope → 400
+# Test 7: Unknown role name → 400
 echo ""
-echo "--- Test 7: Invalid scope ---"
-run_test "Invalid scope" 400 \
+echo "--- Test 7: Unknown role name ---"
+run_test "Unknown role name" 400 \
     -X POST "$BASE_URL/api/v1/tenants/$TENANT_ID/ip-whitelists" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d '{"ipAddress":"1.2.3.4","scope":"invalid_scope"}'
+    -d '{"ipAddress":"1.2.3.4","applicableRoleNames":["NOT_A_REAL_ROLE"]}'
 
 # Test 8: Missing ipAddress → 400
 echo ""

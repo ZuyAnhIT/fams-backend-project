@@ -16,6 +16,10 @@ public interface RoleRepository extends JpaRepository<Role, UUID>, JpaSpecificat
 
     List<Role> findByTenantIdAndDeletedAtIsNull(UUID tenantId);
 
+    /** System-wide roles (tenantId null) plus this tenant's own custom roles — the full set of
+     *  role names assignable within a given tenant, used to validate IP-whitelist role scoping. */
+    List<Role> findByDeletedAtIsNullAndTenantIdIsNullOrDeletedAtIsNullAndTenantId(UUID tenantIdForCustomRoles);
+
     @Query("SELECT r FROM Role r JOIN FETCH r.permissions WHERE r.id = :id")
     Optional<Role> findByIdWithPermissions(@Param("id") UUID id);
 

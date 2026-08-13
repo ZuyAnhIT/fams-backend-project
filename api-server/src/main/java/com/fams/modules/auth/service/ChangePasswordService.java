@@ -1,10 +1,14 @@
 package com.fams.modules.auth.service;
 
+import com.fams.modules.audit.service.AuditLogService;
 import com.fams.modules.auth.dto.request.ChangePasswordRequest;
 import com.fams.modules.auth.entity.User;
 import com.fams.modules.auth.repository.RefreshTokenRepository;
 import com.fams.modules.auth.repository.UserRepository;
+import com.fams.modules.rbac.entity.UserRole;
+import com.fams.modules.rbac.repository.UserRoleRepository;
 import com.fams.shared.exception.InvalidCredentialsException;
+import com.fams.shared.security.HttpRequestUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -13,6 +17,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
@@ -25,6 +30,8 @@ public class ChangePasswordService {
     private final BCryptPasswordEncoder passwordEncoder;
     private final StringRedisTemplate redis;
     private final LogoutService logoutService;
+    private final UserRoleRepository userRoleRepository;
+    private final AuditLogService auditLogService;
     private final int accessTtlMinutes;
 
     public ChangePasswordService(
@@ -33,12 +40,16 @@ public class ChangePasswordService {
             BCryptPasswordEncoder passwordEncoder,
             StringRedisTemplate redis,
             LogoutService logoutService,
+            UserRoleRepository userRoleRepository,
+            AuditLogService auditLogService,
             @Value("${app.jwt.access-ttl-minutes}") int accessTtlMinutes) {
         this.userRepository = userRepository;
         this.refreshTokenRepository = refreshTokenRepository;
         this.passwordEncoder = passwordEncoder;
         this.redis = redis;
         this.logoutService = logoutService;
+        this.userRoleRepository = userRoleRepository;
+        this.auditLogService = auditLogService;
         this.accessTtlMinutes = accessTtlMinutes;
     }
 
@@ -76,5 +87,27 @@ public class ChangePasswordService {
         logoutService.blacklistAccessToken(rawAccessToken);
 
         log.info("Password changed successfully for user {} — all sessions invalidated", userId);
+
+        // Only logged when the account belongs to a tenant — audit viewing is tenant-scoped
+        // (Tenant Admin/HR), so a tenant-less account's entry would have no realistic viewer.
+        List<UserRole> roles = userRoleRepository.findAllActiveByUserId(userId);
+        if (!roles.isEmpty()) {
+            try {
+                auditLogService.record(
+                        roles.get(0).getTenantId(),
+                        userId,
+                        user.getEmail() != null ? user.getEmail() : user.getPhone(),
+                        "USER",
+                        userId.toString(),
+                        "CHANGE_PASSWORD",
+                        null,
+                        null,
+                        HttpRequestUtils.currentRequestId(),
+                        HttpRequestUtils.currentIpAddress(),
+                        HttpRequestUtils.currentUserAgent());
+            } catch (Exception ex) {
+                log.warn("Failed to record CHANGE_PASSWORD audit for user {}: {}", userId, ex.getMessage());
+            }
+        }
     }
 }

@@ -1,10 +1,14 @@
 package com.fams.modules.auth.service;
 
+import com.fams.modules.audit.service.AuditLogService;
 import com.fams.modules.auth.dto.request.ForgotPasswordRequest;
 import com.fams.modules.auth.dto.request.ResetPasswordRequest;
 import com.fams.modules.auth.entity.User;
 import com.fams.modules.auth.repository.RefreshTokenRepository;
 import com.fams.modules.auth.repository.UserRepository;
+import com.fams.modules.rbac.entity.UserRole;
+import com.fams.modules.rbac.repository.UserRoleRepository;
+import com.fams.shared.security.HttpRequestUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -14,6 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
@@ -32,6 +37,8 @@ public class PasswordResetService {
     private final RefreshTokenRepository refreshTokenRepository;
     private final BCryptPasswordEncoder passwordEncoder;
     private final EmailService emailService;
+    private final UserRoleRepository userRoleRepository;
+    private final AuditLogService auditLogService;
     private final String frontendUrl;
     private final int rateLimitMax;
 
@@ -41,6 +48,8 @@ public class PasswordResetService {
             RefreshTokenRepository refreshTokenRepository,
             BCryptPasswordEncoder passwordEncoder,
             EmailService emailService,
+            UserRoleRepository userRoleRepository,
+            AuditLogService auditLogService,
             @Value("${app.frontend-url}") String frontendUrl,
             @Value("${app.password-reset.rate-limit-max:3}") int rateLimitMax) {
         this.redis = redis;
@@ -48,6 +57,8 @@ public class PasswordResetService {
         this.refreshTokenRepository = refreshTokenRepository;
         this.passwordEncoder = passwordEncoder;
         this.emailService = emailService;
+        this.userRoleRepository = userRoleRepository;
+        this.auditLogService = auditLogService;
         this.frontendUrl = frontendUrl;
         this.rateLimitMax = rateLimitMax;
     }
@@ -124,5 +135,27 @@ public class PasswordResetService {
         refreshTokenRepository.revokeAllActiveByUserId(userId, OffsetDateTime.now());
 
         log.info("Password reset successfully for user id={}", userId);
+
+        // Only logged when the account belongs to a tenant — audit viewing is tenant-scoped
+        // (Tenant Admin/HR), so a tenant-less account's entry would have no realistic viewer.
+        List<UserRole> roles = userRoleRepository.findAllActiveByUserId(userId);
+        if (!roles.isEmpty()) {
+            try {
+                auditLogService.record(
+                        roles.get(0).getTenantId(),
+                        userId,
+                        user.getEmail() != null ? user.getEmail() : user.getPhone(),
+                        "USER",
+                        userId.toString(),
+                        "RESET_PASSWORD",
+                        null,
+                        null,
+                        HttpRequestUtils.currentRequestId(),
+                        HttpRequestUtils.currentIpAddress(),
+                        HttpRequestUtils.currentUserAgent());
+            } catch (Exception ex) {
+                log.warn("Failed to record RESET_PASSWORD audit for user {}: {}", userId, ex.getMessage());
+            }
+        }
     }
 }

@@ -1,7 +1,9 @@
 package com.fams.modules.auth.service;
 
+import com.fams.modules.audit.service.AuditLogService;
 import com.fams.modules.auth.entity.User;
 import com.fams.modules.auth.repository.UserRepository;
+import com.fams.modules.rbac.repository.UserRoleRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -23,6 +25,8 @@ class UserProfileServiceTest {
     @Mock private EmailVerificationService emailVerificationService;
     @Mock private EmailService emailService;
     @Mock private PhoneOtpService phoneOtpService;
+    @Mock private UserRoleRepository userRoleRepository;
+    @Mock private AuditLogService auditLogService;
 
     @Test
     void requestEmailChangeBuildsFrontendUiLink() {
@@ -44,6 +48,8 @@ class UserProfileServiceTest {
                 emailVerificationService,
                 emailService,
                 phoneOtpService,
+                userRoleRepository,
+                auditLogService,
                 "http://192.168.1.155:3000");
 
         service.requestEmailChange(userId, "NEW@example.com");

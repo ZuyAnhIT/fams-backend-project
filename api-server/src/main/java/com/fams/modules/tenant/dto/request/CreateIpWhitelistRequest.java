@@ -6,6 +6,8 @@ import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
 
+import java.util.List;
+
 @Data
 @Schema(description = "Add an IP address or CIDR range to a tenant's whitelist")
 public class CreateIpWhitelistRequest {
@@ -23,7 +25,10 @@ public class CreateIpWhitelistRequest {
     @Size(max = 100, message = "Label must be at most 100 characters")
     private String label;
 
-    @Schema(description = "Scope this entry applies to: web_admin, api, or all", example = "all")
-    @Pattern(regexp = "^(web_admin|api|all)$", message = "Scope must be one of: web_admin, api, all")
-    private String scope;
+    @Schema(description = "Role names this entry restricts. Empty/omitted = applies to every role "
+            + "(equivalent to the old \"all\" scope); non-empty = only these roles are restricted "
+            + "by this entry — e.g. whitelist the office IP for TENANT_ADMIN/HR_MANAGER while "
+            + "leaving SITE_SUPERVISOR/FIELD_EMPLOYEE free to check in from any IP.",
+            example = "[\"TENANT_ADMIN\", \"HR_MANAGER\"]")
+    private List<String> applicableRoleNames;
 }

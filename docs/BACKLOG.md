@@ -127,11 +127,13 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 #### Đăng xuất
 
 - [x] **#4 — Đăng xuất khỏi thiết bị hiện tại** `P0` · 2sp · Nền tảng: Backend, Web Admin, Mobile App
+  - 🔒 **Test tay thật — ĐÃ KHÓA (2026-08-13):** toàn bộ case pass qua UI thật trên Web + App. Xem `docs/manual-tests/MANUAL_TEST_LOG.md`.
   - *Audit (2026-07-22):* ✅ ĐÃ XONG — bằng chứng: LogoutService.logout, test_logout.sh
   - *User Story:* Là một người dùng đang đăng nhập, tôi muốn đăng xuất khỏi phiên hiện tại để bảo vệ tài khoản khi dùng xong.
   - *Acceptance Criteria:* Bấm đăng xuất; revoke refresh token hiện tại; xóa token local; chuyển về màn hình login.
   - *DB Entities:* `tokens, audit_logs`
 - [ ] **#5 — Đăng xuất khỏi tất cả thiết bị** `P1` · 3sp · Nền tảng: Backend, Web Admin, Mobile App
+  - 🔒 **Test tay thật — ĐÃ KHÓA (2026-08-13):** toàn bộ case pass (kể cả đa thiết bị) qua UI thật trên Web + App. Gap thiếu audit `LOGOUT_ALL` vẫn còn, không chặn khóa. Xem `docs/manual-tests/MANUAL_TEST_LOG.md`.
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: LogoutService.logoutAll, test_logout_all.sh; thiếu: revoke đúng nhưng không ghi audit
   - *User Story:* Là một người dùng, tôi muốn đăng xuất khỏi mọi thiết bị để xử lý khi nghi ngờ lộ tài khoản.
   - *Acceptance Criteria:* Bấm logout all; revoke toàn bộ refresh token; giữ lại audit; yêu cầu đăng nhập lại ở các thiết bị khác.
@@ -140,21 +142,25 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 #### Tài khoản
 
 - [x] **#6 — Đăng ký tài khoản người dùng** `P0` · 5sp · Nền tảng: Backend, Web Admin, Mobile App, Queue/AI/Automation
+  - 🔒 **Test tay thật — ĐÃ KHÓA (2026-08-13):** cả luồng email và SĐT pass qua UI thật trên Web + App. Xem `docs/manual-tests/MANUAL_TEST_LOG.md`.
   - *Audit (2026-07-22):* ✅ ĐÃ XONG — bằng chứng: RegisterService, test_register.sh
   - *User Story:* Là một người dùng mới, tôi muốn tạo tài khoản cá nhân bằng email/phone để có định danh để tham gia tenant.
   - *Acceptance Criteria:* Nhập thông tin cơ bản; kiểm tra email/phone trùng; hash mật khẩu; gửi xác thực email/OTP; tạo user inactive/active theo policy.
   - *DB Entities:* `users, tokens, notifications, audit_logs`
 - [x] **#7 — Quên mật khẩu** `P0` · 3sp · Nền tảng: Backend, Web Admin, Mobile App, Queue/AI/Automation
+  - 🔒 **Test tay thật — ĐÃ KHÓA (2026-08-13):** toàn bộ case bảo mật/biên pass qua UI thật trên Web + App. Xem `docs/manual-tests/MANUAL_TEST_LOG.md`.
   - *Audit (2026-07-22):* ✅ ĐÃ XONG — bằng chứng: PasswordResetService.forgotPassword, test_forgot_reset_password.sh
   - *User Story:* Là một người dùng, tôi muốn yêu cầu đặt lại mật khẩu để lấy lại quyền truy cập khi quên mật khẩu.
   - *Acceptance Criteria:* Nhập email/phone; tạo reset token; gửi email/OTP; token có hạn; không lộ tài khoản tồn tại hay không.
   - *DB Entities:* `users, tokens, notifications, audit_logs`
 - [ ] **#8 — Đặt lại mật khẩu** `P0` · 3sp · Nền tảng: Backend, Web Admin, Mobile App
+  - 🔒 **Test tay thật — ĐÃ KHÓA (2026-08-13):** toàn bộ case pass qua UI thật trên Web + App. Gap thiếu audit `RESET_PASSWORD` vẫn còn, không chặn khóa. Xem `docs/manual-tests/MANUAL_TEST_LOG.md`.
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: PasswordResetService.resetPassword; thiếu: không ghi audit
   - *User Story:* Là một người dùng, tôi muốn đặt lại mật khẩu bằng token hợp lệ để khôi phục tài khoản an toàn.
   - *Acceptance Criteria:* Token hợp lệ và chưa dùng; mật khẩu đạt policy; cập nhật password_hash; revoke refresh token cũ; ghi audit.
   - *DB Entities:* `users, tokens, audit_logs`
 - [ ] **#9 — Đổi mật khẩu** `P0` · 3sp · Nền tảng: Backend, Web Admin, Mobile App
+  - 🔒 **Test tay thật — ĐÃ KHÓA (2026-08-13):** toàn bộ case pass qua UI thật. Gap thiếu audit `CHANGE_PASSWORD` vẫn còn, không chặn khóa. Xem `docs/manual-tests/MANUAL_TEST_LOG.md`.
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: ChangePasswordService, test_change_password.sh; thiếu: không ghi audit
   - *User Story:* Là một người dùng đang đăng nhập, tôi muốn đổi mật khẩu hiện tại để tăng bảo mật tài khoản.
   - *Acceptance Criteria:* Nhập mật khẩu cũ đúng; mật khẩu mới đạt policy; cập nhật password_hash; có thể revoke phiên khác; ghi audit.
@@ -163,11 +169,13 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 #### Hồ sơ cá nhân
 
 - [ ] **#10 — Xem thông tin cá nhân** `P0` · 2sp · Nền tảng: Backend, Web Admin, Mobile App
+  - 🔒 **Test tay thật — ĐÃ KHÓA (2026-08-13):** toàn bộ case pass qua UI thật. Gap thiếu field 2FA/tenant hiện tại vẫn còn, không chặn khóa. Xem `docs/manual-tests/MANUAL_TEST_LOG.md`.
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: UserProfileService.getProfile, test_profile.sh; thiếu: response thiếu trạng thái 2FA và tenant hiện tại
   - *User Story:* Là một người dùng, tôi muốn xem hồ sơ cá nhân của mình để kiểm tra thông tin đang lưu.
   - *Acceptance Criteria:* Hiển thị full_name, email, phone, avatar, tenant hiện tại, trạng thái 2FA; không hiển thị dữ liệu nhạy cảm.
   - *DB Entities:* `users, tenant_users`
 - [ ] **#11 — Cập nhật hồ sơ cá nhân** `P0` · 3sp · Nền tảng: Backend, Web Admin, Mobile App
+  - 🔒 **Test tay thật — ĐÃ KHÓA (2026-08-13):** toàn bộ case pass qua UI thật. Gap thiếu audit `UPDATE_PROFILE` vẫn còn, không chặn khóa. Xem `docs/manual-tests/MANUAL_TEST_LOG.md`.
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: UserProfileService.updateProfile; thiếu: không ghi audit
   - *User Story:* Là một người dùng, tôi muốn cập nhật tên, avatar và thông tin liên hệ để giữ thông tin cá nhân chính xác.
   - *Acceptance Criteria:* Cập nhật full_name/avatar; validate phone/email nếu thay đổi; ghi audit; đồng bộ hiển thị trong tenant.
@@ -176,16 +184,19 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 #### Bảo mật tài khoản
 
 - [ ] **#12 — Bật TOTP 2FA** `P1` · 5sp · Nền tảng: Backend, Web Admin, Mobile App
+  - 🔒 **Test tay thật — ĐÃ KHÓA (2026-08-13):** toàn bộ case pass qua UI thật, gồm contract mới (otpauthUri, chặn bật trùng). Xem `docs/manual-tests/MANUAL_TEST_LOG.md`.
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: TotpService, test_totp.sh; thiếu: không sinh/lưu backup codes
   - *User Story:* Là một người dùng, tôi muốn bật xác thực hai lớp bằng ứng dụng Authenticator để bảo vệ tài khoản tốt hơn.
   - *Acceptance Criteria:* Sinh QR/secret; xác minh mã 6 số; lưu totp_secret mã hóa; sinh backup codes; ghi audit.
   - *DB Entities:* `users, audit_logs`
 - [ ] **#13 — Đăng nhập có 2FA** `P1` · 5sp · Nền tảng: Backend, Web Admin, Mobile App
+  - 🔒 **Test tay thật — ĐÃ KHÓA (2026-08-13):** toàn bộ case pass qua UI thật, gồm hết 8 mã dự phòng. Xem `docs/manual-tests/MANUAL_TEST_LOG.md`.
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: LoginTotpService, test_login_totp.sh; thiếu: thiếu đường dẫn đăng nhập bằng backup code
   - *User Story:* Là một người dùng đã bật 2FA, tôi muốn nhập mã TOTP sau khi đúng mật khẩu để đảm bảo chỉ chủ tài khoản đăng nhập.
   - *Acceptance Criteria:* Sau password đúng yêu cầu OTP; mã đúng mới tạo token; backup code dùng được một lần; ghi login result.
   - *DB Entities:* `users, tokens, audit_logs`
 - [x] **#14 — Khóa tài khoản khi đăng nhập sai** `P0` · 3sp · Nền tảng: Backend
+  - 🔒 **Test tay thật — ĐÃ KHÓA (2026-08-13):** đã bổ sung audit `LOGIN_FAILED`/`ACCOUNT_LOCKED`, test pass. Xem `docs/manual-tests/MANUAL_TEST_LOG.md`.
   - *Audit (2026-07-22):* ✅ ĐÃ XONG — bằng chứng: AuthService.login (failed-attempt counter, lockedUntil), test_account_lock.sh
   - *User Story:* Là một quản trị hệ thống, tôi muốn tự động khóa tạm tài khoản khi sai mật khẩu nhiều lần để giảm brute-force.
   - *Acceptance Criteria:* Đếm lần sai; đặt locked_until; thông báo lỗi phù hợp; ghi audit result=failure/denied.
@@ -196,16 +207,19 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 #### Tenant
 
 - [ ] **#15 — Tạo tenant mới** `P0` · 5sp · Nền tảng: Backend, Web Admin
+  - 🔒 **Test tay thật — ĐÃ KHÓA (2026-08-13):** toàn bộ case pass, gồm cả luồng self-serve và Platform Admin provisioning. Xem `docs/manual-tests/MANUAL_TEST_LOG.md`.
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: TenantService.createTenant, test_create_tenant.sh; thiếu: chỉ PLATFORM_ADMIN tạo được; không tự gán role admin cho người tạo (chỉ set ownerId); không ghi audit
   - *User Story:* Là một Platform Admin hoặc người dùng được phép, tôi muốn tạo công ty/tenant mới để thiết lập không gian sử dụng FAMS.
   - *Acceptance Criteria:* Nhập tên, slug, timezone; slug không trùng; tạo tenant_settings mặc định; gán role company_admin cho người tạo.
   - *DB Entities:* `tenants, tenant_settings, user_roles, roles, audit_logs`
 - [ ] **#16 — Xem danh sách tenant** `P0` · 3sp · Nền tảng: Backend, Web Admin
+  - 🔒 **Test tay thật — ĐÃ KHÓA (2026-08-13):** toàn bộ case pass. Gap thiếu plan/subscription trong danh sách vẫn còn, không chặn khóa. Xem `docs/manual-tests/MANUAL_TEST_LOG.md`.
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: TenantService.listTenants, test_list_tenants.sh; thiếu: danh sách không kèm plan/subscription (phải gọi /detail riêng)
   - *User Story:* Là một Platform Admin, tôi muốn xem danh sách công ty có tìm kiếm, lọc, sort, phân trang để quản trị khách hàng SaaS hiệu quả.
   - *Acceptance Criteria:* Tìm theo tên/slug/status; lọc trạng thái; sort ngày tạo; phân trang; xem plan/subscription hiện tại.
   - *DB Entities:* `tenants, tenant_subscriptions, plans`
 - [ ] **#17 — Cập nhật thông tin tenant** `P0` · 3sp · Nền tảng: Backend, Web Admin
+  - 🔒 **Test tay thật — ĐÃ KHÓA (2026-08-13):** toàn bộ case pass, gồm giới hạn quyền (chỉ owner sửa được). Xem `docs/manual-tests/MANUAL_TEST_LOG.md`.
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: TenantService.updateTenant, test_update_tenant.sh; thiếu: không ghi audit
   - *User Story:* Là một Company Admin, tôi muốn cập nhật hồ sơ công ty, logo, địa chỉ, timezone để thông tin doanh nghiệp chính xác.
   - *Acceptance Criteria:* Cập nhật name/display_name/logo/address; timezone ảnh hưởng tính ngày sau cập nhật; ghi audit.
@@ -214,6 +228,7 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 #### Tenant Settings
 
 - [ ] **#18 — Cấu hình giao diện và định dạng** `P1` · 3sp · Nền tảng: Backend, Web Admin
+  - 🔒 **Test tay thật — ĐÃ KHÓA (2026-08-13):** toàn bộ case pass. Đã bổ sung audit `tenant_settings_updated`. Gap language/currency thuộc API #17 vẫn còn (đúng kiến trúc). Xem `docs/manual-tests/MANUAL_TEST_LOG.md`.
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: TenantSettingsService, test_tenant_settings.sh; thiếu: language/currency nằm ở Tenant entity chứ không phải tenant_settings; không ghi audit
   - *User Story:* Là một Company Admin, tôi muốn cấu hình ngôn ngữ, định dạng ngày giờ, tiền tệ và màu thương hiệu để hệ thống phù hợp công ty.
   - *Acceptance Criteria:* Lưu language/date_format/time_format/currency/brand_color; preview trên UI; ghi audit.
@@ -222,6 +237,7 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 #### Tenant Security
 
 - [ ] **#19 — Quản lý IP whitelist** `P1` · 5sp · Nền tảng: Backend, Web Admin
+  - 🔒 **Test tay thật — ĐÃ KHÓA (2026-08-13):** đã sửa scope client-type → scope theo ROLE (backend + UI), test pass đầy đủ. Xem `docs/manual-tests/MANUAL_TEST_LOG.md`.
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: IpWhitelistService, test_ip_whitelist.sh; thiếu: CRUD đầy đủ nhưng KHÔNG có filter nào thực sự chặn request theo IP — dữ liệu whitelist chưa được enforce
   - *User Story:* Là một Company Admin, tôi muốn thêm/sửa/tắt IP whitelist cho web admin hoặc API để kiểm soát truy cập theo mạng.
   - *Acceptance Criteria:* Thêm IP/CIDR; chọn applies_to; bật/tắt; expires_at tùy chọn; chặn request ngoài whitelist theo policy; ghi audit denied.
@@ -230,6 +246,7 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 #### Plans
 
 - [x] **#20 — Quản lý gói dịch vụ** `P0` · 5sp · Nền tảng: Backend, Web Admin
+  - 🔒 **Test tay thật — ĐÃ KHÓA (2026-08-13):** toàn bộ case pass. Xem `docs/manual-tests/MANUAL_TEST_LOG.md`.
   - *Audit (2026-07-22):* ✅ ĐÃ XONG — bằng chứng: PlanService, test_plans.sh
   - *User Story:* Là một Platform Admin, tôi muốn tạo và cập nhật các gói trial/basic/pro/enterprise để kiểm soát mô hình SaaS.
   - *Acceptance Criteria:* Tạo/sửa plan; bật/tắt plan; cấu hình giá; không xóa plan đang có subscription active.
@@ -238,6 +255,7 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 #### Plan Limits
 
 - [x] **#21 — Cấu hình giới hạn gói** `P0` · 5sp · Nền tảng: Backend, Web Admin
+  - 🔒 **Test tay thật — ĐÃ KHÓA (2026-08-13):** toàn bộ case pass hoặc hoãn hợp lệ theo Sprint liên quan. Xem `docs/manual-tests/MANUAL_TEST_LOG.md`.
   - *Audit (2026-07-22):* ✅ ĐÃ XONG — bằng chứng: PlanLimitsService + PlanLimitEnforcementService, test_plan_limits.sh
   - *User Story:* Là một Platform Admin, tôi muốn thiết lập giới hạn nhân viên, site, storage, random check theo gói để hệ thống enforce đúng gói dịch vụ.
   - *Acceptance Criteria:* Cập nhật plan_limits; validate số không âm; API tạo nhân viên/site kiểm tra limit; ghi audit.
@@ -246,6 +264,7 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 #### Subscription
 
 - [x] **#22 — Gán subscription cho tenant** `P0` · 5sp · Nền tảng: Backend, Web Admin
+  - 🔒 **Test tay thật — ĐÃ KHÓA (2026-08-13):** toàn bộ case pass. Xem `docs/manual-tests/MANUAL_TEST_LOG.md`.
   - *Audit (2026-07-22):* ✅ ĐÃ XONG — bằng chứng: TenantSubscriptionService, test_subscription.sh, SubscriptionExpirationJob
   - *User Story:* Là một Platform Admin, tôi muốn gán tenant vào plan và kỳ hạn sử dụng để quản lý trạng thái thuê bao.
   - *Acceptance Criteria:* Tạo subscription; set current_period_start/end; cập nhật tenants.current_subscription_id; status trialing/active/expired; ghi audit.
@@ -256,6 +275,7 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 #### Role
 
 - [x] **#23 — Seed role và permission hệ thống** `P0` · 5sp · Nền tảng: Backend, Queue/AI/Automation
+  - 🔒 **Test tay thật — ĐÃ KHÓA (2026-08-13):** xác nhận idempotent qua DB/API. Xem `docs/manual-tests/MANUAL_TEST_LOG.md`.
   - *Audit (2026-07-22):* ✅ ĐÃ XONG — bằng chứng: V13__seed_roles_and_permissions.sql, test_rbac_seed.sh
   - *User Story:* Là một hệ thống, tôi muốn khởi tạo role/permission mặc định khi deploy để có nền tảng phân quyền cho các module.
   - *Acceptance Criteria:* Seed permission theo resource/action; seed role company_admin/hr/site_supervisor/field_employee; idempotent; không tạo trùng.

@@ -1,5 +1,9 @@
 package com.fams.modules.tenant.service;
 
+import com.fams.modules.rbac.entity.Role;
+import com.fams.modules.rbac.entity.UserRole;
+import com.fams.modules.rbac.repository.RoleRepository;
+import com.fams.modules.rbac.repository.UserRoleRepository;
 import com.fams.modules.tenant.dto.request.CreateIpWhitelistRequest;
 import com.fams.modules.tenant.dto.request.UpdateIpWhitelistRequest;
 import com.fams.modules.tenant.dto.response.IpWhitelistResponse;
@@ -18,11 +22,12 @@ import org.springframework.data.domain.Sort;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.util.StringUtils;
 
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 @Slf4j
@@ -32,13 +37,19 @@ public class IpWhitelistService {
     private final TenantRepository tenantRepository;
     private final TenantIpWhitelistRepository whitelistRepository;
     private final IpWhitelistGuard ipWhitelistGuard;
+    private final RoleRepository roleRepository;
+    private final UserRoleRepository userRoleRepository;
 
     public IpWhitelistService(TenantRepository tenantRepository,
                               TenantIpWhitelistRepository whitelistRepository,
-                              IpWhitelistGuard ipWhitelistGuard) {
+                              IpWhitelistGuard ipWhitelistGuard,
+                              RoleRepository roleRepository,
+                              UserRoleRepository userRoleRepository) {
         this.tenantRepository = tenantRepository;
         this.whitelistRepository = whitelistRepository;
         this.ipWhitelistGuard = ipWhitelistGuard;
+        this.roleRepository = roleRepository;
+        this.userRoleRepository = userRoleRepository;
     }
 
     @Transactional(readOnly = true)
@@ -54,14 +65,16 @@ public class IpWhitelistService {
                                         UUID userId, boolean isPlatformAdmin) {
         assertAccess(tenantId, userId, isPlatformAdmin);
 
+        Set<String> roleNames = validateRoleNames(tenantId, request.getApplicableRoleNames());
+
         TenantIpWhitelist entry = TenantIpWhitelist.builder()
                 .tenantId(tenantId)
                 .ipAddress(request.getIpAddress().trim())
                 .label(request.getLabel())
-                .scope(StringUtils.hasText(request.getScope()) ? request.getScope() : "all")
+                .applicableRoleNames(roleNames)
                 .build();
 
-        assertCallerNotLockedOut(tenantId, null, entry.getIpAddress(), true, isPlatformAdmin);
+        assertCallerNotLockedOut(tenantId, userId, null, entry.getIpAddress(), true, roleNames, isPlatformAdmin);
 
         whitelistRepository.save(entry);
         ipWhitelistGuard.invalidate(tenantId);
@@ -79,10 +92,13 @@ public class IpWhitelistService {
                 .orElseThrow(() -> new ResourceNotFoundException("IP whitelist entry not found: " + entryId));
 
         if (request.getLabel() != null)    entry.setLabel(request.getLabel().isBlank() ? null : request.getLabel());
-        if (StringUtils.hasText(request.getScope()))    entry.setScope(request.getScope());
+        if (request.getApplicableRoleNames() != null) {
+            entry.setApplicableRoleNames(validateRoleNames(tenantId, request.getApplicableRoleNames()));
+        }
         if (request.getIsActive() != null) entry.setActive(request.getIsActive());
 
-        assertCallerNotLockedOut(tenantId, entryId, entry.getIpAddress(), entry.isActive(), isPlatformAdmin);
+        assertCallerNotLockedOut(tenantId, userId, entryId, entry.getIpAddress(), entry.isActive(),
+                entry.getApplicableRoleNames(), isPlatformAdmin);
 
         whitelistRepository.save(entry);
         ipWhitelistGuard.invalidate(tenantId);
@@ -98,12 +114,32 @@ public class IpWhitelistService {
         TenantIpWhitelist entry = whitelistRepository.findByIdAndTenantIdAndDeletedAtIsNull(entryId, tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("IP whitelist entry not found: " + entryId));
 
-        assertCallerNotLockedOut(tenantId, entryId, null, false, isPlatformAdmin);
+        assertCallerNotLockedOut(tenantId, userId, entryId, null, false, Set.of(), isPlatformAdmin);
 
         entry.setDeletedAt(OffsetDateTime.now());
         whitelistRepository.save(entry);
         ipWhitelistGuard.invalidate(tenantId);
         log.info("IP whitelist entry deleted: id={} tenantId={} by userId={}", entryId, tenantId, userId);
+    }
+
+    /** Empty/null input = applies to every role (stored as an empty set). Non-empty input is
+     *  validated against the tenant's actually-assignable roles (system roles + this tenant's
+     *  own custom roles) so a typo doesn't silently create an entry nobody's role ever matches. */
+    private Set<String> validateRoleNames(UUID tenantId, List<String> requested) {
+        if (requested == null || requested.isEmpty()) {
+            return Set.of();
+        }
+        Set<String> validNames = roleRepository
+                .findByDeletedAtIsNullAndTenantIdIsNullOrDeletedAtIsNullAndTenantId(tenantId)
+                .stream().map(Role::getName).collect(java.util.stream.Collectors.toSet());
+        Set<String> requestedSet = new HashSet<>(requested);
+        requestedSet.removeIf(String::isBlank);
+        Set<String> unknown = new HashSet<>(requestedSet);
+        unknown.removeAll(validNames);
+        if (!unknown.isEmpty()) {
+            throw new IllegalArgumentException("Unknown role name(s) for this tenant: " + unknown);
+        }
+        return requestedSet;
     }
 
     /**
@@ -114,15 +150,20 @@ public class IpWhitelistService {
      * then recover the tenant (JwtAuthFilter/IpWhitelistGuard exempts admins from enforcement
      * entirely), so this check only applies to non-admin callers.
      *
+     * Role-aware (2026-08-13): only entries that would actually apply to the CALLER's own
+     * role count toward the "resulting active" baseline — an entry scoped to a role the caller
+     * doesn't hold can never lock the caller out, so it's correctly ignored here.
+     *
      * @param excludeEntryId entry being updated/deleted (excluded from the "existing active"
      *                       baseline so its OLD state isn't double-counted) — null when adding
      * @param candidateIp the entry's ip_address after this change would take effect — null
      *                    when deleting (no replacement)
      * @param candidateActive whether that candidate entry would be active after this change
+     * @param candidateRoleNames the entry's role scope after this change would take effect
      */
-    private void assertCallerNotLockedOut(UUID tenantId, UUID excludeEntryId,
+    private void assertCallerNotLockedOut(UUID tenantId, UUID callerId, UUID excludeEntryId,
                                           String candidateIp, boolean candidateActive,
-                                          boolean isPlatformAdmin) {
+                                          Set<String> candidateRoleNames, boolean isPlatformAdmin) {
         if (isPlatformAdmin) {
             return; // admins bypass enforcement entirely — never at risk from this
         }
@@ -131,18 +172,26 @@ public class IpWhitelistService {
             return; // can't evaluate — fail open, matching IpWhitelistGuard's own fail-open rule
         }
 
+        List<UserRole> callerRoles = userRoleRepository.findAllActiveByUserId(callerId);
+        String callerRoleName = callerRoles.isEmpty() ? null : callerRoles.get(0).getRole().getName();
+
         List<String> resultingActive = new ArrayList<>();
         whitelistRepository.findByTenantIdAndIsActiveTrueAndDeletedAtIsNull(tenantId).forEach(e -> {
-            if (excludeEntryId == null || !e.getId().equals(excludeEntryId)) {
+            boolean sameEntry = excludeEntryId != null && e.getId().equals(excludeEntryId);
+            boolean appliesToCaller = e.getApplicableRoleNames().isEmpty()
+                    || (callerRoleName != null && e.getApplicableRoleNames().contains(callerRoleName));
+            if (!sameEntry && appliesToCaller) {
                 resultingActive.add(e.getIpAddress());
             }
         });
-        if (candidateActive && candidateIp != null) {
+        boolean candidateAppliesToCaller = candidateRoleNames.isEmpty()
+                || (callerRoleName != null && candidateRoleNames.contains(callerRoleName));
+        if (candidateActive && candidateIp != null && candidateAppliesToCaller) {
             resultingActive.add(candidateIp);
         }
 
         if (resultingActive.isEmpty()) {
-            return; // tenant would become fully unrestricted — always safe
+            return; // tenant would become unrestricted for the caller's own role — always safe
         }
         boolean callerStillCovered = resultingActive.stream().anyMatch(ip -> IpCidrMatcher.matches(callerIp, ip));
         if (!callerStillCovered) {
@@ -168,7 +217,7 @@ public class IpWhitelistService {
                 .tenantId(e.getTenantId())
                 .ipAddress(e.getIpAddress())
                 .label(e.getLabel())
-                .scope(e.getScope())
+                .applicableRoleNames(new ArrayList<>(e.getApplicableRoleNames()))
                 .isActive(e.isActive())
                 .createdAt(e.getCreatedAt())
                 .updatedAt(e.getUpdatedAt())

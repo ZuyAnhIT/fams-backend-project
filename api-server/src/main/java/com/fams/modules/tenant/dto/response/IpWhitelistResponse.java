@@ -6,6 +6,7 @@ import lombok.Builder;
 import lombok.Data;
 
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.UUID;
 
 @Data
@@ -25,8 +26,9 @@ public class IpWhitelistResponse {
     @Schema(description = "Human-readable label", example = "Office network")
     private String label;
 
-    @Schema(description = "Scope: web_admin, api, or all", example = "all")
-    private String scope;
+    @Schema(description = "Role names this entry restricts. Empty = applies to every role.",
+            example = "[\"TENANT_ADMIN\", \"HR_MANAGER\"]")
+    private List<String> applicableRoleNames;
 
     @Schema(description = "Whether this entry is currently enforced")
     @JsonProperty("isActive")

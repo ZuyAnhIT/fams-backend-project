@@ -1,9 +1,13 @@
 package com.fams.modules.auth.service;
 
+import com.fams.modules.audit.service.AuditLogService;
 import com.fams.modules.auth.dto.response.SessionResponse;
 import com.fams.modules.auth.entity.RefreshToken;
 import com.fams.modules.auth.repository.RefreshTokenRepository;
+import com.fams.modules.rbac.entity.UserRole;
+import com.fams.modules.rbac.repository.UserRoleRepository;
 import com.fams.shared.exception.ResourceNotFoundException;
+import com.fams.shared.security.HttpRequestUtils;
 import com.fams.shared.security.JwtProvider;
 import io.jsonwebtoken.Claims;
 import lombok.extern.slf4j.Slf4j;
@@ -29,15 +33,21 @@ public class LogoutService {
     private final StringRedisTemplate redis;
     private final JwtProvider jwtProvider;
     private final RefreshTokenRepository refreshTokenRepository;
+    private final UserRoleRepository userRoleRepository;
+    private final AuditLogService auditLogService;
     private final int accessTtlMinutes;
 
     public LogoutService(StringRedisTemplate redis,
                          JwtProvider jwtProvider,
                          RefreshTokenRepository refreshTokenRepository,
+                         UserRoleRepository userRoleRepository,
+                         AuditLogService auditLogService,
                          @Value("${app.jwt.access-ttl-minutes}") int accessTtlMinutes) {
         this.redis = redis;
         this.jwtProvider = jwtProvider;
         this.refreshTokenRepository = refreshTokenRepository;
+        this.userRoleRepository = userRoleRepository;
+        this.auditLogService = auditLogService;
         this.accessTtlMinutes = accessTtlMinutes;
     }
 
@@ -70,7 +80,7 @@ public class LogoutService {
     }
 
     @Transactional
-    public void logoutAll(String rawAccessToken, UUID userId) {
+    public void logoutAll(String rawAccessToken, UUID userId, String actorEmail) {
         blacklistAccessToken(rawAccessToken);
 
         String userRevokeKey = USER_REVOKE_PREFIX + userId;
@@ -80,6 +90,28 @@ public class LogoutService {
 
         refreshTokenRepository.revokeAllActiveByUserId(userId, OffsetDateTime.now());
         log.debug("Logout-all executed for user {}", userId);
+
+        // Only logged when the account belongs to a tenant — audit viewing is tenant-scoped
+        // (Tenant Admin/HR), so a tenant-less account's entry would have no realistic viewer.
+        List<UserRole> roles = userRoleRepository.findAllActiveByUserId(userId);
+        if (!roles.isEmpty()) {
+            try {
+                auditLogService.record(
+                        roles.get(0).getTenantId(),
+                        userId,
+                        actorEmail,
+                        "USER",
+                        userId.toString(),
+                        "LOGOUT_ALL",
+                        null,
+                        null,
+                        HttpRequestUtils.currentRequestId(),
+                        HttpRequestUtils.currentIpAddress(),
+                        HttpRequestUtils.currentUserAgent());
+            } catch (Exception ex) {
+                log.warn("Failed to record LOGOUT_ALL audit for user {}: {}", userId, ex.getMessage());
+            }
+        }
     }
 
     private void revokeRefreshToken(String rawRefreshToken) {
