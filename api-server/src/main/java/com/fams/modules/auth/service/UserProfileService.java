@@ -1,14 +1,18 @@
 package com.fams.modules.auth.service;
 
+import com.fams.modules.audit.service.AuditLogService;
 import com.fams.modules.auth.dto.request.UpdateProfileRequest;
 import com.fams.modules.auth.dto.response.UserProfileResponse;
 import com.fams.modules.auth.entity.User;
 import com.fams.modules.auth.repository.UserRepository;
 import com.fams.modules.auth.specification.UserSpecification;
 import com.fams.modules.auth.util.PhoneNumbers;
+import com.fams.modules.rbac.entity.UserRole;
+import com.fams.modules.rbac.repository.UserRoleRepository;
 import com.fams.shared.exception.DuplicateResourceException;
 import com.fams.shared.exception.InvalidCredentialsException;
 import com.fams.shared.pagination.PageResponse;
+import com.fams.shared.security.HttpRequestUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.PageRequest;
@@ -19,6 +23,9 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.util.UriComponentsBuilder;
 
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Slf4j
@@ -32,6 +39,8 @@ public class UserProfileService {
     private final EmailVerificationService emailVerificationService;
     private final EmailService emailService;
     private final PhoneOtpService phoneOtpService;
+    private final UserRoleRepository userRoleRepository;
+    private final AuditLogService auditLogService;
     private final String frontendUrl;
 
     public UserProfileService(UserRepository userRepository,
@@ -39,12 +48,16 @@ public class UserProfileService {
                               EmailVerificationService emailVerificationService,
                               EmailService emailService,
                               PhoneOtpService phoneOtpService,
+                              UserRoleRepository userRoleRepository,
+                              AuditLogService auditLogService,
                               @Value("${app.frontend-url}") String frontendUrl) {
         this.userRepository = userRepository;
         this.avatarStorageService = avatarStorageService;
         this.emailVerificationService = emailVerificationService;
         this.emailService = emailService;
         this.phoneOtpService = phoneOtpService;
+        this.userRoleRepository = userRoleRepository;
+        this.auditLogService = auditLogService;
         this.frontendUrl = frontendUrl;
     }
 
@@ -127,6 +140,8 @@ public class UserProfileService {
         User user = userRepository.findByIdAndDeletedAtIsNull(userId)
                 .orElseThrow(() -> new InvalidCredentialsException("User not found"));
 
+        Map<String, Object> before = profileAuditSnapshot(user);
+
         if (StringUtils.hasText(request.getDisplayName())) {
             user.setDisplayName(request.getDisplayName());
         }
@@ -150,7 +165,39 @@ public class UserProfileService {
         userRepository.save(user);
         log.info("Profile updated for user {}", userId);
 
+        // Only logged when the account belongs to a tenant — audit viewing is tenant-scoped
+        // (Tenant Admin/HR), so a tenant-less account's entry would have no realistic viewer.
+        List<UserRole> roles = userRoleRepository.findAllActiveByUserId(userId);
+        if (!roles.isEmpty()) {
+            try {
+                auditLogService.record(
+                        roles.get(0).getTenantId(),
+                        userId,
+                        user.getEmail() != null ? user.getEmail() : user.getPhone(),
+                        "USER",
+                        userId.toString(),
+                        "UPDATE_PROFILE",
+                        before,
+                        profileAuditSnapshot(user),
+                        HttpRequestUtils.currentRequestId(),
+                        HttpRequestUtils.currentIpAddress(),
+                        HttpRequestUtils.currentUserAgent());
+            } catch (Exception ex) {
+                log.warn("Failed to record UPDATE_PROFILE audit for user {}: {}", userId, ex.getMessage());
+            }
+        }
+
         return toResponse(user);
+    }
+
+    private Map<String, Object> profileAuditSnapshot(User user) {
+        Map<String, Object> snapshot = new HashMap<>();
+        snapshot.put("displayName", user.getDisplayName());
+        snapshot.put("hometown", user.getHometown());
+        snapshot.put("gender", user.getGender());
+        snapshot.put("address", user.getAddress());
+        snapshot.put("dateOfBirth", user.getDateOfBirth());
+        return snapshot;
     }
 
     // ════════════════════════════════════════════════════════════════════════

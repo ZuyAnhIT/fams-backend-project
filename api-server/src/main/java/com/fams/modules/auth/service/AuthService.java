@@ -129,10 +129,17 @@ public class AuthService {
                     emailService.sendAccountLockedEmail(user.getEmail(), lockUntil.toString(), forgotPasswordUrl);
                 }
 
+                // Only recorded when the account belongs to a tenant — that's the only case
+                // anyone (the tenant's HR/Admin) can actually see this entry (audit-log
+                // viewing is tenant-scoped, see AuditLogController). A tenant-less account's
+                // lockout would only ever be visible to a Platform Admin browsing every
+                // tenant at once, which isn't a realistic monitoring path — skip it there.
+                recordAuthFailureAudit(user, "ACCOUNT_LOCKED");
                 throw new AccountLockedException(lockUntil);
             }
 
             userRepository.save(user);
+            recordAuthFailureAudit(user, "LOGIN_FAILED");
             throw new InvalidCredentialsException("Invalid credentials");
         }
 
@@ -247,6 +254,37 @@ public class AuthService {
      * Luôn ném InvalidCredentialsException (không phải 404) để tránh lộ
      * thông tin "tài khoản có tồn tại hay không" (user enumeration).
      */
+    /**
+     * Best-effort audit entry for a failed-login/lockout event — only written when the account
+     * belongs to a tenant, since that's the only case anyone can realistically view it (audit
+     * viewing is tenant-scoped to Tenant Admin/HR; a tenant-less account's log entry would only
+     * ever be reachable by a Platform Admin browsing every tenant at once). Never lets an audit
+     * failure break the login flow itself.
+     */
+    private void recordAuthFailureAudit(User user, String action) {
+        List<UserRole> roles = userRoleRepository.findAllActiveByUserId(user.getId());
+        if (roles.isEmpty()) {
+            return;
+        }
+        UUID tenantId = roles.get(0).getTenantId();
+        try {
+            auditLogService.record(
+                    tenantId,
+                    user.getId(),
+                    user.getEmail() != null ? user.getEmail() : user.getPhone(),
+                    "USER",
+                    user.getId().toString(),
+                    action,
+                    null,
+                    null,
+                    HttpRequestUtils.currentRequestId(),
+                    HttpRequestUtils.currentIpAddress(),
+                    HttpRequestUtils.currentUserAgent());
+        } catch (Exception ex) {
+            log.warn("Failed to record {} audit for user {}: {}", action, user.getId(), ex.getMessage());
+        }
+    }
+
     private User resolveUser(String identifier) {
         if (!StringUtils.hasText(identifier)) {
             throw new InvalidCredentialsException("Invalid credentials");

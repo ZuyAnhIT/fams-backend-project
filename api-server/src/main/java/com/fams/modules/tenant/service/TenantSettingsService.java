@@ -1,5 +1,6 @@
 package com.fams.modules.tenant.service;
 
+import com.fams.modules.audit.service.AuditLogService;
 import com.fams.modules.rbac.repository.UserRoleRepository;
 import com.fams.modules.tenant.dto.request.UpdateTenantSettingsRequest;
 import com.fams.modules.tenant.dto.response.TenantSettingsResponse;
@@ -7,12 +8,15 @@ import com.fams.modules.tenant.entity.TenantSettings;
 import com.fams.modules.tenant.repository.TenantRepository;
 import com.fams.modules.tenant.repository.TenantSettingsRepository;
 import com.fams.shared.exception.ResourceNotFoundException;
+import com.fams.shared.security.HttpRequestUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.UUID;
 
 @Slf4j
@@ -22,13 +26,16 @@ public class TenantSettingsService {
     private final TenantRepository tenantRepository;
     private final TenantSettingsRepository settingsRepository;
     private final UserRoleRepository userRoleRepository;
+    private final AuditLogService auditLogService;
 
     public TenantSettingsService(TenantRepository tenantRepository,
                                  TenantSettingsRepository settingsRepository,
-                                 UserRoleRepository userRoleRepository) {
+                                 UserRoleRepository userRoleRepository,
+                                 AuditLogService auditLogService) {
         this.tenantRepository = tenantRepository;
         this.settingsRepository = settingsRepository;
         this.userRoleRepository = userRoleRepository;
+        this.auditLogService = auditLogService;
     }
 
     @Transactional
@@ -55,6 +62,8 @@ public class TenantSettingsService {
         TenantSettings settings = settingsRepository.findByTenantId(tenantId)
                 .orElseGet(() -> createDefaults(tenantId));
 
+        Map<String, Object> before = settingsAuditSnapshot(settings);
+
         if (StringUtils.hasText(request.getDateFormat()))      settings.setDateFormat(request.getDateFormat());
         if (StringUtils.hasText(request.getTimeFormat()))      settings.setTimeFormat(request.getTimeFormat());
         if (request.getBrandPrimaryColor() != null)            settings.setBrandPrimaryColor(nullIfBlank(request.getBrandPrimaryColor()));
@@ -68,7 +77,31 @@ public class TenantSettingsService {
         settingsRepository.save(settings);
         log.info("Tenant settings updated: tenantId={} by userId={}", tenantId, userId);
 
+        try {
+            auditLogService.record(
+                    tenantId, userId, null,
+                    "TenantSettings", tenantId.toString(), "tenant_settings_updated",
+                    before, settingsAuditSnapshot(settings),
+                    HttpRequestUtils.currentRequestId(),
+                    HttpRequestUtils.currentIpAddress(),
+                    HttpRequestUtils.currentUserAgent());
+        } catch (Exception ex) {
+            log.warn("Failed to record tenant_settings_updated audit for tenantId={}: {}", tenantId, ex.getMessage());
+        }
+
         return toResponse(settings);
+    }
+
+    private Map<String, Object> settingsAuditSnapshot(TenantSettings settings) {
+        Map<String, Object> snapshot = new HashMap<>();
+        snapshot.put("dateFormat", settings.getDateFormat());
+        snapshot.put("timeFormat", settings.getTimeFormat());
+        snapshot.put("brandPrimaryColor", settings.getBrandPrimaryColor());
+        snapshot.put("brandSecondaryColor", settings.getBrandSecondaryColor());
+        snapshot.put("brandAccentColor", settings.getBrandAccentColor());
+        snapshot.put("employeeCodePrefix", settings.getEmployeeCodePrefix());
+        snapshot.put("employeeCodePadding", settings.getEmployeeCodePadding());
+        return snapshot;
     }
 
     /**

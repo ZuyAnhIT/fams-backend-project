@@ -228,6 +228,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
                 String email = claims.get("email", String.class);
                 Boolean isPlatformAdmin = claims.get("isPlatformAdmin", Boolean.class);
                 String tenantId = claims.get("tenantId", String.class);
+                String role = claims.get("role", String.class);
 
                 if (!Boolean.TRUE.equals(isPlatformAdmin) && isTenantSuspended(tenantId)) {
                     log.debug("Rejecting request — tenant {} is suspended", tenantId);
@@ -243,7 +244,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
                 // unrestricted (see IpWhitelistGuard).
                 if (!Boolean.TRUE.equals(isPlatformAdmin) && StringUtils.hasText(tenantId)) {
                     String clientIp = clientIpFrom(request);
-                    if (!ipWhitelistGuard.isAllowed(UUID.fromString(tenantId), clientIp)) {
+                    if (!ipWhitelistGuard.isAllowed(UUID.fromString(tenantId), role, clientIp)) {
                         log.debug("Rejecting request — IP {} not whitelisted for tenant {}", clientIp, tenantId);
                         response.setStatus(HttpServletResponse.SC_FORBIDDEN);
                         response.setContentType("application/json;charset=UTF-8");

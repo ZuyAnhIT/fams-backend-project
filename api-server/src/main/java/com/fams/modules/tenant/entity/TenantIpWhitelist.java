@@ -4,6 +4,8 @@ import jakarta.persistence.*;
 import lombok.*;
 
 import java.time.OffsetDateTime;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.UUID;
 
 @Getter
@@ -28,8 +30,13 @@ public class TenantIpWhitelist {
     @Column(length = 100)
     private String label;
 
-    @Column(nullable = false, length = 20)
-    private String scope;
+    /** Empty = applies to every role (equivalent to the old "all" scope). Non-empty = this
+     *  entry only restricts users holding one of these role names — see V90 migration. */
+    @ElementCollection(fetch = FetchType.EAGER)
+    @CollectionTable(name = "tenant_ip_whitelist_roles", joinColumns = @JoinColumn(name = "ip_whitelist_id"))
+    @Column(name = "role_name")
+    @Builder.Default
+    private Set<String> applicableRoleNames = new HashSet<>();
 
     @Column(name = "is_active", nullable = false)
     private boolean isActive;
@@ -48,7 +55,6 @@ public class TenantIpWhitelist {
         OffsetDateTime now = OffsetDateTime.now();
         if (createdAt == null) createdAt = now;
         if (updatedAt == null) updatedAt = now;
-        if (scope == null) scope = "all";
         isActive = true;
     }
 
