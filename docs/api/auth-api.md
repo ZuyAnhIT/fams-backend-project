@@ -482,13 +482,27 @@ Nhánh TOTP này áp dụng cho **cả 3 kênh đăng nhập** dùng mật khẩ
 
 API đã tồn tại từ trước nhưng **chưa từng được đưa vào tài liệu FE** — mục 4.3 ở trên chỉ nói tới nhánh LOGIN khi TOTP đã bật; đây là toàn bộ luồng BẬT/TẮT trong màn Cài đặt tài khoản.
 
+#### Cập nhật contract 2026-08-12 (theo yêu cầu FE) — thêm `otpauthUri`, bỏ nhúng iframe
+
+**Lý do**: FE trước đây nhúng `qrCodeUrl` (trang HTML dựng QR) bằng `<iframe>`. Endpoint này trả `X-Frame-Options: DENY` (mặc định của Spring Security cho toàn hệ thống, **không đổi vì bất kỳ lý do gì**, kể cả để cho iframe hoạt động) nên trình duyệt luôn chặn. Hướng xử lý đúng: Backend trả thêm `otpauthUri`, FE tự vẽ QR phía client (dùng thư viện JS/mobile QR bất kỳ) thay vì nhúng trang HTML server-side.
+
 **Bước 1 — Khởi tạo**: `POST /api/v1/auth/totp/setup` (cần Bearer token). `409` nếu tài khoản đã bật TOTP rồi.
 ```json
 // response
-{ "setupToken": "uuid", "qrCodeUrl": "http://.../api/v1/auth/totp/qr?token=uuid", "manualEntryKey": "BASE32SECRET..." }
+{
+  "setupToken": "550e8400-e29b-41d4-a716-446655440000",
+  "otpauthUri": "otpauth://totp/FAMS:user%40example.com?secret=JBSWY3DPEHPK3PXP&issuer=FAMS&algorithm=SHA1&digits=6&period=30",
+  "manualEntryKey": "JBSWY3DPEHPK3PXP",
+  "qrCodeUrl": "http://.../api/v1/auth/totp/qr?token=550e8400-e29b-41d4-a716-446655440000",
+  "expiresAt": "2026-08-12T21:30:00+07:00"
+}
 ```
-- `qrCodeUrl`: trang HTML dựng sẵn (không cần Bearer token, hết hạn sau 10 phút) — có thể mở trực tiếp trong WebView hoặc hiện QR ảnh cho user quét bằng Google Authenticator/Authy. Web có thể tự vẽ QR từ `manualEntryKey` nếu muốn UI riêng thay vì mở trang HTML này.
-- `manualEntryKey`: dùng khi user muốn nhập tay thay vì quét QR.
+- **`otpauthUri` (MỚI, dùng đây)**: chuỗi `otpauth://totp/...` chuẩn RFC — FE/App tự vẽ QR từ chuỗi này (mọi thư viện QR phổ biến nhận thẳng chuỗi text). `issuer`/`account` đã được URL-encode đúng chuẩn (email có `+`, khoảng trắng, ký tự đặc biệt đều encode đúng — đã có test tự động). `account` ưu tiên email, không có thì dùng số điện thoại, không có cả hai thì dùng user ID. `secret` trong URI **luôn trùng** `manualEntryKey`.
+- **`expiresAt` (MỚI)**: thời điểm hết hạn phiên setup (10 phút), phản ánh đúng TTL thật trong Redis — dùng để hiện đếm ngược/cảnh báo hết hạn trên UI.
+- **`qrCodeUrl` (DEPRECATED, vẫn còn)**: trang HTML dựng QR server-side. **Không được nhúng iframe** — chỉ dùng để mở trực tiếp 1 tab trình duyệt (hỗ trợ kiểm thử thủ công) hoặc cho client cũ chưa kịp cập nhật. Client mới **phải** chuyển sang dùng `otpauthUri`.
+- `manualEntryKey`: dùng khi user muốn nhập tay thay vì quét QR — không đổi.
+- Gọi `setup` nhiều lần liên tiếp (trước khi `verify`) sẽ **vô hiệu hoá phiên trước đó** — chỉ 1 secret đang chờ xác nhận tồn tại tại 1 thời điểm cho mỗi user, tránh trường hợp user quét nhầm QR cũ vẫn hoạt động.
+- Response có header `Cache-Control: no-store, no-cache, must-revalidate`, `Pragma: no-cache`, `Referrer-Policy: no-referrer` — chứa secret sống, không được cache ở bất kỳ tầng nào (browser, proxy, CDN).
 
 **Bước 2 — Xác nhận mã đầu tiên và kích hoạt**: `POST /api/v1/auth/totp/verify`
 ```json
@@ -498,11 +512,13 @@ API đã tồn tại từ trước nhưng **chưa từng được đưa vào tà
 // response — CHỈ hiện MỘT LẦN DUY NHẤT, bắt buộc nhắc user lưu lại
 { "backupCodes": ["RNJYVZY2", "P85W53GC", "...", "8 mã tổng cộng"] }
 ```
-`400` nếu `setupToken` hết hạn/sai, hoặc mã nhập sai. **UI bắt buộc**: sau khi thành công, hiện màn hình yêu cầu user xác nhận đã lưu 8 backup code (dùng khi mất điện thoại) — không hiện lại được sau màn này.
+`400` nếu `setupToken` hết hạn/sai, mã nhập sai, hoặc `setupToken` thuộc về user khác (không lộ thông tin nào khác ngoài "không hợp lệ"). Cho phép lệch giờ tối đa ±1 time-step (±30 giây) giữa server và điện thoại. Setup token **dùng 1 lần** — verify thành công sẽ xoá ngay khỏi Redis, gọi lại với cùng token sẽ luôn 400. **UI bắt buộc**: sau khi thành công, hiện màn hình yêu cầu user xác nhận đã lưu 8 backup code (dùng khi mất điện thoại) — không hiện lại được sau màn này.
 
 **Tắt 2FA**: `POST /api/v1/auth/totp/disable` — **bắt buộc xác thực lại**, gửi đúng 1 trong 3: `{"password": "..."}`, `{"code": "123456"}`, hoặc `{"backupCode": "..."}`. Chỉ có Bearer token hợp lệ là **không đủ** (chủ đích — chống trường hợp session token bị đánh cắp thì tắt luôn 2FA). `401` nếu xác thực lại thất bại, `400` nếu tài khoản chưa bật TOTP.
 
-**Mới (2026-08-05)**: cả bật và tắt TOTP giờ được ghi vào audit log (`action=TOTP_ENABLED`/`TOTP_DISABLED`) — không đổi API contract, chỉ là dữ liệu nội bộ để truy vết bảo mật, FE không cần làm gì thêm.
+**Mới (2026-08-05)**: cả bật và tắt TOTP giờ được ghi vào audit log (`action=TOTP_ENABLED`/`TOTP_DISABLED`) — không đổi API contract, chỉ là dữ liệu nội bộ để truy vết bảo mật, FE không cần làm gì thêm. Bản ghi audit **không** chứa secret/otpauthUri (đã có test tự động xác nhận).
+
+**`GET /api/v1/auth/totp/qr?token=...` — [DEPRECATED]**: giữ lại để tương thích ngược và mở tay trong trình duyệt, dự kiến loại bỏ ở phiên bản sau khi mọi client đã chuyển sang `otpauthUri`. **Không nhúng iframe** — `X-Frame-Options: DENY` chặn có chủ đích, không phải bug. Cùng bộ header no-store như bước 1.
 
 ### 4.4 Các lỗi đăng nhập
 

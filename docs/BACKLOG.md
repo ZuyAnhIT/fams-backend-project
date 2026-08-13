@@ -2,6 +2,11 @@
 
 > **Tài liệu backlog & lộ trình phát triển dự án FAMS.**
 > File này được sinh tự động từ `Backlog_Tính_Năng_Fams.xlsx` — dùng làm nguồn tham chiếu chính cho cả người phát triển và AI coding assistant (Claude Code, Cursor, v.v.) khi triển khai lần lượt từng Sprint.
+>
+> ⚠️ Checkbox `[x]`/`[ ]` bên dưới chỉ phản ánh **code/backend đã audit xong**, KHÔNG đồng nghĩa
+> đã có người test tay qua UI thật (Web Admin/Mobile App). Trạng thái test tay thật + tính năng
+> nào đã "khóa" (tránh sửa gây ảnh hưởng) nằm ở `docs/manual-tests/MANUAL_TEST_LOG.md` — đọc file
+> đó trước khi sửa bất kỳ tính năng nào đã ✅ ĐÃ KHÓA.
 
 ---
 
@@ -72,6 +77,9 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 #### Đăng nhập
 
 - [x] **#1 — Đăng nhập email/mật khẩu** `P0` · 5sp · Nền tảng: Backend, Web Admin, Mobile App
+  - 🔒 **Test tay thật — ĐÃ KHÓA (2026-08-13):** user đã tự test toàn bộ case trong
+    `docs/manual-tests/sprint-1-feature-01-login.md` qua UI thật, pass hết. Xem
+    `docs/manual-tests/MANUAL_TEST_LOG.md` trước khi sửa lại tính năng này.
   - *Audit (2026-07-22):* ✅ ĐÃ XONG — bằng chứng: AuthController.login, AuthService.login, test_login.sh (backend); LoginForm.tsx (Web Admin, đã kiểm chứng qua trình duyệt thật); login.tsx (Mobile App, đã kiểm chứng qua Expo Web thật).
     - Đã bổ sung: `users.last_login_at` (migration V61) + ghi audit log `LOGIN` (AuthService.login, dùng lại `AuditLogService.record` sẵn có nhưng trước đó chưa ai gọi tới).
     - Bug tìm & sửa khi test UI thật (Mobile App):
@@ -94,6 +102,9 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
   - *Acceptance Criteria:* Nhập email/phone + password; kiểm tra tài khoản active; báo lỗi rõ ràng; tạo access/refresh token; ghi last_login và audit LOGIN.
   - *DB Entities:* `users, tokens, audit_logs`
 - [ ] **#2 — Đăng nhập bằng số điện thoại OTP** `P0` · 5sp · Nền tảng: Backend, Mobile App, Queue/AI/Automation
+  - 🟡 **Test tay thật — PASS MỘT PHẦN (2026-08-13):** Phần A (không cần Firebase) đã pass. Mobile
+    App — luồng OTP thật (Phần B) chưa test, chờ build EAS dev-client. Chưa khóa. Xem
+    `docs/manual-tests/MANUAL_TEST_LOG.md`.
   - *Audit (2026-07-23):* 🟡 CODE ĐÃ ĐÚNG KIẾN TRÚC, CHỜ FIREBASE PROJECT THẬT ĐỂ TEST SMS LIVE.
     - Phát hiện lớn: Backend đã làm đúng Firebase Phone Auth, nhưng **cả 2 frontend gọi sai hoàn toàn** — được viết theo 1 API tưởng tượng (`/auth/otp/send {phone}`, `/auth/otp/verify {phone,code}`) không khớp backend thật (chỉ có `/auth/otp/verify`, nhận `{firebaseIdToken, deviceId}` — không có bước gửi OTP ở backend vì Firebase Client SDK gửi trực tiếp). Cả 2 frontend chưa từng tích hợp Firebase Client SDK thật. Tính năng **không chạy được** trên UI dù không lỗi khi đọc code qua loa.
     - Đã sửa **Backend**: xóa hẳn `OtpService`/`SendOtpRequest`/`VerifyOtpRequest`/`SmsService`/`ConsoleSmsService` (code chết, xác nhận không ai gọi); xóa rule `permitAll` thừa cho `/otp/send` (endpoint không tồn tại); bổ sung rate-limit theo IP cho `/otp/verify` (429, tái dùng `OtpRateLimitException`) để đóng gap AC "chặn nhập sai nhiều lần" — lý do dùng rate-limit theo IP thay vì đếm số lần sai: Firebase đã tự chặn đoán sai OTP trước khi request đến được backend, backend chỉ cần chặn lạm dụng endpoint; **bổ sung luôn nhánh kiểm tra TOTP/2FA** trong `FirebasePhoneLoginService` (trước đây hoàn toàn không có — người dùng bật 2FA có thể bỏ qua 2FA bằng cách đăng nhập qua SĐT!), tái dùng đúng cơ chế pending-token của `AuthService.login()`.
@@ -104,6 +115,10 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
   - *Acceptance Criteria:* Nhập số điện thoại; gửi OTP; xác thực OTP còn hạn; chặn nhập sai nhiều lần; tạo phiên đăng nhập.
   - *DB Entities:* `users, tokens, notifications, audit_logs`
 - [x] **#3 — Đăng nhập Google** `P1` · 3sp · Nền tảng: Backend, Web Admin, Mobile App
+  - ⬜ **Test tay thật — CHƯA TEST (2026-08-13):** chưa chạy qua UI thật trên Web/App. Xem
+    `docs/manual-tests/sprint-1-feature-03-google-login.md` và
+    `docs/manual-tests/MANUAL_TEST_LOG.md` — lưu ý case 4/5 là phát hiện lệch Acceptance Criteria
+    cần xác nhận khi test.
   - *Audit (2026-07-22):* ✅ ĐÃ XONG — bằng chứng: GoogleLoginService, test_google_login.sh
   - *User Story:* Là một người dùng, tôi muốn đăng nhập nhanh bằng tài khoản Google để giảm thao tác đăng nhập.
   - *Acceptance Criteria:* Bấm Google login; nhận profile cơ bản; liên kết email đã tồn tại; từ chối email chưa được mời nếu tenant yêu cầu.

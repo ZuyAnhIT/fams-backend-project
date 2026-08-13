@@ -692,7 +692,18 @@ public class AuthController {
     }
 
     @Operation(summary = "Initiate TOTP 2FA setup",
-        description = "Returns a setup token and QR code URL to configure an Authenticator app. Requires Bearer token.")
+        description = "Returns a setup token, an otpauthUri to render a QR code CLIENT-SIDE, and a manual-entry "
+            + "key to configure an Authenticator app. Requires Bearer token. "
+            + "Contract update (2026-08-12, FE request): added `otpauthUri` (the canonical field going forward — "
+            + "FE/App should build the QR from this, not from the deprecated `qrCodeUrl` HTML page, which is "
+            + "blocked from iframe embedding by design — see X-Frame-Options below) and `expiresAt` (mirrors the "
+            + "real Redis TTL of this setup session). `qrCodeUrl` is kept for backward compatibility only. "
+            + "Calling this while TOTP is already enabled now correctly returns 409 (previously silently issued "
+            + "a fresh secret). Calling this again before finishing a prior pending setup invalidates that prior "
+            + "session — only one pending secret can exist per user at a time. "
+            + "Response headers: `Cache-Control: no-store, no-cache, must-revalidate`, `Pragma: no-cache`, "
+            + "`Referrer-Policy: no-referrer` — this response carries a live TOTP secret and must never be cached "
+            + "or leaked via the Referer header of a subsequent navigation.")
     @ApiResponses({
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "TOTP setup initiated",
             content = @Content(schema = @Schema(implementation = TotpSetupResponse.class))),
@@ -704,11 +715,24 @@ public class AuthController {
             @AuthenticationPrincipal FamsUserDetails userDetails) {
         log.info("TOTP setup initiated by user {}", userDetails.getUserId());
         TotpSetupResponse response = totpService.initiateSetup(userDetails.getUserId());
-        return ResponseEntity.ok(ApiResponse.success(response));
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CACHE_CONTROL, "no-store, no-cache, must-revalidate")
+                .header(HttpHeaders.PRAGMA, "no-cache")
+                .header("Referrer-Policy", "no-referrer")
+                .body(ApiResponse.success(response));
     }
 
-    @Operation(summary = "TOTP QR code page",
-        description = "Returns an HTML page containing the QR code for TOTP setup. Identified by setupToken query parameter. No auth required.")
+    @Deprecated
+    @Operation(summary = "[DEPRECATED] TOTP QR code page",
+        description = "DEPRECATED (2026-08-12) — use `otpauthUri` from POST /totp/setup to render the QR "
+            + "client-side instead. Retained only for old clients and for opening directly in a browser tab "
+            + "(e.g. manual verification during support). Returns an HTML page containing the QR code for TOTP "
+            + "setup. Identified by setupToken query parameter. No auth required. "
+            + "This page CANNOT be embedded in an iframe — `X-Frame-Options: DENY` is intentional here and will "
+            + "NOT be relaxed to SAMEORIGIN or removed just to make iframe embedding work; that header protects "
+            + "the whole app from clickjacking, not just this one page. Frontend must not attempt to iframe this "
+            + "URL — use `otpauthUri` and render the QR yourselves instead.",
+        deprecated = true)
     @ApiResponses({
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "QR code HTML page"),
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Missing or invalid token")
@@ -720,6 +744,9 @@ public class AuthController {
         String html = totpService.buildQrPageHtml(token);
         return ResponseEntity.ok()
                 .contentType(MediaType.TEXT_HTML)
+                .header(HttpHeaders.CACHE_CONTROL, "no-store, no-cache, must-revalidate")
+                .header(HttpHeaders.PRAGMA, "no-cache")
+                .header("Referrer-Policy", "no-referrer")
                 .body(html);
     }
 
