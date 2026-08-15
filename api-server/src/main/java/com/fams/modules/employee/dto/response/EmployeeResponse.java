@@ -7,6 +7,7 @@ import lombok.Data;
 
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.UUID;
 
 @Data
@@ -73,4 +74,9 @@ public class EmployeeResponse {
             + "masking decision itself always stays server-side regardless of what a client does "
             + "with this flag.")
     private boolean piiMasked;
+
+    @Schema(description = "System role name(s) held by this employee's linked account in this tenant "
+            + "(TENANT_ADMIN, HR_MANAGER, SITE_SUPERVISOR, EMPLOYEE, or a custom role name) — empty if "
+            + "userId is null (no linked account yet) or they hold no active role.")
+    private List<String> roleNames;
 }

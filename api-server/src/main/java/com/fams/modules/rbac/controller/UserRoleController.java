@@ -2,6 +2,8 @@ package com.fams.modules.rbac.controller;
 
 import com.fams.modules.rbac.dto.request.AssignPlatformRoleRequest;
 import com.fams.modules.rbac.dto.request.AssignRoleRequest;
+import com.fams.modules.rbac.dto.request.BulkAssignRoleRequest;
+import com.fams.modules.rbac.dto.response.BulkAssignRoleResponse;
 import com.fams.modules.rbac.dto.response.UserRoleResponse;
 import com.fams.modules.rbac.service.UserRoleService;
 import com.fams.shared.response.ApiResponse;
@@ -57,6 +59,35 @@ public class UserRoleController {
                 userDetails.getUserId(), userDetails.isPlatformAdmin(), request);
 
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success(result));
+    }
+
+    @Operation(summary = "Assign a role to many users at once",
+        description = "Grants one role to a list of users within a tenant in a single call — e.g. moving every "
+            + "employee off a role that's being retired onto its replacement (pass revokeRoleId to also revoke "
+            + "that old role from each user first). Partial failure is normal: one bad entry (already has the "
+            + "role, user not found, ...) does not roll back the others — check the per-user results.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Batch processed (see per-user results for outcome)",
+            content = @Content(schema = @Schema(implementation = BulkAssignRoleResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Validation error"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Unauthorized"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "Insufficient permissions"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "Tenant not found")
+    })
+    @PostMapping("/bulk-assign")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<ApiResponse<BulkAssignRoleResponse>> bulkAssignRole(
+            @Valid @RequestBody BulkAssignRoleRequest request,
+            @AuthenticationPrincipal FamsUserDetails userDetails) {
+
+        log.info("Bulk assign role: roleId={} revokeRoleId={} tenantId={} userCount={} by={}",
+                request.getRoleId(), request.getRevokeRoleId(), request.getTenantId(),
+                request.getUserIds().size(), userDetails.getUserId());
+
+        BulkAssignRoleResponse result = userRoleService.bulkAssignRole(
+                userDetails.getUserId(), userDetails.isPlatformAdmin(), request);
+
+        return ResponseEntity.ok(ApiResponse.success(result));
     }
 
     @Operation(summary = "Assign a platform-scoped (cross-tenant) system role",

@@ -37,4 +37,12 @@ public interface EmployeeRepository extends JpaRepository<Employee, UUID>, JpaSp
     @Query("SELECT e FROM Employee e WHERE e.tenantId = :tenantId AND e.id IN :ids AND e.deletedAt IS NULL")
     List<Employee> findAllByTenantIdAndIdInAndDeletedAtIsNull(
             @Param("tenantId") UUID tenantId, @Param("ids") Collection<UUID> ids);
+
+    /** Used by TenantMemberService to attach HR profile info (position/department/employeeCode)
+     *  to whoever holds a role in the tenant — not every role holder has an Employee record
+     *  (e.g. an owner/admin who was never onboarded through HR), so this is a best-effort join,
+     *  not a requirement. */
+    @Query("SELECT e FROM Employee e WHERE e.tenantId = :tenantId AND e.userId IN :userIds AND e.deletedAt IS NULL")
+    List<Employee> findAllByTenantIdAndUserIdInAndDeletedAtIsNull(
+            @Param("tenantId") UUID tenantId, @Param("userIds") Collection<UUID> userIds);
 }

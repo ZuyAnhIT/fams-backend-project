@@ -21,13 +21,15 @@ public class RoleSpecification {
             predicates.add(cb.isNull(root.get("deletedAt")));
 
             // Scope: system roles always included; tenant roles only if tenantId provided.
-            // Platform-scoped custom roles (tenantId NULL, isSystem false) are FAMS's own
-            // internal staff hierarchy — only surfaced to Platform Admins, never to regular
-            // tenant users even though they share the tenantId-IS-NULL bucket with system roles
-            // (applies whether or not a tenantId filter is also given).
+            // Platform-scoped custom roles (tenantId NULL, isSystem false) AND platform-tier
+            // system roles (PLATFORM_ADMIN/PLATFORM_STAFF, isPlatformRole=true — see V91) are
+            // FAMS's own internal governance structure — only surfaced to Platform Admins,
+            // never to regular tenant users (applies whether or not a tenantId filter is also
+            // given). Non-admin callers only ever see tenant-tier system roles here.
             Predicate globalRoles = includePlatformCustomRoles
                     ? cb.isNull(root.get("tenantId"))
-                    : cb.and(cb.isNull(root.get("tenantId")), cb.isTrue(root.get("isSystem")));
+                    : cb.and(cb.isNull(root.get("tenantId")), cb.isTrue(root.get("isSystem")),
+                             cb.isFalse(root.get("isPlatformRole")));
 
             if (tenantId != null) {
                 predicates.add(cb.or(globalRoles, cb.equal(root.get("tenantId"), tenantId)));

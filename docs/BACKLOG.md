@@ -281,21 +281,25 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
   - *Acceptance Criteria:* Seed permission theo resource/action; seed role company_admin/hr/site_supervisor/field_employee; idempotent; không tạo trùng.
   - *DB Entities:* `roles, permissions, role_permissions`
 - [ ] **#24 — Danh sách role** `P0` · 3sp · Nền tảng: Backend, Web Admin
+  - ⬜ **Test tay thật — CHƯA TEST (2026-08-13):** xem `docs/manual-tests/sprint-1-feature-24-list-roles.md` — gap cũ (thiếu số user gán) đã xác nhận SỬA XONG.
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: RoleService.listRoles, test_list_roles.sh; thiếu: thiếu số user đang gán role
   - *User Story:* Là một Company Admin, tôi muốn xem danh sách role với tìm kiếm, lọc, phân trang để quản lý quyền người dùng.
   - *Acceptance Criteria:* Tìm theo tên; lọc active/system; sort priority; hiển thị số user đang gán; phân trang.
   - *DB Entities:* `roles, user_roles`
 - [ ] **#25 — Tạo role tùy chỉnh** `P0` · 5sp · Nền tảng: Backend, Web Admin
+  - ⬜ **Test tay thật — CHƯA TEST (2026-08-13):** xem `docs/manual-tests/sprint-1-feature-25-create-custom-role.md` — gap audit cũ đã xác nhận SỬA XONG.
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: RoleService.createRole, test_create_role.sh; thiếu: không có cờ is_editable/is_deletable riêng (chỉ isSystem); không ghi audit
   - *User Story:* Là một Company Admin, tôi muốn tạo role riêng cho công ty để đáp ứng mô hình vận hành khác nhau.
   - *Acceptance Criteria:* Nhập name/display_name/description; name không trùng trong tenant; chọn permission; role custom editable/deletable=true.
   - *DB Entities:* `roles, role_permissions, permissions, audit_logs`
 - [ ] **#26 — Sửa role và quyền** `P0` · 5sp · Nền tảng: Backend, Web Admin
+  - ⬜ **Test tay thật — CHƯA TEST (2026-08-13):** xem `docs/manual-tests/sprint-1-feature-26-update-role.md` — gap audit cũ đã xác nhận SỬA XONG; case 2 test evict cache quyền.
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: RoleService.updateRole, test_update_role.sh; thiếu: không ghi audit ROLE_PERMISSION_UPDATE
   - *User Story:* Là một Company Admin, tôi muốn sửa role tùy chỉnh và danh sách permission để điều chỉnh quyền theo thực tế.
   - *Acceptance Criteria:* Không sửa role is_editable=false; cập nhật role_permissions; ghi audit ROLE_PERMISSION_UPDATE.
   - *DB Entities:* `roles, role_permissions, permissions, audit_logs`
 - [ ] **#27 — Xóa hoặc vô hiệu hóa role** `P1` · 3sp · Nền tảng: Backend, Web Admin
+  - ⬜ **Test tay thật — CHƯA TEST (2026-08-13):** xem `docs/manual-tests/sprint-1-feature-27-delete-role.md` — audit đã có; fallback deactivate KHÔNG tự động, case 3 xác nhận đúng hành vi.
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: RoleService.deleteRole, test_delete_role.sh; thiếu: chặn xóa nhưng không có fallback deactivate; không ghi audit
   - *User Story:* Là một Company Admin, tôi muốn xóa/vô hiệu hóa role không còn dùng để giữ hệ thống quyền gọn gàng.
   - *Acceptance Criteria:* Không xóa role is_deletable=false; nếu đã gán user thì chỉ cho deactivate; ghi audit.
@@ -304,6 +308,7 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 #### Permission
 
 - [x] **#28 — Xem permission theo nhóm** `P0` · 2sp · Nền tảng: Backend, Web Admin
+  - ⬜ **Test tay thật — CHƯA TEST (2026-08-13):** xem `docs/manual-tests/sprint-1-feature-28-list-permissions.md`.
   - *Audit (2026-07-22):* ✅ ĐÃ XONG — bằng chứng: PermissionService.listGrouped, test_list_permissions.sh
   - *User Story:* Là một Company Admin, tôi muốn xem permission được nhóm theo nghiệp vụ để dễ cấu hình role.
   - *Acceptance Criteria:* Hiển thị group_name/display_name/description; lọc scope; chỉ hiển thị is_active.
@@ -312,11 +317,13 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 #### User Role
 
 - [ ] **#29 — Gán role cho user** `P0` · 5sp · Nền tảng: Backend, Web Admin
+  - ⬜ **Test tay thật — CHƯA TEST (2026-08-14):** xem `docs/manual-tests/sprint-1-feature-29-assign-role.md` — scope theo site + audit đã xác nhận SỬA XONG; `expires_at` vẫn chưa có (gap thật, không chặn khóa).
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: UserRoleService.assignRole, test_assign_role.sh; thiếu: chưa có scope theo site, chưa có expires_at, không ghi audit ROLE_GRANT
   - *User Story:* Là một Company Admin, tôi muốn gán role cho thành viên trong tenant hoặc theo site để cấp quyền đúng phạm vi.
   - *Acceptance Criteria:* Chọn user, role, scope tenant/site; hỗ trợ expires_at; kiểm tra permission; ghi audit ROLE_GRANT.
   - *DB Entities:* `user_roles, roles, users, tenants, sites, audit_logs`
 - [ ] **#30 — Thu hồi role** `P0` · 3sp · Nền tảng: Backend, Web Admin
+  - ⬜ **Test tay thật — CHƯA TEST (2026-08-14):** xem `docs/manual-tests/sprint-1-feature-30-revoke-role.md` — case 4 xác nhận gap "chưa có safeguard mất admin cuối cùng của tenant" vẫn còn tồn tại.
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: UserRoleService.revokeRole, test_revoke_role.sh; thiếu: soft-delete qua deletedAt (không phải is_active); không lưu revoked_by; không có safeguard mất admin cuối; không ghi audit
   - *User Story:* Là một Company Admin, tôi muốn thu hồi role của user để đảm bảo quyền truy cập đúng hiện trạng.
   - *Acceptance Criteria:* Set is_active=false; lưu revoked_by/revoked_at; không thu hồi quyền cuối cùng của company_admin nếu gây mất admin; ghi audit.
@@ -327,6 +334,7 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 #### Audit nền tảng
 
 - [ ] **#31 — Ghi audit cho hành động quan trọng** `P0` · 5sp · Nền tảng: Backend, Queue/AI/Automation
+  - ⬜ **Test tay thật — CHƯA TEST (2026-08-14):** xem `docs/manual-tests/sprint-1-feature-31-audit-logging.md` — gap gốc "record() không được gọi ở đâu cả" đã xác nhận SAI hoàn toàn với hiện trạng, đã gọi ở 17 module.
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: AuditLogController/Service (đọc đầy đủ), test_audit_logs.sh; thiếu: AuditLogService.record() KHÔNG được gọi ở BẤT KỲ module nào — audit trail không hoạt động dù API đọc hoàn chỉnh
   - *User Story:* Là một hệ thống, tôi muốn ghi lại actor, action, resource, old/new value và request_id để truy vết đầy đủ các thao tác.
   - *Acceptance Criteria:* Middleware tạo request_id; service ghi audit; mask dữ liệu nhạy cảm; audit_logs append-only.

@@ -1,5 +1,6 @@
 package com.fams.modules.rbac.service;
 
+import com.fams.modules.rbac.dto.request.CloneRoleRequest;
 import com.fams.modules.rbac.dto.request.CreateRoleRequest;
 import com.fams.modules.rbac.dto.request.UpdateRoleRequest;
 import com.fams.modules.rbac.dto.response.PermissionResponse;
@@ -83,6 +84,34 @@ public class RoleService {
         }
     }
 
+    /**
+     * Privilege-escalation guard (2026-08-14, docs/reviews/backend/
+     * rbac-role-permission-audit-2026-08-13.md mục 6/7): a non-admin caller can only grant
+     * permissions they themselves currently hold in that tenant — same rule GitLab/GitHub use
+     * for custom roles. Without this, anyone with just roles:create + roles:update (a
+     * reasonable pair to delegate to a team lead) could build a role with the tenant's ENTIRE
+     * permission catalog and assign it to themselves via POST /user-roles, regardless of how
+     * narrow their own original role actually was. Platform Admins are exempt (they already
+     * hold the platform's full permission set in practice). The tenant OWNER is never limited
+     * by this either in effect, since TENANT_ADMIN already carries virtually every tenant
+     * permission — this only constrains someone delegated a narrower custom role.
+     */
+    private void assertNoPrivilegeEscalation(boolean callerIsPlatformAdmin, Set<String> callerPermissions,
+                                             Set<Permission> requestedPermissions) {
+        if (callerIsPlatformAdmin || requestedPermissions.isEmpty()) {
+            return;
+        }
+        List<String> notHeldByCaller = requestedPermissions.stream()
+                .map(Permission::getName)
+                .filter(name -> !callerPermissions.contains(name))
+                .sorted()
+                .toList();
+        if (!notHeldByCaller.isEmpty()) {
+            throw new AccessDeniedException(
+                    "Cannot grant permission(s) you do not hold yourself: " + notHeldByCaller);
+        }
+    }
+
     private Map<String, Object> roleAuditSnapshot(Role role) {
         Map<String, Object> m = new java.util.LinkedHashMap<>();
         m.put("name", role.getName());
@@ -162,7 +191,7 @@ public class RoleService {
         Page<Role> rolePage = roleRepository.findAll(spec, pageable);
 
         Map<UUID, Long> assignmentCounts = batchLoadAssignmentCounts(
-                rolePage.getContent().stream().map(Role::getId).toList());
+                rolePage.getContent().stream().map(Role::getId).toList(), tenantId);
         Page<RoleResponse> result = rolePage.map(role -> toResponse(role, assignmentCounts.getOrDefault(role.getId(), 0L)));
 
         log.info("List roles: tenantId={} search={} isSystem={} isActive={} page={} total={}",
@@ -175,6 +204,14 @@ public class RoleService {
     public RoleDetailResponse getRoleById(UUID roleId, UUID callerUserId, boolean callerIsPlatformAdmin) {
         Role role = roleRepository.findByIdAndDeletedAtIsNull(roleId)
                 .orElseThrow(() -> new ResourceNotFoundException("Role not found: " + roleId));
+
+        if (role.isSystem() && role.isPlatformRole() && !callerIsPlatformAdmin) {
+            // PLATFORM_ADMIN/PLATFORM_STAFF (see V91) — FAMS's own governance roles, not
+            // visible outside Platform Admin even though isSystem=true would otherwise skip
+            // every check below (true system roles are normally public to any authenticated
+            // user, but these two are the one exception).
+            throw new AccessDeniedException("You do not have permission to view this role");
+        }
 
         if (!role.isSystem()) {
             if (role.getTenantId() != null) {
@@ -199,6 +236,7 @@ public class RoleService {
     @Transactional
     public RoleDetailResponse createRole(UUID callerUserId, boolean callerIsPlatformAdmin, CreateRoleRequest request) {
         UUID tenantId = request.getTenantId();
+        Set<String> callerPermissions = Set.of();
 
         if (tenantId == null) {
             // Platform-scoped custom role: defines FAMS's own internal staff hierarchy
@@ -213,7 +251,7 @@ public class RoleService {
                     .orElseThrow(() -> new ResourceNotFoundException("Tenant not found: " + tenantId));
 
             if (!callerIsPlatformAdmin) {
-                Set<String> callerPermissions = userRoleRepository.findPermissionNamesByUserIdAndTenantId(callerUserId, tenantId);
+                callerPermissions = userRoleRepository.findPermissionNamesByUserIdAndTenantId(callerUserId, tenantId);
                 if (!callerPermissions.contains("roles:create")) {
                     throw new AccessDeniedException("You do not have permission to create roles in this tenant");
                 }
@@ -238,6 +276,8 @@ public class RoleService {
             permissions.addAll(found);
         }
 
+        assertNoPrivilegeEscalation(callerIsPlatformAdmin, callerPermissions, permissions);
+
         Role role = Role.builder()
                 .tenantId(tenantId)
                 .name(request.getName())
@@ -255,6 +295,83 @@ public class RoleService {
         return toDetailResponse(role, 0L);
     }
 
+    /**
+     * Clones an existing role's permission set into a brand-new, independent custom role —
+     * lets a Company Admin turn a system role like EMPLOYEE (which can never be edited
+     * directly, see {@link #updateRole}) into a tenant-owned starting point they can then
+     * freely adjust, without re-ticking every permission by hand. Same access rules as
+     * {@link #createRole} for WHERE the clone lands; additionally the source role must be
+     * either a system role (visible to everyone) or already belong to the target tenant —
+     * a tenant admin cannot use this to peek at or copy another tenant's custom role
+     * structure. Platform Admins may clone any role into any scope.
+     */
+    @Transactional
+    public RoleDetailResponse cloneRole(UUID sourceRoleId, UUID callerUserId, boolean callerIsPlatformAdmin,
+                                        CloneRoleRequest request) {
+        Role source = roleRepository.findByIdAndDeletedAtIsNull(sourceRoleId)
+                .orElseThrow(() -> new ResourceNotFoundException("Role not found: " + sourceRoleId));
+
+        UUID tenantId = request.getTenantId();
+        Set<String> callerPermissions = Set.of();
+
+        if (tenantId == null) {
+            if (!callerIsPlatformAdmin) {
+                throw new AccessDeniedException("Only Platform Admins may create platform-scoped roles");
+            }
+        } else {
+            tenantRepository.findByIdAndDeletedAtIsNull(tenantId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Tenant not found: " + tenantId));
+
+            if (!callerIsPlatformAdmin) {
+                callerPermissions = userRoleRepository.findPermissionNamesByUserIdAndTenantId(callerUserId, tenantId);
+                if (!callerPermissions.contains("roles:create")) {
+                    throw new AccessDeniedException("You do not have permission to create roles in this tenant");
+                }
+            }
+        }
+
+        // isPlatformRole (PLATFORM_ADMIN/PLATFORM_STAFF, see V91) is deliberately excluded from
+        // "source.isSystem()" here — same leak class as assignRole/listRoles: without this,
+        // any tenant admin could clone all 77 PLATFORM_ADMIN permissions into their own tenant.
+        boolean sourceIsClonable = (source.isSystem() && !source.isPlatformRole())
+                || (source.getTenantId() != null && source.getTenantId().equals(tenantId))
+                || callerIsPlatformAdmin;
+        if (!sourceIsClonable) {
+            throw new AccessDeniedException("You do not have permission to clone this role");
+        }
+
+        // Same privilege-escalation guard as createRole/updateRole — cloning is just another
+        // way to end up with a set of permissions on a new role, so it must obey the same
+        // "cannot grant what you don't have" rule (e.g. cloning TENANT_ADMIN's 68 permissions
+        // with only roles:create held would otherwise bypass the direct-create check entirely).
+        assertNoPrivilegeEscalation(callerIsPlatformAdmin, callerPermissions, source.getPermissions());
+
+        if (roleRepository.existsByTenantIdAndNameAndDeletedAtIsNull(tenantId, request.getName())) {
+            throw new DuplicateResourceException(
+                    "Role name '" + request.getName() + "' already exists" + (tenantId != null ? " in tenant " + tenantId : " as a platform-scoped role"));
+        }
+
+        Role clone = Role.builder()
+                .tenantId(tenantId)
+                .name(request.getName())
+                .description(request.getDescription() != null ? request.getDescription() : source.getDescription())
+                .isSystem(false)
+                .permissions(new HashSet<>(source.getPermissions()))
+                .build();
+
+        clone = roleRepository.save(clone);
+
+        log.info("Cloned role: id={} name={} sourceRoleId={} sourceName={} tenantId={} permissionCount={} by userId={}",
+                clone.getId(), clone.getName(), sourceRoleId, source.getName(), tenantId, clone.getPermissions().size(), callerUserId);
+
+        Map<String, Object> newValue = roleAuditSnapshot(clone);
+        newValue.put("clonedFromRoleId", sourceRoleId.toString());
+        newValue.put("clonedFromRoleName", source.getName());
+        recordRoleAudit(tenantId, callerUserId, "role_cloned", clone.getId(), null, newValue);
+
+        return toDetailResponse(clone, 0L);
+    }
+
     @Transactional
     public RoleDetailResponse updateRole(UUID roleId, UUID callerUserId, boolean callerIsPlatformAdmin,
                                          UpdateRoleRequest request) {
@@ -267,6 +384,7 @@ public class RoleService {
         }
 
         UUID tenantId = role.getTenantId();
+        Set<String> callerPermissions = Set.of();
 
         if (!callerIsPlatformAdmin) {
             if (tenantId == null) {
@@ -274,7 +392,7 @@ public class RoleService {
                 // against; only Platform Admin may touch the platform's own role hierarchy.
                 throw new AccessDeniedException("Only Platform Admins may update platform-scoped roles");
             }
-            Set<String> callerPermissions = userRoleRepository.findPermissionNamesByUserIdAndTenantId(callerUserId, tenantId);
+            callerPermissions = userRoleRepository.findPermissionNamesByUserIdAndTenantId(callerUserId, tenantId);
             if (!callerPermissions.contains("roles:update")) {
                 throw new AccessDeniedException("You do not have permission to update roles in this tenant");
             }
@@ -299,6 +417,13 @@ public class RoleService {
             }
             permissions.addAll(found);
         }
+
+        // Only check permissions actually being ADDED — permissions this role already has
+        // that the caller happens to lack (e.g. two admins with slightly different grants)
+        // must remain editable for other fields without the caller needing every single one.
+        Set<Permission> newlyAdded = new HashSet<>(permissions);
+        newlyAdded.removeAll(role.getPermissions());
+        assertNoPrivilegeEscalation(callerIsPlatformAdmin, callerPermissions, newlyAdded);
 
         role.setName(request.getName());
         role.setDescription(request.getDescription());
@@ -356,13 +481,22 @@ public class RoleService {
     }
 
     /** Batch-fetches active-assignment counts for a page of roles in one query, instead of
-     *  one query per row — see UserRoleRepository.countActiveByRoleIdIn. */
-    private Map<UUID, Long> batchLoadAssignmentCounts(List<UUID> roleIds) {
+     *  one query per row — see UserRoleRepository.countActiveByRoleIdIn. When a tenantId
+     *  filter is active on the surrounding list query, counts are scoped to that tenant —
+     *  otherwise a SHARED system role (TENANT_ADMIN etc.) would show its holder count across
+     *  every tenant on the platform, not just the company the caller is actually looking at
+     *  (confirmed real bug, reported 2026-08-14). With no tenantId (Platform Admin browsing
+     *  the global role catalog with no company picked), the platform-wide total is shown —
+     *  appropriate there since there's no single "own company" to scope to. */
+    private Map<UUID, Long> batchLoadAssignmentCounts(List<UUID> roleIds, UUID tenantId) {
         if (roleIds.isEmpty()) {
             return Map.of();
         }
+        Iterable<UserRoleRepository.RoleAssignmentCount> rows = tenantId != null
+                ? userRoleRepository.countActiveByRoleIdInAndTenantId(roleIds, tenantId)
+                : userRoleRepository.countActiveByRoleIdIn(roleIds);
         Map<UUID, Long> counts = new java.util.HashMap<>();
-        for (UserRoleRepository.RoleAssignmentCount row : userRoleRepository.countActiveByRoleIdIn(roleIds)) {
+        for (UserRoleRepository.RoleAssignmentCount row : rows) {
             counts.put(row.getRoleId(), row.getCnt());
         }
         return counts;

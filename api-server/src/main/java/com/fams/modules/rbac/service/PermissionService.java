@@ -25,7 +25,11 @@ public class PermissionService {
 
     @Transactional(readOnly = true)
     public List<PermissionGroupResponse> listGrouped() {
-        List<Permission> all = permissionRepository.findAllByOrderByResourceAscActionAsc();
+        // Only assignable permissions — see V92 migration + docs/reviews/backend/
+        // rbac-role-permission-audit-2026-08-13.md mục 3: ~23 catalog entries have no
+        // enforcement code reading them, so offering them here would let an admin tick a
+        // permission that silently does nothing.
+        List<Permission> all = permissionRepository.findByIsAssignableTrueOrderByResourceAscActionAsc();
 
         Map<String, List<PermissionResponse>> byResource = new LinkedHashMap<>();
         for (Permission p : all) {

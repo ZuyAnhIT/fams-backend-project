@@ -12,6 +12,25 @@ import java.util.UUID;
 
 public interface UserRoleRepository extends JpaRepository<UserRole, UUID> {
 
+    /** Every active role assignment in one tenant, across every role — powers the "Thành viên
+     *  công ty" (Company Members) view, which is broader than the Employee list (covers anyone
+     *  holding a role here, including an owner/admin never onboarded through HR). */
+    @Query("SELECT ur FROM UserRole ur JOIN FETCH ur.role WHERE ur.tenantId = :tenantId AND ur.deletedAt IS NULL")
+    List<UserRole> findAllWithRoleByTenantId(@Param("tenantId") UUID tenantId);
+
+    /** Batch role lookup for a page of employees (avoids N+1) — used to show each employee's
+     *  system role(s) inline in the employee list, see EmployeeService#listEmployees. */
+    @Query("""
+            SELECT ur FROM UserRole ur
+            JOIN FETCH ur.role r
+            WHERE ur.userId IN :userIds
+              AND ur.tenantId = :tenantId
+              AND ur.deletedAt IS NULL
+            """)
+    List<UserRole> findAllWithRoleByUserIdInAndTenantId(
+            @Param("userIds") Collection<UUID> userIds,
+            @Param("tenantId") UUID tenantId);
+
     @Query("""
             SELECT DISTINCT p.name
             FROM UserRole ur
@@ -78,6 +97,17 @@ public interface UserRoleRepository extends JpaRepository<UserRole, UUID> {
     @Query("SELECT ur.role.id AS roleId, COUNT(ur) AS cnt FROM UserRole ur "
             + "WHERE ur.role.id IN :roleIds AND ur.deletedAt IS NULL GROUP BY ur.role.id")
     List<RoleAssignmentCount> countActiveByRoleIdIn(@Param("roleIds") Collection<UUID> roleIds);
+
+    /** Same as {@link #countActiveByRoleIdIn} but scoped to one tenant — required for SHARED
+     *  system roles (TENANT_ADMIN, HR_MANAGER, SITE_SUPERVISOR, EMPLOYEE: one role row used by
+     *  every tenant). Without this, a tenant admin viewing their own role list saw the count of
+     *  that role's holders ACROSS THE ENTIRE PLATFORM, not just their own company — confirmed
+     *  real bug, reported 2026-08-14. Tenant-owned custom roles don't strictly need this (their
+     *  role.id already implies one tenant), but scoping is harmless there too. */
+    @Query("SELECT ur.role.id AS roleId, COUNT(ur) AS cnt FROM UserRole ur "
+            + "WHERE ur.role.id IN :roleIds AND ur.tenantId = :tenantId AND ur.deletedAt IS NULL GROUP BY ur.role.id")
+    List<RoleAssignmentCount> countActiveByRoleIdInAndTenantId(
+            @Param("roleIds") Collection<UUID> roleIds, @Param("tenantId") UUID tenantId);
 
     interface RoleAssignmentCount {
         UUID getRoleId();

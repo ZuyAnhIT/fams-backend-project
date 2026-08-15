@@ -241,6 +241,19 @@ public class EmployeeService {
                         FaceProfile::getEmployeeId,
                         FaceIdService::toDto));
 
+        // Batch-fetch each employee's system role name(s) in this tenant — shown as a column
+        // in the employee list so "who is TENANT_ADMIN/HR_MANAGER/..." is visible at a glance
+        // instead of opening each employee's profile one at a time (2026-08-14 user feedback).
+        List<UUID> userIds = employeePage.getContent().stream()
+                .map(Employee::getUserId)
+                .filter(java.util.Objects::nonNull)
+                .toList();
+        Map<UUID, List<String>> roleNamesByUserId = userIds.isEmpty() ? Map.of()
+                : userRoleRepository.findAllWithRoleByUserIdInAndTenantId(userIds, tenantId).stream()
+                        .collect(Collectors.groupingBy(
+                                com.fams.modules.rbac.entity.UserRole::getUserId,
+                                Collectors.mapping(ur -> ur.getRole().getName(), Collectors.toList())));
+
         Page<EmployeeResponse> resultPage = employeePage.map(e ->
                 toResponse(e, faceIdMap.getOrDefault(e.getId(), FaceIdStatusDto.builder()
                         .status("not_enrolled")
@@ -248,7 +261,8 @@ public class EmployeeService {
                         .consentGivenAt(null)
                         .enrolledAt(null)
                         .revokedAt(null)
-                        .build())));
+                        .build()),
+                        e.getUserId() != null ? roleNamesByUserId.getOrDefault(e.getUserId(), List.of()) : List.of()));
 
         return PageResponse.from(resultPage);
     }
@@ -653,6 +667,10 @@ public class EmployeeService {
     }
 
     public EmployeeResponse toResponse(Employee e, FaceIdStatusDto faceId) {
+        return toResponse(e, faceId, java.util.List.of());
+    }
+
+    public EmployeeResponse toResponse(Employee e, FaceIdStatusDto faceId, java.util.List<String> roleNames) {
         return EmployeeResponse.builder()
                 .id(e.getId())
                 .tenantId(e.getTenantId())
@@ -672,6 +690,7 @@ public class EmployeeService {
                 .updatedAt(e.getUpdatedAt())
                 .faceId(faceId)
                 .piiMasked(!com.fams.shared.util.PiiAccess.currentCallerCanViewUnmaskedPii())
+                .roleNames(roleNames)
                 .build();
     }
 }

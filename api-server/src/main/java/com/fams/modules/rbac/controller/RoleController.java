@@ -1,9 +1,11 @@
 package com.fams.modules.rbac.controller;
 
+import com.fams.modules.rbac.dto.request.CloneRoleRequest;
 import com.fams.modules.rbac.dto.request.CreateRoleRequest;
 import com.fams.modules.rbac.dto.request.UpdateRoleRequest;
 import com.fams.modules.rbac.dto.response.MyRoleResponse;
 import com.fams.modules.rbac.dto.response.RoleDetailResponse;
+import com.fams.modules.rbac.dto.response.RoleMemberResponse;
 import com.fams.modules.rbac.dto.response.RoleResponse;
 import com.fams.modules.rbac.service.RoleService;
 import com.fams.modules.rbac.service.UserRoleService;
@@ -116,6 +118,34 @@ public class RoleController {
         return ResponseEntity.ok(ApiResponse.success(result));
     }
 
+    @Operation(summary = "List who holds this role",
+        description = "Returns every user currently holding this role. For a tenant-owned custom role the "
+            + "tenant is implied by the role itself; for a shared system role (TENANT_ADMIN, HR_MANAGER, "
+            + "SITE_SUPERVISOR, EMPLOYEE — assignable in every tenant) pass tenantId to see that tenant's "
+            + "holders specifically. Platform-tier roles (PLATFORM_ADMIN/PLATFORM_STAFF) are Platform-Admin-only.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Members returned",
+            content = @Content(schema = @Schema(implementation = RoleMemberResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "tenantId required for a system role"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Unauthorized"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "Insufficient permissions"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "Role not found")
+    })
+    @GetMapping("/{id}/members")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<ApiResponse<List<RoleMemberResponse>>> listRoleMembers(
+            @Parameter(description = "Role UUID") @PathVariable UUID id,
+            @Parameter(description = "Required only for system roles — which tenant's holders to list") @RequestParam(required = false) UUID tenantId,
+            @AuthenticationPrincipal FamsUserDetails userDetails) {
+
+        log.info("List role members: roleId={} tenantId={} by userId={}", id, tenantId, userDetails.getUserId());
+
+        List<RoleMemberResponse> result = userRoleService.listRoleMembers(
+                id, tenantId, userDetails.getUserId(), userDetails.isPlatformAdmin());
+
+        return ResponseEntity.ok(ApiResponse.success(result));
+    }
+
     @Operation(summary = "Create a custom role",
         description = "Creates a new role for a tenant and optionally assigns a set of permissions. Callable by Company Admins and Platform Admins.")
     @ApiResponses({
@@ -137,6 +167,36 @@ public class RoleController {
 
         RoleDetailResponse result = roleService.createRole(
                 userDetails.getUserId(), userDetails.isPlatformAdmin(), request);
+
+        return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success(result));
+    }
+
+    @Operation(summary = "Clone a role",
+        description = "Creates a new custom role by copying another role's permission set — the new role starts "
+            + "with the exact same permissions as the source (system or custom) and can then be edited "
+            + "independently. Source must be a system role, or a custom role already belonging to the target "
+            + "tenant, or the caller must be a Platform Admin.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "201", description = "Role cloned",
+            content = @Content(schema = @Schema(implementation = RoleDetailResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Validation error"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Unauthorized"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "Insufficient permissions"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "Source role not found"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "409", description = "Role name already exists in the target scope")
+    })
+    @PostMapping("/{id}/clone")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<ApiResponse<RoleDetailResponse>> cloneRole(
+            @Parameter(description = "Source role UUID to clone from") @PathVariable UUID id,
+            @Valid @RequestBody CloneRoleRequest request,
+            @AuthenticationPrincipal FamsUserDetails userDetails) {
+
+        log.info("Clone role: sourceId={} newName={} tenantId={} by userId={}",
+                id, request.getName(), request.getTenantId(), userDetails.getUserId());
+
+        RoleDetailResponse result = roleService.cloneRole(
+                id, userDetails.getUserId(), userDetails.isPlatformAdmin(), request);
 
         return ResponseEntity.status(HttpStatus.CREATED).body(ApiResponse.success(result));
     }

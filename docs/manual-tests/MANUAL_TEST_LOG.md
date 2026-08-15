@@ -56,6 +56,14 @@ giữ nguyên ✅ ĐÃ KHÓA. Đồng thời xác nhận UI "tìm người thao 
 | 21 | Cấu hình giới hạn gói | ✅ Pass | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-13 | Case enforcement (3-5) đã test hoặc xác nhận hoãn hợp lệ theo Sprint liên quan |
 | 22 | Gán subscription cho tenant | ✅ Pass | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-13 | Không có gap |
 | 23 | Seed role và permission hệ thống | ✅ Pass (kiểm qua DB/API) | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-13 | Idempotent xác nhận qua restart container |
+| 24 | Danh sách role | ⬜ Chưa test | — | ⬜ **CHƯA TEST** | — | Gap cũ (thiếu số user đang gán) đã xác nhận SỬA XONG — có `assignmentCount`, case 4 xác nhận lại |
+| 25 | Tạo role tùy chỉnh | ⬜ Chưa test | — | ⬜ **CHƯA TEST** | — | Gap audit cũ đã xác nhận SỬA XONG (`role_created`) |
+| 26 | Sửa role và quyền | ⬜ Chưa test | — | ⬜ **CHƯA TEST** | — | Gap audit cũ đã xác nhận SỬA XONG (`role_updated`); case 2 test cơ chế evict cache quyền ngay lập tức |
+| 27 | Xóa hoặc vô hiệu hóa role | ⬜ Chưa test | — | ⬜ **CHƯA TEST** | — | Audit đã có (`role_deleted`); fallback deactivate KHÔNG tự động (chỉ chặn xóa), case 3 xác nhận đúng hành vi |
+| 28 | Xem permission theo nhóm | ⬜ Chưa test | — | ⬜ **CHƯA TEST** | — | Không có gap đã biết |
+| 29 | Gán role cho user | ⬜ Chưa test | — | ⬜ **CHƯA TEST** | — | Scope theo site + audit đã xác nhận SỬA XONG; `expires_at` vẫn chưa có (gap thật, không chặn khóa) |
+| 30 | Thu hồi role | ⬜ Chưa test | — | ⬜ **CHƯA TEST** | — | Case 4 xác nhận gap "chưa có safeguard mất admin cuối cùng của tenant" vẫn còn tồn tại |
+| 31 | Ghi audit cho hành động quan trọng | ⬜ Chưa test | — | ⬜ **CHƯA TEST** | — | Gap gốc "record() không được gọi ở đâu" đã xác nhận SAI — đã gọi ở 17 module |
 
 ---
 
@@ -188,6 +196,42 @@ giữ nguyên ✅ ĐÃ KHÓA. Đồng thời xác nhận UI "tìm người thao 
 ### #23 — Seed role và permission hệ thống — ✅ PASS — ĐÃ KHÓA (2026-08-13)
 - Kịch bản: `docs/manual-tests/sprint-1-feature-23-seed-roles-permissions.md`. Backend-only, xác
   nhận idempotent qua query DB + restart container, không đổi số lượng role/permission.
+
+---
+
+### #24 — Danh sách role — ⬜ CHƯA TEST (2026-08-13)
+- Kịch bản: `docs/manual-tests/sprint-1-feature-24-list-roles.md`. Case 4 xác nhận gap cũ (thiếu
+  số user đang gán) đã sửa xong (`assignmentCount`, batch-load).
+
+### #25 — Tạo role tùy chỉnh — ⬜ CHƯA TEST (2026-08-13)
+- Kịch bản: `docs/manual-tests/sprint-1-feature-25-create-custom-role.md`. Audit `role_created` đã
+  có sẵn, case 5 chỉ xác nhận lại.
+
+### #26 — Sửa role và quyền — ⬜ CHƯA TEST (2026-08-13)
+- Kịch bản: `docs/manual-tests/sprint-1-feature-26-update-role.md`. Case 2 quan trọng nhất — xác
+  nhận evict cache quyền hoạt động ngay lập tức khi sửa permission của role.
+
+### #27 — Xóa hoặc vô hiệu hóa role — ⬜ CHƯA TEST (2026-08-13)
+- Kịch bản: `docs/manual-tests/sprint-1-feature-27-delete-role.md`. Case 3 xác nhận đúng hành vi:
+  xóa bị chặn khi role còn người giữ, nhưng KHÔNG tự động deactivate — cần làm thủ công qua #26.
+
+### #28 — Xem permission theo nhóm — ⬜ CHƯA TEST (2026-08-13)
+- Kịch bản: `docs/manual-tests/sprint-1-feature-28-list-permissions.md`. Không có gap đã biết.
+
+---
+
+### #29 — Gán role cho user — ⬜ CHƯA TEST (2026-08-14)
+- Kịch bản: `docs/manual-tests/sprint-1-feature-29-assign-role.md`. Gap cũ về scope theo site và
+  audit đã xác nhận sửa xong qua code; `expires_at` vẫn chưa có (gap thật, không chặn khóa).
+
+### #30 — Thu hồi role — ⬜ CHƯA TEST (2026-08-14)
+- Kịch bản: `docs/manual-tests/sprint-1-feature-30-revoke-role.md`. Case 4 quan trọng nhất — xác
+  nhận gap "chưa có safeguard mất admin cuối cùng của tenant" vẫn còn tồn tại.
+
+### #31 — Ghi audit cho hành động quan trọng — ⬜ CHƯA TEST (2026-08-14)
+- Kịch bản: `docs/manual-tests/sprint-1-feature-31-audit-logging.md`. Gap gốc "AuditLogService
+  không được gọi ở đâu cả" đã xác nhận SAI hoàn toàn với thực tế hiện tại — record() đã được gọi
+  ở 17 module. Test chủ yếu để xác nhận UI đọc đúng + không lộ audit chéo tenant.
 
 ## Quy ước cập nhật file này (cho các phiên làm việc sau)
 

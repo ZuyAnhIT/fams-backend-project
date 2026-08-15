@@ -13,6 +13,7 @@ import com.fams.modules.subscription.entity.Plan;
 import com.fams.modules.subscription.repository.PlanRepository;
 import com.fams.modules.subscription.repository.TenantSubscriptionRepository;
 import com.fams.modules.tenant.dto.request.CreateTenantRequest;
+import com.fams.modules.tenant.dto.request.TransferOwnerRequest;
 import com.fams.modules.tenant.dto.request.UpdateTenantRequest;
 import com.fams.modules.tenant.dto.response.TenantResponse;
 import com.fams.modules.tenant.entity.Tenant;
@@ -227,19 +228,24 @@ public class TenantService {
     }
 
     /**
-     * Owner-only, by product decision — including for Platform Admin/Staff. Whoever
-     * provisioned the tenant (see {@link #createTenant}) can set its initial basic info and
-     * assign the owner/plan, but does not retain edit rights afterward: once a tenant has an
-     * assigned owner, only that owner manages its profile going forward. Platform-level
-     * administrative actions (suspend/reactivate/cancel/subscription changes) are separate
-     * endpoints, unaffected by this restriction.
+     * Owner-only by default. Whoever provisioned the tenant (see {@link #createTenant}) can
+     * set its initial basic info and assign the owner/plan, but does not retain edit rights
+     * afterward: once a tenant has an assigned owner, only that owner manages its profile
+     * going forward — unless the caller is a Platform Admin, added 2026-08-14
+     * (docs/reviews/backend/rbac-role-permission-audit-2026-08-13.md mục 6) for support cases
+     * where the owner has lost account access entirely (forgot password + lost recovery
+     * email, account disabled, ...) and nobody else could otherwise fix the tenant's profile.
+     * Matches how every other sensitive tenant resource already treats Platform Admin (IP
+     * whitelist, tenant settings). Platform-level administrative actions
+     * (suspend/reactivate/cancel/subscription changes) are separate endpoints, unaffected by
+     * this restriction.
      */
     @Transactional
-    public TenantResponse updateTenant(UUID tenantId, UpdateTenantRequest request, UUID userId) {
+    public TenantResponse updateTenant(UUID tenantId, UpdateTenantRequest request, UUID userId, boolean callerIsPlatformAdmin) {
         Tenant tenant = tenantRepository.findByIdAndDeletedAtIsNull(tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Tenant not found: " + tenantId));
 
-        if (!userId.equals(tenant.getOwnerId())) {
+        if (!callerIsPlatformAdmin && !userId.equals(tenant.getOwnerId())) {
             throw new AccessDeniedException("Only this tenant's owner may update its profile");
         }
 
@@ -263,6 +269,80 @@ public class TenantService {
         tenantRepository.save(tenant);
         log.info("Tenant updated: id={} by userId={}", tenantId, userId);
         recordTenantAudit(tenantId, userId, "tenant_updated", before, tenantAuditSnapshot(tenant));
+
+        return toResponse(tenant);
+    }
+
+    /**
+     * Ownership was previously permanent — set once at {@link #createTenant} with no way to
+     * ever change it, meaning a company with no working access to its owner's account (left
+     * the company, lost credentials, ...) had no self-service recovery path for
+     * owner-gated actions (profile/settings/IP-whitelist/billing detail — see
+     * docs/reviews/backend/rbac-role-permission-audit-2026-08-13.md mục 8). Added 2026-08-14.
+     *
+     * Callable by the CURRENT owner (self-service handoff) or a Platform Admin (support case,
+     * same exemption pattern as {@link #updateTenant}). The new owner must already be an
+     * active member of this tenant (holds some role here) — this is a handoff between people
+     * who already work at the company, not a way to hand a stranger control of it. The new
+     * owner is granted TENANT_ADMIN if they don't already hold it, so ownership and admin
+     * access stay coherent; the OLD owner's own role membership is left untouched (they may
+     * still work there).
+     */
+    @Transactional
+    public TenantResponse transferOwner(UUID tenantId, TransferOwnerRequest request, UUID callerUserId, boolean callerIsPlatformAdmin) {
+        Tenant tenant = tenantRepository.findByIdAndDeletedAtIsNull(tenantId)
+                .orElseThrow(() -> new ResourceNotFoundException("Tenant not found: " + tenantId));
+
+        if (!callerIsPlatformAdmin && !callerUserId.equals(tenant.getOwnerId())) {
+            throw new AccessDeniedException("Only this tenant's current owner may transfer ownership");
+        }
+
+        if (request.getNewOwnerUserId() == null && !StringUtils.hasText(request.getNewOwnerEmail())) {
+            throw new IllegalArgumentException("newOwnerUserId or newOwnerEmail is required");
+        }
+
+        User newOwner = request.getNewOwnerUserId() != null
+                ? userRepository.findByIdAndDeletedAtIsNull(request.getNewOwnerUserId())
+                        .orElseThrow(() -> new ResourceNotFoundException("User not found: " + request.getNewOwnerUserId()))
+                : userRepository.findByEmailAndDeletedAtIsNull(request.getNewOwnerEmail().trim().toLowerCase())
+                        .orElseThrow(() -> new ResourceNotFoundException(
+                                "No existing account found for email '" + request.getNewOwnerEmail() + "'"));
+
+        if (newOwner.getId().equals(tenant.getOwnerId())) {
+            throw new IllegalArgumentException("This user is already the owner of this tenant");
+        }
+
+        if (!userRoleRepository.existsByUserIdAndTenantIdAndDeletedAtIsNull(newOwner.getId(), tenantId)) {
+            throw new IllegalArgumentException(
+                    "The new owner must already be an active member of this tenant (hold some role here) — "
+                    + "assign them a role first if they are new to the company.");
+        }
+
+        Map<String, Object> before = tenantAuditSnapshot(tenant);
+        UUID previousOwnerId = tenant.getOwnerId();
+        tenant.setOwnerId(newOwner.getId());
+        tenantRepository.save(tenant);
+
+        Role tenantAdminRole = roleRepository.findByNameAndTenantIdIsNull("TENANT_ADMIN").orElse(null);
+        if (tenantAdminRole != null) {
+            boolean alreadyHasActiveTenantAdmin = userRoleRepository
+                    .findByUserIdAndRoleIdAndTenantId(newOwner.getId(), tenantAdminRole.getId(), tenantId)
+                    .stream().anyMatch(ur -> ur.getDeletedAt() == null);
+            if (!alreadyHasActiveTenantAdmin) {
+                userRoleRepository.save(UserRole.builder()
+                        .userId(newOwner.getId())
+                        .role(tenantAdminRole)
+                        .tenantId(tenantId)
+                        .assignedBy(callerUserId)
+                        .build());
+                log.info("Granted TENANT_ADMIN to new owner: userId={} tenantId={}", newOwner.getId(), tenantId);
+            }
+        }
+
+        log.info("Tenant ownership transferred: tenantId={} from={} to={} by={}",
+                tenantId, previousOwnerId, newOwner.getId(), callerUserId);
+        Map<String, Object> after = tenantAuditSnapshot(tenant);
+        recordTenantAudit(tenantId, callerUserId, "tenant_owner_transferred", before, after);
 
         return toResponse(tenant);
     }

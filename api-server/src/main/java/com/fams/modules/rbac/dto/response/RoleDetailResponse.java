@@ -1,5 +1,6 @@
 package com.fams.modules.rbac.dto.response;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Builder;
 import lombok.Data;
@@ -22,10 +23,15 @@ public class RoleDetailResponse {
     @Schema(description = "Role description", example = "Manages a single construction site")
     private String description;
 
+    // See RoleResponse for why @JsonProperty is required here — without it Jackson strips
+    // "is" off isSystem()/isActive() and the frontend's isSystem/isActive fields are always
+    // undefined.
     @Schema(description = "True for built-in system roles that cannot be modified or deleted")
+    @JsonProperty("isSystem")
     private boolean isSystem;
 
     @Schema(description = "False if this custom role has been deactivated — existing holders keep it, but it can no longer be assigned to new users. Always true for system roles.")
+    @JsonProperty("isActive")
     private boolean isActive;
 
     @Schema(description = "Tenant that owns this role (null for platform-wide system roles)")

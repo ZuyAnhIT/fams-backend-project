@@ -34,6 +34,13 @@ public class Role {
     @Column(name = "is_system", nullable = false)
     private boolean isSystem;
 
+    /** True only for PLATFORM_ADMIN/PLATFORM_STAFF — distinguishes platform-tier system roles
+     *  from tenant-tier ones (TENANT_ADMIN, HR_MANAGER, SITE_SUPERVISOR, EMPLOYEE), which
+     *  otherwise share the exact same tenantId=null/isSystem=true signature. See V91
+     *  migration for why this matters (visibility + assignment leak, both fixed 2026-08-14). */
+    @Column(name = "is_platform_role", nullable = false)
+    private boolean isPlatformRole;
+
     @Builder.Default
     @Column(name = "is_active", nullable = false)
     private boolean isActive = true;

@@ -12,4 +12,6 @@ public interface PermissionRepository extends JpaRepository<Permission, UUID> {
     Optional<Permission> findByName(String name);
 
     List<Permission> findAllByOrderByResourceAscActionAsc();
+
+    List<Permission> findByIsAssignableTrueOrderByResourceAscActionAsc();
 }
