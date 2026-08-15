@@ -1,9 +1,13 @@
 package com.fams.modules.rbac.service;
 
+import com.fams.modules.auth.entity.User;
 import com.fams.modules.auth.repository.UserRepository;
 import com.fams.modules.rbac.dto.request.AssignPlatformRoleRequest;
 import com.fams.modules.rbac.dto.request.AssignRoleRequest;
+import com.fams.modules.rbac.dto.request.BulkAssignRoleRequest;
+import com.fams.modules.rbac.dto.response.BulkAssignRoleResponse;
 import com.fams.modules.rbac.dto.response.MyRoleResponse;
+import com.fams.modules.rbac.dto.response.RoleMemberResponse;
 import com.fams.modules.rbac.dto.response.SiteRefResponse;
 import com.fams.modules.rbac.dto.response.UserRoleResponse;
 import com.fams.modules.rbac.entity.Role;
@@ -175,6 +179,73 @@ public class UserRoleService {
                 .toList();
     }
 
+    /**
+     * Lists who currently holds a given role — previously the only visibility into this was a
+     * bare count ("27 người") on the role list, with no way to see who without opening each
+     * employee's profile one at a time (2026-08-14 user feedback). Access rules mirror
+     * {@link com.fams.modules.rbac.service.RoleService#getRoleById}: a tenant-owned custom
+     * role is scoped to its own tenant automatically; a platform-tier system role
+     * (PLATFORM_ADMIN/PLATFORM_STAFF, see V91) or platform-scoped custom role is Platform-Admin
+     * only; a tenant-TIER system role (TENANT_ADMIN/HR_MANAGER/SITE_SUPERVISOR/EMPLOYEE) is
+     * shared across every tenant, so the caller must specify WHICH tenant's holders they want
+     * and must actually belong to it (or be Platform Admin) — without this, any authenticated
+     * user could list every TENANT_ADMIN across the entire platform by role name alone.
+     */
+    @Transactional(readOnly = true)
+    public List<RoleMemberResponse> listRoleMembers(UUID roleId, UUID requestedTenantId,
+                                                     UUID callerUserId, boolean callerIsPlatformAdmin) {
+        Role role = roleRepository.findByIdAndDeletedAtIsNull(roleId)
+                .orElseThrow(() -> new ResourceNotFoundException("Role not found: " + roleId));
+
+        UUID scopeTenantId;
+        if (role.getTenantId() != null) {
+            scopeTenantId = role.getTenantId();
+            if (!callerIsPlatformAdmin) {
+                Set<String> callerPermissions = userRoleRepository.findPermissionNamesByUserIdAndTenantId(callerUserId, scopeTenantId);
+                if (!callerPermissions.contains("roles:read") && !callerPermissions.contains("roles:update")) {
+                    throw new AccessDeniedException("You do not have permission to view roles in this tenant");
+                }
+            }
+        } else if (role.isPlatformRole() || !role.isSystem()) {
+            if (!callerIsPlatformAdmin) {
+                throw new AccessDeniedException("You do not have permission to view this role");
+            }
+            scopeTenantId = null;
+        } else {
+            if (requestedTenantId == null) {
+                throw new IllegalArgumentException("tenantId is required to view members of a system role");
+            }
+            if (!callerIsPlatformAdmin
+                    && !userRoleRepository.existsByUserIdAndTenantIdAndDeletedAtIsNull(callerUserId, requestedTenantId)) {
+                throw new AccessDeniedException("You do not have permission to view roles in this tenant");
+            }
+            scopeTenantId = requestedTenantId;
+        }
+
+        List<UserRole> assignments = userRoleRepository.findByRoleIdAndDeletedAtIsNull(roleId).stream()
+                .filter(ur -> scopeTenantId == null || scopeTenantId.equals(ur.getTenantId()))
+                .sorted((a, b) -> a.getCreatedAt().compareTo(b.getCreatedAt()))
+                .toList();
+
+        Map<UUID, User> usersById = userRepository.findAllById(
+                assignments.stream().map(UserRole::getUserId).collect(Collectors.toSet())
+        ).stream().collect(Collectors.toMap(User::getId, Function.identity()));
+
+        return assignments.stream()
+                .map(ur -> {
+                    User u = usersById.get(ur.getUserId());
+                    return RoleMemberResponse.builder()
+                            .userRoleId(ur.getId())
+                            .userId(ur.getUserId())
+                            .displayName(u != null ? u.getDisplayName() : null)
+                            .contact(u != null ? (u.getEmail() != null ? u.getEmail() : u.getPhone()) : null)
+                            .assignedAt(ur.getCreatedAt())
+                            .siteIds(new ArrayList<>(ur.getSiteIds()))
+                            .build();
+                })
+                .toList();
+    }
+
     @Transactional
     public UserRoleResponse assignRole(UUID callerUserId, boolean callerIsPlatformAdmin,
                                        AssignRoleRequest request) {
@@ -205,11 +276,16 @@ public class UserRoleService {
                     "Role " + roleId + " does not belong to tenant " + tenantId);
         }
 
-        // Platform-scoped custom roles (tenantId null, not system) define FAMS's own internal
-        // staff hierarchy — they must go through assignPlatformRole, never through a tenant
-        // context. Without this check they'd slip past the check above (null tenantId always
-        // "matches") and a tenant admin could effectively hand out a platform-governance role.
-        if (role.getTenantId() == null && !role.isSystem()) {
+        // Platform-scoped roles (tenantId null) — whether a custom platform role, or the two
+        // platform-tier SYSTEM roles PLATFORM_ADMIN/PLATFORM_STAFF (isPlatformRole=true, see
+        // V91) — define FAMS's own internal staff hierarchy and must go through
+        // assignPlatformRole, never through a tenant context. SECURITY FIX (2026-08-14): the
+        // isPlatformRole half of this check was missing before — role.isSystem()==true made
+        // PLATFORM_ADMIN/PLATFORM_STAFF slip past the old "!role.isSystem()" condition
+        // entirely, so any tenant admin with roles:update could grant themselves or anyone
+        // else full PLATFORM_ADMIN permissions inside their own tenant. Confirmed exploitable
+        // live before this fix.
+        if (role.getTenantId() == null && (!role.isSystem() || role.isPlatformRole())) {
             throw new IllegalArgumentException(
                     "Role '" + role.getName() + "' is a platform-scoped role and can only be assigned via "
                     + "/user-roles/platform, not within a tenant");
@@ -264,6 +340,80 @@ public class UserRoleService {
                 userRoleAuditSnapshot(assignment));
 
         return toResponse(assignment);
+    }
+
+    /**
+     * Assigns one role to many users in a single call — the practical fix for "move everyone
+     * off the retiring role onto its replacement" without clicking through each person one at
+     * a time. Reuses {@link #assignRole} per user (identical validation/behavior to a single
+     * assignment) rather than duplicating its rules; each user is isolated in its own
+     * try/catch so one bad entry (already has the role, user not found, ...) doesn't roll back
+     * everyone else already processed in the batch.
+     */
+    @Transactional
+    public BulkAssignRoleResponse bulkAssignRole(UUID callerUserId, boolean callerIsPlatformAdmin,
+                                                 BulkAssignRoleRequest request) {
+        UUID tenantId = request.getTenantId();
+
+        tenantRepository.findByIdAndDeletedAtIsNull(tenantId)
+                .orElseThrow(() -> new ResourceNotFoundException("Tenant not found: " + tenantId));
+
+        if (!callerIsPlatformAdmin) {
+            Set<String> callerPermissions = userRoleRepository
+                    .findPermissionNamesByUserIdAndTenantId(callerUserId, tenantId);
+            if (!callerPermissions.contains("roles:update")) {
+                throw new AccessDeniedException("You do not have permission to assign roles in this tenant");
+            }
+        }
+
+        List<BulkAssignRoleResponse.Result> results = new ArrayList<>();
+        for (UUID userId : request.getUserIds()) {
+            try {
+                if (request.getRevokeRoleId() != null) {
+                    revokeRoleIfHeld(userId, request.getRevokeRoleId(), tenantId, callerUserId);
+                }
+
+                AssignRoleRequest single = new AssignRoleRequest();
+                single.setTenantId(tenantId);
+                single.setUserId(userId);
+                single.setRoleId(request.getRoleId());
+                single.setSiteIds(request.getSiteIds());
+
+                UserRoleResponse assigned = assignRole(callerUserId, callerIsPlatformAdmin, single);
+                results.add(BulkAssignRoleResponse.Result.builder()
+                        .userId(userId).success(true).userRoleId(assigned.getId()).build());
+            } catch (Exception ex) {
+                log.warn("Bulk role assignment failed for userId={} tenantId={} roleId={}: {}",
+                        userId, tenantId, request.getRoleId(), ex.getMessage());
+                results.add(BulkAssignRoleResponse.Result.builder()
+                        .userId(userId).success(false).message(ex.getMessage()).build());
+            }
+        }
+
+        long successCount = results.stream().filter(BulkAssignRoleResponse.Result::isSuccess).count();
+        log.info("Bulk role assignment complete: tenantId={} roleId={} total={} success={} failed={} by={}",
+                tenantId, request.getRoleId(), results.size(), successCount, results.size() - successCount, callerUserId);
+
+        return BulkAssignRoleResponse.builder()
+                .results(results)
+                .successCount((int) successCount)
+                .failureCount((int) (results.size() - successCount))
+                .build();
+    }
+
+    /** Best-effort companion to bulkAssignRole's revokeRoleId — silently no-ops if the user
+     *  never held that role (nothing to revoke isn't an error in a bulk "move everyone" call). */
+    private void revokeRoleIfHeld(UUID userId, UUID roleId, UUID tenantId, UUID callerUserId) {
+        userRoleRepository.findByUserIdAndRoleIdAndTenantId(userId, roleId, tenantId).stream()
+                .filter(ur -> ur.getDeletedAt() == null)
+                .findFirst()
+                .ifPresent(ur -> {
+                    Map<String, Object> before = userRoleAuditSnapshot(ur);
+                    ur.setDeletedAt(OffsetDateTime.now());
+                    userRoleRepository.save(ur);
+                    evictPermissionCache(userId, tenantId);
+                    recordUserRoleAudit(tenantId, callerUserId, "role_revoked", ur.getId(), before, null);
+                });
     }
 
     private Map<String, Object> userRoleAuditSnapshot(UserRole ur) {

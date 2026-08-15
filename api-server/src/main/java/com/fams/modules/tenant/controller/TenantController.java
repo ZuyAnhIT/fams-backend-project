@@ -6,15 +6,18 @@ import com.fams.modules.subscription.dto.response.SubscriptionResponse;
 import com.fams.modules.subscription.service.TenantSubscriptionService;
 import com.fams.modules.tenant.dto.request.CreateIpWhitelistRequest;
 import com.fams.modules.tenant.dto.request.CreateTenantRequest;
+import com.fams.modules.tenant.dto.request.TransferOwnerRequest;
 import com.fams.modules.tenant.dto.request.UpdateIpWhitelistRequest;
 import com.fams.modules.tenant.dto.request.UpdateTenantRequest;
 import com.fams.modules.tenant.dto.request.UpdateTenantSettingsRequest;
 import com.fams.modules.tenant.dto.response.IpWhitelistResponse;
 import com.fams.modules.tenant.dto.response.TenantDetailResponse;
+import com.fams.modules.tenant.dto.response.TenantMemberResponse;
 import com.fams.modules.tenant.dto.response.TenantResponse;
 import com.fams.modules.tenant.dto.response.TenantSettingsResponse;
 import com.fams.modules.tenant.service.IpWhitelistService;
 import com.fams.modules.tenant.service.TenantDetailService;
+import com.fams.modules.tenant.service.TenantMemberService;
 import com.fams.modules.tenant.service.TenantService;
 import com.fams.modules.tenant.service.TenantSettingsService;
 
@@ -31,6 +34,7 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 
+import java.util.List;
 import java.util.UUID;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
@@ -49,17 +53,20 @@ public class TenantController {
     private final TenantSettingsService tenantSettingsService;
     private final IpWhitelistService ipWhitelistService;
     private final TenantSubscriptionService subscriptionService;
+    private final TenantMemberService tenantMemberService;
 
     public TenantController(TenantService tenantService,
                             TenantDetailService tenantDetailService,
                             TenantSettingsService tenantSettingsService,
                             IpWhitelistService ipWhitelistService,
-                            TenantSubscriptionService subscriptionService) {
+                            TenantSubscriptionService subscriptionService,
+                            TenantMemberService tenantMemberService) {
         this.tenantService = tenantService;
         this.tenantDetailService = tenantDetailService;
         this.tenantSettingsService = tenantSettingsService;
         this.ipWhitelistService = ipWhitelistService;
         this.subscriptionService = subscriptionService;
+        this.tenantMemberService = tenantMemberService;
     }
 
     @Operation(summary = "List tenants",
@@ -161,7 +168,53 @@ public class TenantController {
             @Valid @RequestBody UpdateTenantRequest request,
             @AuthenticationPrincipal FamsUserDetails userDetails) {
         log.info("Update tenant id={} by userId={}", id, userDetails.getUserId());
-        TenantResponse response = tenantService.updateTenant(id, request, userDetails.getUserId());
+        TenantResponse response = tenantService.updateTenant(id, request, userDetails.getUserId(), userDetails.isPlatformAdmin());
+        return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    @Operation(summary = "Transfer tenant ownership",
+        description = "Hands off owner-gated capabilities (profile edit, display settings, IP whitelist, billing "
+            + "detail) to another existing member of this tenant. Callable by the CURRENT owner, or a Platform "
+            + "Admin for support cases. The new owner must already hold an active role in this tenant, and is "
+            + "granted TENANT_ADMIN automatically if they don't already have it. The previous owner's own role "
+            + "membership is left untouched.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Ownership transferred",
+            content = @Content(schema = @Schema(implementation = TenantResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Validation error, or new owner is not yet a tenant member"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Unauthorized"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "Only the current owner or a Platform Admin may transfer ownership"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "Tenant or new owner not found")
+    })
+    @PostMapping("/{id}/transfer-owner")
+    public ResponseEntity<ApiResponse<TenantResponse>> transferOwner(
+            @Parameter(description = "Tenant UUID") @PathVariable UUID id,
+            @Valid @RequestBody TransferOwnerRequest request,
+            @AuthenticationPrincipal FamsUserDetails userDetails) {
+        log.info("Transfer tenant owner: tenantId={} by userId={}", id, userDetails.getUserId());
+        TenantResponse response = tenantService.transferOwner(id, request, userDetails.getUserId(), userDetails.isPlatformAdmin());
+        return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    @Operation(summary = "List tenant members",
+        description = "Returns everyone who holds at least one role in this tenant — owner, other admins, HR, "
+            + "site supervisors, and regular employees — including anyone with access but no HR Employee profile "
+            + "(e.g. an owner who received the company via transfer-owner and was never onboarded through HR). "
+            + "Broader than GET /employees, which only lists people with an HR profile. Callable by the tenant's "
+            + "owner, a Platform Admin, or anyone holding roles:read, roles:update, or employees:list in this tenant.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Members returned",
+            content = @Content(schema = @Schema(implementation = TenantMemberResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Unauthorized"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "Insufficient permissions"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "Tenant not found")
+    })
+    @GetMapping("/{id}/members")
+    public ResponseEntity<ApiResponse<List<TenantMemberResponse>>> listMembers(
+            @Parameter(description = "Tenant UUID") @PathVariable UUID id,
+            @AuthenticationPrincipal FamsUserDetails userDetails) {
+        log.info("List tenant members tenantId={} by userId={}", id, userDetails.getUserId());
+        List<TenantMemberResponse> response = tenantMemberService.listMembers(id, userDetails.getUserId(), userDetails.isPlatformAdmin());
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 
