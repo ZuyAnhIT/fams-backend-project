@@ -56,14 +56,19 @@ giữ nguyên ✅ ĐÃ KHÓA. Đồng thời xác nhận UI "tìm người thao 
 | 21 | Cấu hình giới hạn gói | ✅ Pass | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-13 | Case enforcement (3-5) đã test hoặc xác nhận hoãn hợp lệ theo Sprint liên quan |
 | 22 | Gán subscription cho tenant | ✅ Pass | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-13 | Không có gap |
 | 23 | Seed role và permission hệ thống | ✅ Pass (kiểm qua DB/API) | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-13 | Idempotent xác nhận qua restart container |
-| 24 | Danh sách role | ⬜ Chưa test | — | ⬜ **CHƯA TEST** | — | Gap cũ (thiếu số user đang gán) đã xác nhận SỬA XONG — có `assignmentCount`, case 4 xác nhận lại |
-| 25 | Tạo role tùy chỉnh | ⬜ Chưa test | — | ⬜ **CHƯA TEST** | — | Gap audit cũ đã xác nhận SỬA XONG (`role_created`) |
-| 26 | Sửa role và quyền | ⬜ Chưa test | — | ⬜ **CHƯA TEST** | — | Gap audit cũ đã xác nhận SỬA XONG (`role_updated`); case 2 test cơ chế evict cache quyền ngay lập tức |
-| 27 | Xóa hoặc vô hiệu hóa role | ⬜ Chưa test | — | ⬜ **CHƯA TEST** | — | Audit đã có (`role_deleted`); fallback deactivate KHÔNG tự động (chỉ chặn xóa), case 3 xác nhận đúng hành vi |
-| 28 | Xem permission theo nhóm | ⬜ Chưa test | — | ⬜ **CHƯA TEST** | — | Không có gap đã biết |
-| 29 | Gán role cho user | ⬜ Chưa test | — | ⬜ **CHƯA TEST** | — | Scope theo site + audit đã xác nhận SỬA XONG; `expires_at` vẫn chưa có (gap thật, không chặn khóa) |
-| 30 | Thu hồi role | ⬜ Chưa test | — | ⬜ **CHƯA TEST** | — | Case 4 xác nhận gap "chưa có safeguard mất admin cuối cùng của tenant" vẫn còn tồn tại |
-| 31 | Ghi audit cho hành động quan trọng | ⬜ Chưa test | — | ⬜ **CHƯA TEST** | — | Gap gốc "record() không được gọi ở đâu" đã xác nhận SAI — đã gọi ở 17 module |
+| 24 | Danh sách role | ✅ Pass | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-15 | assignmentCount scoped đúng theo tenant (TENANT_ADMIN → "1 người" trong tenant test, không lộ số toàn platform); tìm kiếm lọc đúng |
+| 25 | Tạo role tùy chỉnh | ✅ Pass | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-15 | Tạo role với đúng 2 permission chọn; audit `role_created` ghi đúng entity_id + request_id |
+| 26 | Sửa role và quyền | ✅ Pass | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-15 | Case cache-eviction xác nhận bằng THỰC NGHIỆM: gọi API bằng đúng JWT cấp TRƯỚC khi sửa quyền — trước khi sửa trả 403, ngay sau khi Owner bấm "Cập nhật" (không đăng nhập lại) trả 200; audit `role_updated` ghi đúng |
+| 27 | Xóa hoặc vô hiệu hóa role | ✅ Pass | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-15 | UI tự vô hiệu hóa nút Xóa khi role còn người giữ (chủ động hơn cả yêu cầu — không cần đợi lỗi 400); vô hiệu hóa role KHÔNG tự thu hồi quyền người đang giữ (đúng thiết kế); xóa thành công sau khi thu hồi hết; audit `role_deleted` ghi đúng |
+| 28 | Xem permission theo nhóm | ✅ Pass | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-15 | Xác nhận permission "chết" (`tenants:update`, đã ẩn ở đợt dọn V92) không xuất hiện trong picker tạo role — 0 lần khớp |
+| 29 | Gán role cho user | ✅ Pass | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-15 | Gán qua UI thật (tab "Vai trò & Phân quyền" của nhân viên) pass; gán trùng bị chặn 409 idempotent; gán lại sau khi thu hồi (reactivate) pass 201; chặn leo thang đặc quyền 403 khi role không có quyền đang gán; chặn gán PLATFORM_ADMIN qua API tenant-scoped 400. Case "scope theo công trình cụ thể" mới xác nhận có UI (radio "Công trình cụ thể"), CHƯA test hết luồng submit — để dành khi có dữ liệu site thật |
+| 30 | Thu hồi role | ✅ Pass | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-15 | Case 1-3 pass. Case 4/5 phát hiện gap "tự khóa vĩnh viễn khi thu hồi admin cuối cùng" — **đã vá cùng ngày**: safeguard chặn 409 + tự phục hồi (self-heal) cho chủ sở hữu. Xem chi tiết bên dưới. |
+| 31 | Ghi audit cho hành động quan trọng | ✅ Pass | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-15 | Xác nhận qua màn Nhật ký audit thật: toàn bộ `role_created/role_updated/role_deleted/role_assigned/role_revoked` phát sinh trong đợt test đều xuất hiện, đúng actor/entity/request_id, đúng phạm vi tenant (banner "Dữ liệu được giới hạn theo công ty đang chọn") |
+| 32 | Tạo notification in-app cơ bản | ✅ Pass | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-15 | Chuông + badge + màn "Thông báo" đầy đủ (hơn kỳ vọng: có filter Tất cả/Chưa đọc, chọn hàng loạt) — đánh dấu đọc từng cái và tất cả đều đúng, idempotent (nút tự ẩn khi hết chưa đọc) |
+| 33 | Mời nhân viên bằng email | ✅ Pass | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-15 | Đã vá đủ AC: thêm chọn workspace mặc định lúc mời, ghi audit `invitation_sent`, thêm notification `EMPLOYEE_INVITED` cho email đã có tài khoản — cả 3 xác nhận qua UI/DB thật |
+| 34 | Chấp nhận lời mời | ✅ Pass | ⬜ Chưa test | ✅ **PASS — ĐÃ KHÓA** (Web) | 2026-08-15 | Đã vá đủ AC: chấp nhận giờ tự tạo `WorkspaceMember` theo workspace mặc định của lời mời, ghi audit `invitation_accepted`, thêm notification `INVITATION_ACCEPTED` cho người mời — xác nhận qua API+DB thật. Mobile App chưa test (để dành đợt có thiết bị) |
+| 35 | Hủy lời mời | ✅ Pass | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-15 | Đã vá đủ AC: modal hủy giờ có ô nhập lý do (tùy chọn), backend lưu `cancelled_by`/`cancel_reason`/`cancelled_at`, ghi audit `invitation_cancelled` — xác nhận qua UI/DB thật, tooltip lý do hiện trên tag trạng thái |
+| 36 | Danh sách nhân viên | ✅ Pass | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-15 | Đã vá đủ AC: thêm filter Face ID (Đã đăng ký/Chưa đăng ký, join `face_profiles.status`) và filter Workspace riêng (join `workspace_members`, độc lập với filter Phòng ban cũ theo tên chuỗi) — cả 2 xác nhận qua UI thật, kể cả trường hợp kết hợp nhiều filter cùng lúc |
 
 ---
 
@@ -199,39 +204,144 @@ giữ nguyên ✅ ĐÃ KHÓA. Đồng thời xác nhận UI "tìm người thao 
 
 ---
 
-### #24 — Danh sách role — ⬜ CHƯA TEST (2026-08-13)
-- Kịch bản: `docs/manual-tests/sprint-1-feature-24-list-roles.md`. Case 4 xác nhận gap cũ (thiếu
-  số user đang gán) đã sửa xong (`assignmentCount`, batch-load).
+### #24 — Danh sách role — ✅ PASS — ĐÃ KHÓA (2026-08-15)
+- Kịch bản: `docs/manual-tests/sprint-1-feature-24-list-roles.md`. Test tự động (Playwright) trên
+  1 tenant thật mới tạo riêng cho đợt test này. Case 4 (số người đang giữ) xác nhận đúng: role
+  dùng chung `TENANT_ADMIN` hiện "1 người · Xem" — đúng với thực tế của tenant test (chỉ chủ sở
+  hữu giữ role này), không lộ số toàn platform (bug đã sửa 2026-08-14). Tìm kiếm theo tên lọc
+  đúng ("TENANT" → chỉ ra đúng 1 kết quả `TENANT_ADMIN`).
 
-### #25 — Tạo role tùy chỉnh — ⬜ CHƯA TEST (2026-08-13)
-- Kịch bản: `docs/manual-tests/sprint-1-feature-25-create-custom-role.md`. Audit `role_created` đã
-  có sẵn, case 5 chỉ xác nhận lại.
+### #25 — Tạo role tùy chỉnh — ✅ PASS — ĐÃ KHÓA (2026-08-15)
+- Kịch bản: `docs/manual-tests/sprint-1-feature-25-create-custom-role.md`. Tạo role qua UI thật
+  với đúng 2 permission chọn (`roles:create`, `roles:update`) — xác nhận qua API sau khi tạo,
+  permission trả về khớp chính xác. Audit `role_created` ghi đúng `entity_id` = role vừa tạo, có
+  `request_id`.
 
-### #26 — Sửa role và quyền — ⬜ CHƯA TEST (2026-08-13)
-- Kịch bản: `docs/manual-tests/sprint-1-feature-26-update-role.md`. Case 2 quan trọng nhất — xác
-  nhận evict cache quyền hoạt động ngay lập tức khi sửa permission của role.
+### #26 — Sửa role và quyền — ✅ PASS — ĐÃ KHÓA (2026-08-15)
+- Kịch bản: `docs/manual-tests/sprint-1-feature-26-update-role.md`. Case 2 (evict cache ngay lập
+  tức) xác nhận bằng thực nghiệm chặt chẽ: lấy JWT của 1 tài khoản test **trước khi** sửa role,
+  gọi 1 API cần quyền chưa có → 403; Owner sửa role qua UI thêm đúng quyền đó; gọi lại **CHÍNH
+  JWT CŨ đó, không đăng nhập lại** → 200 ngay lập tức. Audit `role_updated` ghi đúng.
 
-### #27 — Xóa hoặc vô hiệu hóa role — ⬜ CHƯA TEST (2026-08-13)
-- Kịch bản: `docs/manual-tests/sprint-1-feature-27-delete-role.md`. Case 3 xác nhận đúng hành vi:
-  xóa bị chặn khi role còn người giữ, nhưng KHÔNG tự động deactivate — cần làm thủ công qua #26.
+### #27 — Xóa hoặc vô hiệu hóa role — ✅ PASS — ĐÃ KHÓA (2026-08-15)
+- Kịch bản: `docs/manual-tests/sprint-1-feature-27-delete-role.md`. Phát hiện tích cực: UI **chủ
+  động vô hiệu hóa nút Xóa** khi role còn người giữ (disabled, có tooltip) — tốt hơn kỳ vọng gốc
+  của kịch bản (chỉ yêu cầu backend trả lỗi). Xác nhận backend cũng chặn đúng ở tầng API (400
+  "Role is still assigned..."). Vô hiệu hóa (deactivate) role KHÔNG tự thu hồi quyền người đang
+  giữ — đúng thiết kế, đã xác nhận qua UI ("1 người · Xem" không đổi sau khi vô hiệu hóa). Xóa
+  thành công sau khi thu hồi hết người giữ — role biến mất khỏi danh sách ngay. Audit
+  `role_deleted` ghi đúng.
 
-### #28 — Xem permission theo nhóm — ⬜ CHƯA TEST (2026-08-13)
-- Kịch bản: `docs/manual-tests/sprint-1-feature-28-list-permissions.md`. Không có gap đã biết.
+### #28 — Xem permission theo nhóm — ✅ PASS — ĐÃ KHÓA (2026-08-15)
+- Kịch bản: `docs/manual-tests/sprint-1-feature-28-list-permissions.md`. Xác nhận permission đã
+  bị ẩn ở đợt dọn dẹp trước (`tenants:update`, migration V92) **không xuất hiện** trong picker tạo
+  role — 0 lần khớp trong toàn bộ modal "Tạo Role Tùy Chỉnh".
 
 ---
 
-### #29 — Gán role cho user — ⬜ CHƯA TEST (2026-08-14)
-- Kịch bản: `docs/manual-tests/sprint-1-feature-29-assign-role.md`. Gap cũ về scope theo site và
-  audit đã xác nhận sửa xong qua code; `expires_at` vẫn chưa có (gap thật, không chặn khóa).
+### #29 — Gán role cho user — ✅ PASS — ĐÃ KHÓA (2026-08-15)
+- Kịch bản: `docs/manual-tests/sprint-1-feature-29-assign-role.md`. Case 1 (gán qua UI thật, tab
+  "Vai trò & Phân quyền" trong hồ sơ nhân viên) pass — toast "Đã gán role thành công", role xuất
+  hiện ngay trong bảng. Case 3 (idempotent) pass theo 2 chiều: gán trùng role đang giữ → 409 rõ
+  ràng, không tạo bản ghi rác; thu hồi rồi gán lại → 201 thành công (reactivate đúng bản ghi cũ).
+  Case 4 (chặn leo thang đặc quyền khi gán) pass — tài khoản chỉ giữ `roles:create`+`roles:update`
+  thử tạo role có quyền `employees:create` (không có) → 403. Case 5 (chặn gán role nền tảng qua
+  API tenant) pass — thử gán `PLATFORM_ADMIN` qua `/user-roles` (không phải
+  `/user-roles/platform`) → 400 với thông báo rõ ràng.
+  **Chưa test hết:** case 2 (giới hạn theo công trình cụ thể) — modal đã xác nhận có UI (radio
+  "Công trình cụ thể"), nhưng chưa hoàn tất 1 luồng submit thật với site (cần dữ liệu site thật,
+  để dành cho đợt test Epic Workspace/Site ở Sprint 2). Không chặn khóa vì case 1 (scope "Toàn
+  công ty") đã pass đầy đủ và đây chỉ là 1 biến thể UI của cùng 1 API.
 
-### #30 — Thu hồi role — ⬜ CHƯA TEST (2026-08-14)
-- Kịch bản: `docs/manual-tests/sprint-1-feature-30-revoke-role.md`. Case 4 quan trọng nhất — xác
-  nhận gap "chưa có safeguard mất admin cuối cùng của tenant" vẫn còn tồn tại.
+### #30 — Thu hồi role — ✅ PASS — ĐÃ KHÓA (2026-08-15)
+- Kịch bản: `docs/manual-tests/sprint-1-feature-30-revoke-role.md`. Case 1 (thu hồi qua UI) pass —
+  toast "Đã thu hồi role thành công", role biến mất khỏi bảng ngay. Case 2 (thu hồi lại đúng
+  `userRoleId` đã thu hồi) pass — 404 rõ ràng, không crash. Case 3 (thu hồi xuyên tenant) pass —
+  403, không lộ hay ảnh hưởng dữ liệu tenant khác.
+  **Case 4/5 phát hiện gap thật, nghiêm trọng — đã sửa cùng ngày:** thu hồi role admin cuối cùng
+  của 1 tenant từng thành công không cảnh báo, khiến chủ sở hữu bị hệ thống coi như "không thuộc
+  công ty nào" dù `tenants.owner_id` không đổi (chi tiết đầy đủ ở
+  `docs/reviews/backend/rbac-role-permission-audit-2026-08-13.md` mục 10). **Đã vá 2 lớp:**
+  (1) `UserRoleService.assertNotLastAdminHolder` chặn 409 nếu đây là người cuối cùng giữ
+  `roles:update` trong tenant (Platform Admin được miễn trừ); (2)
+  `UserRoleService.selfHealOwnerRoles` tự động phục hồi `TENANT_ADMIN` cho chủ sở hữu bất kỳ khi
+  nào họ đăng nhập/chuyển tenant/gọi `GET /roles/me` mà đang giữ 0 role trong tenant mình sở hữu.
+  Đã test lại qua UI thật: (a) chủ sở hữu duy nhất tự thu hồi role của mình qua modal "Danh sách
+  người giữ role" → bị chặn đúng, toast hiện "Không thể thu hồi role này vì đây là quyền quản trị
+  vai trò cuối cùng của công ty..."; (b) tái hiện đúng kịch bản gốc bằng Platform Admin
+  force-revoke (kênh miễn trừ hợp lệ) rồi đăng nhập lại bằng owner → tự động phục hồi hoàn toàn,
+  vào thẳng dashboard, không cần can thiệp DB.
 
-### #31 — Ghi audit cho hành động quan trọng — ⬜ CHƯA TEST (2026-08-14)
-- Kịch bản: `docs/manual-tests/sprint-1-feature-31-audit-logging.md`. Gap gốc "AuditLogService
-  không được gọi ở đâu cả" đã xác nhận SAI hoàn toàn với thực tế hiện tại — record() đã được gọi
-  ở 17 module. Test chủ yếu để xác nhận UI đọc đúng + không lộ audit chéo tenant.
+### #31 — Ghi audit cho hành động quan trọng — ✅ PASS — ĐÃ KHÓA (2026-08-15)
+- Kịch bản: `docs/manual-tests/sprint-1-feature-31-audit-logging.md`. Xác nhận qua màn Nhật ký
+  audit thật (không chỉ qua DB): toàn bộ hành động phát sinh trong đợt test này —
+  `role_created`, `role_updated`, `role_deleted`, `role_assigned` (2 lần), `role_revoked` (nhiều
+  lần) — đều xuất hiện đúng thứ tự thời gian, đúng actor (email + user UUID), đúng entity, có
+  `request_id` riêng từng dòng. Banner "Dữ liệu được giới hạn theo công ty đang chọn" xác nhận
+  không lộ audit chéo tenant. Gap gốc (07-22) "`AuditLogService.record()` không được gọi ở đâu
+  cả" đã xác nhận **sai hoàn toàn** với hiện trạng — record() được gọi ở 17 module khác nhau.
+
+---
+
+### #32 — Tạo notification in-app cơ bản — ✅ PASS — ĐÃ KHÓA (2026-08-15)
+- Kịch bản: `docs/manual-tests/sprint-1-feature-32-notification-inbox.md`. Test tự động
+  (Playwright) trên 1 tenant thật riêng cho đợt test này, seed 2 notification test qua DB (vì
+  research code xác nhận: hiện tại **chỉ có 1 nơi duy nhất trong toàn hệ thống tạo notification**
+  — `RandomCheckDispatchService` khi gửi kiểm tra ngẫu nhiên; mời/chấp nhận/gán role đều KHÔNG tạo
+  notification nào — xem thêm mục "logic nghiệp vụ cần bổ sung" trong tin nhắn trả lời). Đã xác
+  nhận: chuông header hiện đúng badge số chưa đọc; click 1 item → đánh dấu đã đọc ngay + điều
+  hướng qua màn "Thông báo" đầy đủ (phát hiện thêm: có sẵn tab "Tất cả/Chưa đọc" và checkbox chọn
+  hàng loạt — tốt hơn kỳ vọng ban đầu của kịch bản); "Đánh dấu tất cả đã đọc" hoạt động đúng, nút
+  tự ẩn khi hết thông báo chưa đọc (cách xử lý idempotent chủ động, không cần bấm lại để test).
+
+### #33 — Mời nhân viên bằng email — ✅ PASS — ĐÃ KHÓA (2026-08-15)
+- Kịch bản: `docs/manual-tests/sprint-2-feature-33-invite-employee.md`. Case 1-2 (mời happy path,
+  chặn trùng email) pass qua UI thật, như lần test trước. **Cả 2 gap đã vá cùng ngày, ngay sau
+  lần test đầu tiên phát hiện chúng:**
+  1. Thêm ô chọn "Phòng ban / Workspace (Tùy chọn)" vào modal mời (dùng chung danh sách workspace
+     active của tenant), lưu vào cột mới `employee_invitations.workspace_id` (migration V93).
+  2. Thêm audit `invitation_sent` (`AuditLogService`, entity `EmployeeInvitation`).
+  Đồng thời bổ sung tính năng liên quan phát sinh từ thảo luận: nếu email được mời đã có tài
+  khoản FAMS, gửi thêm notification in-app `EMPLOYEE_INVITED`. Đã test lại toàn bộ qua UI+DB
+  thật trên 1 tenant mới: chọn workspace trong modal → gửi → xác nhận `workspace_id` lưu đúng,
+  audit `invitation_sent` xuất hiện, notification `EMPLOYEE_INVITED` tới đúng người (xác nhận cả
+  qua DB lẫn màn "Thông báo" thật của người nhận).
+
+### #34 — Chấp nhận lời mời — ✅ PASS — ĐÃ KHÓA (Web) (2026-08-15)
+- Kịch bản: `docs/manual-tests/sprint-2-feature-34-accept-invitation.md`. Case 1, 3 (chấp nhận,
+  lỗi token) pass như lần test trước. **Cả 2 gap đã vá cùng ngày:**
+  1. `EmployeeInvitationService.acceptInvitation` giờ tự tạo `WorkspaceMember` cho workspace mặc
+     định của lời mời (nếu có) ngay khi Employee được resolve — best-effort, không chặn cả luồng
+     nếu workspace bị xóa/vô hiệu hóa giữa chừng.
+  2. Thêm audit `invitation_accepted`.
+  Bổ sung thêm: gửi notification `INVITATION_ACCEPTED` cho người đã gửi lời mời. Đã test lại end-
+  to-end trên 1 tenant mới: mời kèm workspace → chấp nhận qua API → xác nhận `WorkspaceMember`
+  được tạo đúng workspace, audit `invitation_accepted` xuất hiện, notification tới đúng người mời
+  — và xác nhận chéo bằng filter workspace mới ở #36 (nhân viên vừa chấp nhận xuất hiện đúng khi
+  lọc theo workspace đó). Case 2 (Mobile App) chưa test — để dành đợt test có thiết bị thật.
+
+### #35 — Hủy lời mời — ✅ PASS — ĐÃ KHÓA (2026-08-15)
+- Kịch bản: `docs/manual-tests/sprint-2-feature-35-cancel-invitation.md`. Case 1-3 pass như lần
+  test trước. **Cả 2 gap đã vá cùng ngày:**
+  1. `EmployeeInvitation` có thêm cột `cancelled_by`, `cancel_reason`, `cancelled_at` (migration
+     V93); modal Hủy trên Web Admin có thêm ô "Lý do hủy (Tùy chọn)".
+  2. Thêm audit `invitation_cancelled` (before/after snapshot).
+  Đã test lại qua UI thật: nhập lý do "Ứng viên đã từ chối offer" → hủy → xác nhận qua DB cả 3
+  cột lưu đúng giá trị, audit `invitation_cancelled` xuất hiện; tag trạng thái "Đã hủy" trên màn
+  "Lời mời đã gửi" giờ có tooltip hiện lý do khi hover.
+
+### #36 — Danh sách nhân viên — ✅ PASS — ĐÃ KHÓA (2026-08-15)
+- Kịch bản: `docs/manual-tests/sprint-2-feature-36-list-employees.md`. Case 1-5 pass như lần test
+  trước. **Cả 2 gap đã vá cùng ngày:**
+  1. Thêm filter "Face ID" (Đã đăng ký/Chưa đăng ký) — `EmployeeSpecification` dùng subquery join
+     `face_profiles.status = 'enrolled'`.
+  2. Thêm filter "Workspace" riêng biệt với filter "Phòng ban" cũ — join `workspace_members`
+     (active, đúng workspaceId), khác với "Phòng ban" (chỉ so tên chuỗi trên `Employee.department`,
+     giữ nguyên không đổi để tránh phá hành vi cũ).
+  Đã test lại qua UI thật trên tenant vừa test #33/#34: lọc "Chưa đăng ký" → đúng 1 kết quả (nhân
+  viên chưa có Face ID); lọc "Đã đăng ký" → đúng 0 kết quả (rỗng, không ai enrolled); lọc theo
+  workspace "Phòng Kỹ thuật" (workspace vừa được gán tự động ở #34) → đúng hiện nhân viên đó —
+  xác nhận filter mới hoạt động đúng và độc lập với filter Phòng ban cũ.
 
 ## Quy ước cập nhật file này (cho các phiên làm việc sau)
 

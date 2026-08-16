@@ -10,6 +10,7 @@ import com.fams.modules.auth.repository.UserRepository;
 import com.fams.modules.auth.util.PhoneNumbers;
 import com.fams.modules.rbac.entity.UserRole;
 import com.fams.modules.rbac.repository.UserRoleRepository;
+import com.fams.modules.rbac.service.UserRoleService;
 import com.fams.modules.tenant.repository.TenantRepository;
 import com.fams.shared.constants.AppConstants;
 import com.fams.shared.exception.AccountLockedException;
@@ -45,6 +46,7 @@ public class AuthService {
     private final UserRepository userRepository;
     private final RefreshTokenRepository refreshTokenRepository;
     private final UserRoleRepository userRoleRepository;
+    private final UserRoleService userRoleService;
     private final TenantRepository tenantRepository;
     private final JwtProvider jwtProvider;
     private final BCryptPasswordEncoder passwordEncoder;
@@ -59,6 +61,7 @@ public class AuthService {
             UserRepository userRepository,
             RefreshTokenRepository refreshTokenRepository,
             UserRoleRepository userRoleRepository,
+            UserRoleService userRoleService,
             TenantRepository tenantRepository,
             JwtProvider jwtProvider,
             BCryptPasswordEncoder passwordEncoder,
@@ -71,6 +74,7 @@ public class AuthService {
         this.userRepository = userRepository;
         this.refreshTokenRepository = refreshTokenRepository;
         this.userRoleRepository = userRoleRepository;
+        this.userRoleService = userRoleService;
         this.tenantRepository = tenantRepository;
         this.jwtProvider = jwtProvider;
         this.passwordEncoder = passwordEncoder;
@@ -163,6 +167,10 @@ public class AuthService {
         userRepository.save(user);
 
         // ── 7. Resolve primary tenant & role cho JWT claims ─────────────────────
+        // Self-heal first: a tenant owner who ended up with zero active roles (e.g. the last
+        // admin's role was revoked) must never lose access to their own company — see
+        // UserRoleService#selfHealOwnerRoles.
+        userRoleService.selfHealOwnerRoles(user.getId());
         List<UserRole> roles = userRoleRepository.findAllActiveByUserId(user.getId());
         UUID primaryTenantId = roles.isEmpty() ? null : roles.get(0).getTenantId();
         String primaryRole   = roles.isEmpty() ? null : roles.get(0).getRole().getName();
@@ -321,6 +329,7 @@ public class AuthService {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Refresh token is no longer valid");
         }
 
+        userRoleService.selfHealOwnerRoles(callerUserId);
         List<UserRole> targetRoles = userRoleRepository
                 .findActiveByUserIdAndTenantId(callerUserId, targetTenantId);
         if (targetRoles.isEmpty()) {

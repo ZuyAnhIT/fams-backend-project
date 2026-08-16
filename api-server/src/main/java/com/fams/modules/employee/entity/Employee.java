@@ -50,6 +50,13 @@ public class Employee {
     @Column(name = "department_id")
     private UUID departmentId;
 
+    /** Intended role for this person once they're invited/linked to a login account — this
+     *  Employee has no userId yet, so no real UserRole can exist. Carried forward automatically
+     *  by EmployeeInvitationService#sendInvitation when an invite is later sent for this same
+     *  email with no explicit roleId, instead of silently falling back to EMPLOYEE. */
+    @Column(name = "planned_role_id")
+    private UUID plannedRoleId;
+
     @Column(nullable = false, length = 20)
     private String status;
 

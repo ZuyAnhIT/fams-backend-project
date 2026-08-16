@@ -1,5 +1,6 @@
 package com.fams.modules.employee.controller;
 
+import com.fams.modules.employee.dto.request.CancelInvitationRequest;
 import com.fams.modules.employee.dto.request.InviteEmployeeRequest;
 import com.fams.modules.employee.dto.response.InvitationResponse;
 import com.fams.modules.employee.service.EmployeeInvitationService;
@@ -104,10 +105,11 @@ public class EmployeeInvitationController {
     public ResponseEntity<ApiResponse<InvitationResponse>> cancelInvitation(
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
             @Parameter(description = "Invitation UUID") @PathVariable UUID invitationId,
+            @RequestBody(required = false) CancelInvitationRequest request,
             @AuthenticationPrincipal FamsUserDetails userDetails) {
         log.info("Cancel invitation id={} tenantId={} by userId={}", invitationId, tenantId, userDetails.getUserId());
         InvitationResponse response = invitationService.cancelInvitation(
-                tenantId, invitationId, userDetails.getUserId(), userDetails.isPlatformAdmin());
+                tenantId, invitationId, request, userDetails.getUserId(), userDetails.isPlatformAdmin());
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 }

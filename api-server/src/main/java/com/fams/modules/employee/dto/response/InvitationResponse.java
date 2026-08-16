@@ -32,6 +32,9 @@ public class InvitationResponse {
     @Schema(description = "Role to assign on acceptance")
     private UUID roleId;
 
+    @Schema(description = "Workspace to assign the invitee to (as a WorkspaceMember) on acceptance, if any")
+    private UUID workspaceId;
+
     @Schema(description = "Pre-filled first name")
     private String firstName;
 
@@ -46,6 +49,15 @@ public class InvitationResponse {
 
     @Schema(description = "Last update timestamp (UTC)")
     private OffsetDateTime updatedAt;
+
+    @Schema(description = "User ID who cancelled this invitation, present only if status=cancelled")
+    private UUID cancelledBy;
+
+    @Schema(description = "Free-text reason given when cancelling, present only if status=cancelled and a reason was given")
+    private String cancelReason;
+
+    @Schema(description = "Timestamp the invitation was cancelled, present only if status=cancelled")
+    private OffsetDateTime cancelledAt;
 
     @Schema(description = "Invitation token UUID, used to accept the invitation. Present ONLY in the response to "
             + "POST /invitations (creation) — always null when this invitation appears anywhere else (list, "

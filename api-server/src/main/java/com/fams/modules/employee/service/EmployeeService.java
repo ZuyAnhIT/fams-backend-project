@@ -18,6 +18,8 @@ import com.fams.modules.employee.specification.EmployeeSpecification;
 import com.fams.modules.randomcheck.service.ScheduledCheckCancelService;
 import com.fams.modules.rbac.dto.response.UserRoleResponse;
 import com.fams.modules.rbac.entity.UserRole;
+import com.fams.modules.rbac.entity.Role;
+import com.fams.modules.rbac.repository.RoleRepository;
 import com.fams.modules.rbac.repository.UserRoleRepository;
 import com.fams.modules.rbac.service.SiteScopeService;
 import com.fams.modules.subscription.service.PlanLimitEnforcementService;
@@ -56,6 +58,7 @@ public class EmployeeService {
 
     private final EmployeeRepository employeeRepository;
     private final UserRoleRepository userRoleRepository;
+    private final RoleRepository roleRepository;
     private final TenantRepository tenantRepository;
     private final PlanLimitEnforcementService planLimitEnforcementService;
     private final FaceProfileRepository faceProfileRepository;
@@ -71,6 +74,7 @@ public class EmployeeService {
 
     public EmployeeService(EmployeeRepository employeeRepository,
                            UserRoleRepository userRoleRepository,
+                           RoleRepository roleRepository,
                            TenantRepository tenantRepository,
                            PlanLimitEnforcementService planLimitEnforcementService,
                            FaceProfileRepository faceProfileRepository,
@@ -85,6 +89,7 @@ public class EmployeeService {
                            com.fams.modules.audit.service.AuditLogService auditLogService) {
         this.employeeRepository = employeeRepository;
         this.userRoleRepository = userRoleRepository;
+        this.roleRepository = roleRepository;
         this.tenantRepository = tenantRepository;
         this.planLimitEnforcementService = planLimitEnforcementService;
         this.faceProfileRepository = faceProfileRepository;
@@ -117,6 +122,22 @@ public class EmployeeService {
         m.put("status", e.getStatus());
         m.put("hiredDate", e.getHiredDate() != null ? e.getHiredDate().toString() : null);
         return m;
+    }
+
+    /** Mirrors the role-ownership rule used everywhere else a role gets attached to a tenant
+     *  context (e.g. UserRoleService#assignRole, EmployeeInvitationService#sendInvitation): a
+     *  role must either be a shared tenant-tier system role, or belong to this exact tenant —
+     *  never another tenant's custom role, never a platform-tier role. */
+    private void validatePlannedRoleId(UUID tenantId, UUID roleId) {
+        Role role = roleRepository.findByIdAndDeletedAtIsNull(roleId)
+                .orElseThrow(() -> new ResourceNotFoundException("Role not found: " + roleId));
+        if (role.getTenantId() != null && !role.getTenantId().equals(tenantId)) {
+            throw new IllegalArgumentException("Role " + roleId + " does not belong to tenant " + tenantId);
+        }
+        if (role.getTenantId() == null && (!role.isSystem() || role.isPlatformRole())) {
+            throw new IllegalArgumentException(
+                    "Role '" + role.getName() + "' is a platform-scoped role and cannot be used as a planned role");
+        }
     }
 
     @Transactional
@@ -157,6 +178,10 @@ public class EmployeeService {
             deptName = dept.getName();  // sync text field
         }
 
+        if (request.getPlannedRoleId() != null) {
+            validatePlannedRoleId(tenantId, request.getPlannedRoleId());
+        }
+
         Employee employee = Employee.builder()
                 .tenantId(tenantId)
                 .firstName(request.getFirstName().trim())
@@ -170,6 +195,7 @@ public class EmployeeService {
                 .departmentId(deptId)
                 .hiredDate(request.getHiredDate())
                 .avatarUrl(request.getAvatarUrl())
+                .plannedRoleId(request.getPlannedRoleId())
                 .status("active")
                 .build();
 
@@ -196,7 +222,8 @@ public class EmployeeService {
 
     @Transactional(readOnly = true)
     public PageResponse<EmployeeResponse> listEmployees(UUID tenantId, String search, String status,
-                                                        String department, String sortBy, String sortDir,
+                                                        String department, Boolean faceRegistered, UUID workspaceId,
+                                                        String sortBy, String sortDir,
                                                         int page, int size,
                                                         UUID callerUserId, boolean callerIsPlatformAdmin) {
         tenantRepository.findByIdAndDeletedAtIsNull(tenantId)
@@ -230,7 +257,8 @@ public class EmployeeService {
             }
         }
 
-        Specification<Employee> spec = EmployeeSpecification.build(tenantId, search, status, department, restrictToEmployeeIds);
+        Specification<Employee> spec = EmployeeSpecification.build(
+                tenantId, search, status, department, restrictToEmployeeIds, faceRegistered, workspaceId);
         Page<Employee> employeePage = employeeRepository.findAll(spec, pageable);
 
         List<UUID> employeeIds = employeePage.getContent().stream().map(Employee::getId).toList();
@@ -318,6 +346,10 @@ public class EmployeeService {
                     .orElseThrow(() -> new ResourceNotFoundException("Department not found: " + request.getDepartmentId()));
             employee.setDepartmentId(dept.getId());
             employee.setDepartment(dept.getName());
+        }
+        if (request.getPlannedRoleId() != null) {
+            validatePlannedRoleId(tenantId, request.getPlannedRoleId());
+            employee.setPlannedRoleId(request.getPlannedRoleId());
         }
 
         employeeRepository.save(employee);
@@ -671,6 +703,9 @@ public class EmployeeService {
     }
 
     public EmployeeResponse toResponse(Employee e, FaceIdStatusDto faceId, java.util.List<String> roleNames) {
+        String plannedRoleName = e.getPlannedRoleId() != null
+                ? roleRepository.findByIdAndDeletedAtIsNull(e.getPlannedRoleId()).map(Role::getName).orElse(null)
+                : null;
         return EmployeeResponse.builder()
                 .id(e.getId())
                 .tenantId(e.getTenantId())
@@ -683,6 +718,8 @@ public class EmployeeService {
                 .position(e.getPosition())
                 .department(e.getDepartment())
                 .departmentId(e.getDepartmentId())
+                .plannedRoleId(e.getPlannedRoleId())
+                .plannedRoleName(plannedRoleName)
                 .status(e.getStatus())
                 .hiredDate(e.getHiredDate())
                 .avatarUrl(e.getAvatarUrl())

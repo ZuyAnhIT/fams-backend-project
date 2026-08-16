@@ -280,26 +280,26 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
   - *User Story:* Là một hệ thống, tôi muốn khởi tạo role/permission mặc định khi deploy để có nền tảng phân quyền cho các module.
   - *Acceptance Criteria:* Seed permission theo resource/action; seed role company_admin/hr/site_supervisor/field_employee; idempotent; không tạo trùng.
   - *DB Entities:* `roles, permissions, role_permissions`
-- [ ] **#24 — Danh sách role** `P0` · 3sp · Nền tảng: Backend, Web Admin
-  - ⬜ **Test tay thật — CHƯA TEST (2026-08-13):** xem `docs/manual-tests/sprint-1-feature-24-list-roles.md` — gap cũ (thiếu số user gán) đã xác nhận SỬA XONG.
+- [x] **#24 — Danh sách role** `P0` · 3sp · Nền tảng: Backend, Web Admin
+  - ✅ **Test tay thật — PASS, ĐÃ KHÓA (2026-08-15):** xem `docs/manual-tests/sprint-1-feature-24-list-roles.md` — assignmentCount scoped đúng theo tenant, tìm kiếm lọc đúng. Test tự động (Playwright).
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: RoleService.listRoles, test_list_roles.sh; thiếu: thiếu số user đang gán role
   - *User Story:* Là một Company Admin, tôi muốn xem danh sách role với tìm kiếm, lọc, phân trang để quản lý quyền người dùng.
   - *Acceptance Criteria:* Tìm theo tên; lọc active/system; sort priority; hiển thị số user đang gán; phân trang.
   - *DB Entities:* `roles, user_roles`
-- [ ] **#25 — Tạo role tùy chỉnh** `P0` · 5sp · Nền tảng: Backend, Web Admin
-  - ⬜ **Test tay thật — CHƯA TEST (2026-08-13):** xem `docs/manual-tests/sprint-1-feature-25-create-custom-role.md` — gap audit cũ đã xác nhận SỬA XONG.
+- [x] **#25 — Tạo role tùy chỉnh** `P0` · 5sp · Nền tảng: Backend, Web Admin
+  - ✅ **Test tay thật — PASS, ĐÃ KHÓA (2026-08-15):** xem `docs/manual-tests/sprint-1-feature-25-create-custom-role.md` — tạo qua UI thật, permission khớp chính xác, audit `role_created` xác nhận.
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: RoleService.createRole, test_create_role.sh; thiếu: không có cờ is_editable/is_deletable riêng (chỉ isSystem); không ghi audit
   - *User Story:* Là một Company Admin, tôi muốn tạo role riêng cho công ty để đáp ứng mô hình vận hành khác nhau.
   - *Acceptance Criteria:* Nhập name/display_name/description; name không trùng trong tenant; chọn permission; role custom editable/deletable=true.
   - *DB Entities:* `roles, role_permissions, permissions, audit_logs`
-- [ ] **#26 — Sửa role và quyền** `P0` · 5sp · Nền tảng: Backend, Web Admin
-  - ⬜ **Test tay thật — CHƯA TEST (2026-08-13):** xem `docs/manual-tests/sprint-1-feature-26-update-role.md` — gap audit cũ đã xác nhận SỬA XONG; case 2 test evict cache quyền.
+- [x] **#26 — Sửa role và quyền** `P0` · 5sp · Nền tảng: Backend, Web Admin
+  - ✅ **Test tay thật — PASS, ĐÃ KHÓA (2026-08-15):** xem `docs/manual-tests/sprint-1-feature-26-update-role.md` — cache-eviction xác nhận bằng thực nghiệm (cùng JWT: 403 trước sửa → 200 ngay sau sửa, không đăng nhập lại).
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: RoleService.updateRole, test_update_role.sh; thiếu: không ghi audit ROLE_PERMISSION_UPDATE
   - *User Story:* Là một Company Admin, tôi muốn sửa role tùy chỉnh và danh sách permission để điều chỉnh quyền theo thực tế.
   - *Acceptance Criteria:* Không sửa role is_editable=false; cập nhật role_permissions; ghi audit ROLE_PERMISSION_UPDATE.
   - *DB Entities:* `roles, role_permissions, permissions, audit_logs`
-- [ ] **#27 — Xóa hoặc vô hiệu hóa role** `P1` · 3sp · Nền tảng: Backend, Web Admin
-  - ⬜ **Test tay thật — CHƯA TEST (2026-08-13):** xem `docs/manual-tests/sprint-1-feature-27-delete-role.md` — audit đã có; fallback deactivate KHÔNG tự động, case 3 xác nhận đúng hành vi.
+- [x] **#27 — Xóa hoặc vô hiệu hóa role** `P1` · 3sp · Nền tảng: Backend, Web Admin
+  - ✅ **Test tay thật — PASS, ĐÃ KHÓA (2026-08-15):** xem `docs/manual-tests/sprint-1-feature-27-delete-role.md` — UI chủ động vô hiệu hóa nút Xóa khi còn người giữ; deactivate không tự thu hồi; xóa thành công sau khi thu hồi hết.
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: RoleService.deleteRole, test_delete_role.sh; thiếu: chặn xóa nhưng không có fallback deactivate; không ghi audit
   - *User Story:* Là một Company Admin, tôi muốn xóa/vô hiệu hóa role không còn dùng để giữ hệ thống quyền gọn gàng.
   - *Acceptance Criteria:* Không xóa role is_deletable=false; nếu đã gán user thì chỉ cho deactivate; ghi audit.
@@ -308,7 +308,7 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 #### Permission
 
 - [x] **#28 — Xem permission theo nhóm** `P0` · 2sp · Nền tảng: Backend, Web Admin
-  - ⬜ **Test tay thật — CHƯA TEST (2026-08-13):** xem `docs/manual-tests/sprint-1-feature-28-list-permissions.md`.
+  - ✅ **Test tay thật — PASS, ĐÃ KHÓA (2026-08-15):** xem `docs/manual-tests/sprint-1-feature-28-list-permissions.md` — permission đã ẩn (`tenants:update`) xác nhận không xuất hiện trong picker.
   - *Audit (2026-07-22):* ✅ ĐÃ XONG — bằng chứng: PermissionService.listGrouped, test_list_permissions.sh
   - *User Story:* Là một Company Admin, tôi muốn xem permission được nhóm theo nghiệp vụ để dễ cấu hình role.
   - *Acceptance Criteria:* Hiển thị group_name/display_name/description; lọc scope; chỉ hiển thị is_active.
@@ -316,14 +316,14 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 
 #### User Role
 
-- [ ] **#29 — Gán role cho user** `P0` · 5sp · Nền tảng: Backend, Web Admin
-  - ⬜ **Test tay thật — CHƯA TEST (2026-08-14):** xem `docs/manual-tests/sprint-1-feature-29-assign-role.md` — scope theo site + audit đã xác nhận SỬA XONG; `expires_at` vẫn chưa có (gap thật, không chặn khóa).
+- [x] **#29 — Gán role cho user** `P0` · 5sp · Nền tảng: Backend, Web Admin
+  - ✅ **Test tay thật — PASS, ĐÃ KHÓA (2026-08-15):** xem `docs/manual-tests/sprint-1-feature-29-assign-role.md` — gán/idempotent/reactivate/chặn leo thang/chặn gán role nền tảng đều pass qua UI+API thật. Scope theo công trình cụ thể chưa test hết luồng (để dành Sprint 2); `expires_at` vẫn chưa có (gap thật, không chặn khóa).
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: UserRoleService.assignRole, test_assign_role.sh; thiếu: chưa có scope theo site, chưa có expires_at, không ghi audit ROLE_GRANT
   - *User Story:* Là một Company Admin, tôi muốn gán role cho thành viên trong tenant hoặc theo site để cấp quyền đúng phạm vi.
   - *Acceptance Criteria:* Chọn user, role, scope tenant/site; hỗ trợ expires_at; kiểm tra permission; ghi audit ROLE_GRANT.
   - *DB Entities:* `user_roles, roles, users, tenants, sites, audit_logs`
-- [ ] **#30 — Thu hồi role** `P0` · 3sp · Nền tảng: Backend, Web Admin
-  - ⬜ **Test tay thật — CHƯA TEST (2026-08-14):** xem `docs/manual-tests/sprint-1-feature-30-revoke-role.md` — case 4 xác nhận gap "chưa có safeguard mất admin cuối cùng của tenant" vẫn còn tồn tại.
+- [x] **#30 — Thu hồi role** `P0` · 3sp · Nền tảng: Backend, Web Admin
+  - ✅ **Test tay thật — PASS, ĐÃ KHÓA (2026-08-15):** xem `docs/manual-tests/sprint-1-feature-30-revoke-role.md` — thu hồi/idempotent/chặn xuyên tenant đều pass. Case 4/5 phát hiện gap "tự khóa vĩnh viễn khi thu hồi admin cuối cùng" — **đã vá cùng ngày**: safeguard 409 (`UserRoleService.assertNotLastAdminHolder`) + tự phục hồi cho chủ sở hữu (`UserRoleService.selfHealOwnerRoles`, chạy ở login/switch-tenant/`GET /roles/me`). Đã tái hiện lại đúng kịch bản gốc và xác nhận owner tự phục hồi hoàn toàn, không cần can thiệp DB.
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: UserRoleService.revokeRole, test_revoke_role.sh; thiếu: soft-delete qua deletedAt (không phải is_active); không lưu revoked_by; không có safeguard mất admin cuối; không ghi audit
   - *User Story:* Là một Company Admin, tôi muốn thu hồi role của user để đảm bảo quyền truy cập đúng hiện trạng.
   - *Acceptance Criteria:* Set is_active=false; lưu revoked_by/revoked_at; không thu hồi quyền cuối cùng của company_admin nếu gây mất admin; ghi audit.
@@ -333,8 +333,8 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 
 #### Audit nền tảng
 
-- [ ] **#31 — Ghi audit cho hành động quan trọng** `P0` · 5sp · Nền tảng: Backend, Queue/AI/Automation
-  - ⬜ **Test tay thật — CHƯA TEST (2026-08-14):** xem `docs/manual-tests/sprint-1-feature-31-audit-logging.md` — gap gốc "record() không được gọi ở đâu cả" đã xác nhận SAI hoàn toàn với hiện trạng, đã gọi ở 17 module.
+- [x] **#31 — Ghi audit cho hành động quan trọng** `P0` · 5sp · Nền tảng: Backend, Queue/AI/Automation
+  - ✅ **Test tay thật — PASS, ĐÃ KHÓA (2026-08-15):** xem `docs/manual-tests/sprint-1-feature-31-audit-logging.md` — xác nhận qua màn Nhật ký audit thật, đúng actor/entity/request_id, đúng phạm vi tenant. Gap gốc "record() không được gọi ở đâu cả" đã xác nhận SAI hoàn toàn với hiện trạng, đã gọi ở 17 module.
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: AuditLogController/Service (đọc đầy đủ), test_audit_logs.sh; thiếu: AuditLogService.record() KHÔNG được gọi ở BẤT KỲ module nào — audit trail không hoạt động dù API đọc hoàn chỉnh
   - *User Story:* Là một hệ thống, tôi muốn ghi lại actor, action, resource, old/new value và request_id để truy vết đầy đủ các thao tác.
   - *Acceptance Criteria:* Middleware tạo request_id; service ghi audit; mask dữ liệu nhạy cảm; audit_logs append-only.
@@ -345,6 +345,7 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 #### Notification nền tảng
 
 - [x] **#32 — Tạo notification in-app cơ bản** `P0` · 3sp · Nền tảng: Backend, Web Admin, Mobile App
+  - ✅ **Test tay thật — PASS, ĐÃ KHÓA (2026-08-15):** xem `docs/manual-tests/sprint-1-feature-32-notification-inbox.md` — chuông/badge/màn Thông báo/đánh dấu đã đọc đều đúng qua UI thật.
   - *Audit (2026-07-22):* ✅ ĐÃ XONG — bằng chứng: NotificationService, test_notification_inbox.sh, test_mark_read.sh
   - *User Story:* Là một hệ thống, tôi muốn tạo thông báo in-app cho user để có nền cho các module sau.
   - *Acceptance Criteria:* Tạo notification channel=in_app; user xem unread count; đánh dấu đã đọc; ghi created_at/read_at.
@@ -358,17 +359,38 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 
 #### Lời mời
 
-- [ ] **#33 — Mời nhân viên bằng email** `P0` · 5sp · Nền tảng: Backend, Web Admin, Queue/AI/Automation
+- [x] **#33 — Mời nhân viên bằng email** `P0` · 5sp · Nền tảng: Backend, Web Admin, Queue/AI/Automation
+  - ✅ **Test tay thật — PASS, ĐÃ KHÓA (2026-08-15):** xem `docs/manual-tests/sprint-2-feature-33-invite-employee.md` — đã vá cả 2 gap (chọn workspace mặc định + audit `invitation_sent`), cộng thêm notification `EMPLOYEE_INVITED`. Xác nhận lại qua UI/DB thật.
+  - 🐛 **Bug phát hiện + đã sửa (2026-08-16):** ô "Vai trò (Role)" trong modal mời chỉ hiện 4 role
+    hệ thống, không bao giờ hiện role tùy chỉnh của công ty — do gọi `GET /roles` thiếu tham số
+    `tenantId`, khiến bất kỳ ai không chọn role hợp lệ đều bị mời với role mặc định EMPLOYEE.
+    Sửa: `InviteEmployeeModal` truyền `tenantId`. Bổ sung thêm: nhân viên tạo thủ công (không tài
+    khoản) giờ có ô "Vai trò dự kiến (Tùy chọn)" (`Employee.plannedRoleId`, migration V94) — nếu
+    sau này mời đúng email đó mà không chọn role, hệ thống tự dùng role dự kiến này thay vì rơi về
+    EMPLOYEE. Đã test end-to-end: tạo hồ sơ thủ công + chọn role tùy chỉnh → mời qua email không
+    chọn role → xác nhận `invitation.role_id` đúng role đã dự kiến → chấp nhận → `user_roles`
+    đúng role tùy chỉnh, không phải EMPLOYEE.
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: EmployeeInvitationController/Service, test_invite_employee.sh; thiếu: không chọn workspace mặc định; không ghi audit
   - *User Story:* Là một HR/Admin, tôi muốn mời nhân viên vào công ty bằng email để onboard nhân viên nhanh.
   - *Acceptance Criteria:* Nhập email/name; chọn default role/workspace; tạo invite token; gửi notification/email; trạng thái pending.
   - *DB Entities:* `tenant_invitations, tokens, users, roles, workspaces, notifications, audit_logs`
-- [ ] **#34 — Chấp nhận lời mời** `P0` · 5sp · Nền tảng: Backend, Web Admin, Mobile App
+- [x] **#34 — Chấp nhận lời mời** `P0` · 5sp · Nền tảng: Backend, Web Admin, Mobile App
+  - ✅ **Test tay thật — PASS, ĐÃ KHÓA cho Web (2026-08-15):** xem `docs/manual-tests/sprint-2-feature-34-accept-invitation.md` — đã vá cả 2 gap (tự tạo WorkspaceMember theo workspace mặc định + audit `invitation_accepted`), cộng thêm notification `INVITATION_ACCEPTED` cho người mời. Mobile App chưa test.
+  - ⚠️ **Gap còn tồn đọng — chưa sửa (2026-08-15):** Link mời trong email luôn mở Web Admin
+    (`${APP_FRONTEND_URL}/accept-invite?...`) qua trình duyệt, **không tự mở Mobile App** dù máy có
+    cài app — vì thiếu cấu hình Universal Link/App Link (`apple-app-site-association` cho iOS,
+    `assetlinks.json` cho Android). Mobile App **đã có sẵn màn hình accept-invite đầy đủ**
+    (`app/accept-invite.tsx`, cùng logic với Web) nhưng chỉ mở được qua deep link riêng của app
+    (`famsfrontappproject://accept-invite?token=...`), không phải qua link email — hiện không có
+    đường vào từ luồng thật. Cần domain production thật để verify Universal Link, chưa làm được
+    trong môi trường dev hiện tại. Notification in-app (`EMPLOYEE_INVITED`) vẫn hiển thị đúng trên
+    app dù thiếu phần này (dùng chung API, không phụ thuộc deep link).
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: InvitationPublicController.acceptInvitation, test_accept_invitation.sh; thiếu: tạo user+role+employee nhưng không tạo WorkspaceMember
   - *User Story:* Là một nhân viên được mời, tôi muốn chấp nhận lời mời tham gia công ty để trở thành thành viên tenant.
   - *Acceptance Criteria:* Token hợp lệ; tạo hoặc liên kết user; tạo tenant_user; gán role/workspace mặc định; cập nhật accepted_at.
   - *DB Entities:* `tenant_invitations, tenant_users, users, user_roles, workspace_members`
 - [x] **#35 — Hủy lời mời** `P1` · 2sp · Nền tảng: Backend, Web Admin
+  - ✅ **Test tay thật — PASS, ĐÃ KHÓA (2026-08-15):** xem `docs/manual-tests/sprint-2-feature-35-cancel-invitation.md` — đã vá cả 2 gap (lưu cancelled_by/cancel_reason/cancelled_at + audit `invitation_cancelled`); modal Hủy có thêm ô nhập lý do.
   - *Audit (2026-07-22):* ✅ ĐÃ XONG — bằng chứng: EmployeeInvitationController.cancelInvitation, test_cancel_invitation.sh; thiếu: không ghi audit
   - *User Story:* Là một HR/Admin, tôi muốn hủy lời mời chưa được chấp nhận để tránh user vào sai tenant.
   - *Acceptance Criteria:* Chỉ hủy pending; lưu cancelled_by/cancel_reason; revoke token; gửi thông báo nếu cần.
@@ -376,7 +398,8 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 
 #### Nhân viên
 
-- [ ] **#36 — Danh sách nhân viên** `P0` · 3sp · Nền tảng: Backend, Web Admin
+- [x] **#36 — Danh sách nhân viên** `P0` · 3sp · Nền tảng: Backend, Web Admin
+  - ✅ **Test tay thật — PASS, ĐÃ KHÓA (2026-08-15):** xem `docs/manual-tests/sprint-2-feature-36-list-employees.md` — đã vá cả 2 gap: filter Face ID (đã đăng ký/chưa) và filter Workspace riêng (join workspace_members, độc lập filter Phòng ban cũ theo tên).
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: EmployeeController.listEmployees, test_list_employees.sh; thiếu: thiếu filter face_registered và workspace
   - *User Story:* Là một HR/Admin, tôi muốn xem danh sách nhân viên có tìm kiếm, lọc, sort và phân trang để quản lý nhân sự hiệu quả.
   - *Acceptance Criteria:* Tìm theo tên/email/employee_code; lọc status/workspace/face_registered; sort ngày tạo; phân trang.

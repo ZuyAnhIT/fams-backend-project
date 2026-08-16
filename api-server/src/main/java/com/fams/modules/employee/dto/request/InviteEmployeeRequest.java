@@ -29,4 +29,8 @@ public class InviteEmployeeRequest {
 
     @Schema(description = "Role UUID to assign when the invitation is accepted (optional)")
     private UUID roleId;
+
+    @Schema(description = "Workspace UUID to assign the invitee to (as a WorkspaceMember) once the invitation is "
+            + "accepted (optional). Must be an active workspace belonging to the same tenant.")
+    private UUID workspaceId;
 }

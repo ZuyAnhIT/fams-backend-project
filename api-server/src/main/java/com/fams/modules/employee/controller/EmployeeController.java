@@ -121,6 +121,10 @@ public class EmployeeController {
             @Parameter(description = "Search term (name, email, code, position)") @RequestParam(required = false) String search,
             @Parameter(description = "Filter by status: active, inactive, terminated") @RequestParam(required = false) String status,
             @Parameter(description = "Filter by department") @RequestParam(required = false) String department,
+            @Parameter(description = "Filter by Face ID registration: true = only enrolled, false = not enrolled/revoked")
+                @RequestParam(required = false) Boolean faceRegistered,
+            @Parameter(description = "Filter by workspace membership (active WorkspaceMember in this workspace)")
+                @RequestParam(required = false) UUID workspaceId,
             @Parameter(description = "Sort field") @RequestParam(defaultValue = "createdAt") String sortBy,
             @Parameter(description = "Sort direction: asc or desc") @RequestParam(defaultValue = "desc") String sortDir,
             @Parameter(description = "Zero-based page index") @RequestParam(defaultValue = "0") @Min(0) int page,
@@ -129,7 +133,7 @@ public class EmployeeController {
         log.info("List employees tenantId={} search={} status={} page={} size={} by={}",
                 tenantId, search, status, page, size, userDetails.getUserId());
         PageResponse<EmployeeResponse> result = employeeService.listEmployees(
-                tenantId, search, status, department, sortBy, sortDir, page, size,
+                tenantId, search, status, department, faceRegistered, workspaceId, sortBy, sortDir, page, size,
                 userDetails.getUserId(), userDetails.isPlatformAdmin());
         return ResponseEntity.ok(ApiResponse.success(result));
     }
