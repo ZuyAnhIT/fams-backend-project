@@ -404,27 +404,32 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
   - *User Story:* Là một HR/Admin, tôi muốn xem danh sách nhân viên có tìm kiếm, lọc, sort và phân trang để quản lý nhân sự hiệu quả.
   - *Acceptance Criteria:* Tìm theo tên/email/employee_code; lọc status/workspace/face_registered; sort ngày tạo; phân trang.
   - *DB Entities:* `tenant_users, users, workspace_members, face_embeddings`
-- [ ] **#37 — Xem chi tiết nhân viên** `P0` · 3sp · Nền tảng: Backend, Web Admin
+- [x] **#37 — Xem chi tiết nhân viên** `P0` · 3sp · Nền tảng: Backend, Web Admin
+  - ✅ **Test tay thật — PASS, ĐÃ KHÓA (2026-08-16):** xem `docs/manual-tests/sprint-2-feature-37-employee-detail.md` — gap gốc (workspaces/assignments hardcode rỗng) đã xác nhận SỬA XONG qua code, audit note cũ đã lỗi thời. Response giờ cũng có `nationalId`/`terminatedAt` (bổ sung cùng đợt fix #39/#40).
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: EmployeeService.getEmployee, test_get_employee.sh; thiếu: workspaces/assignments trong response bị hardcode rỗng, chưa nối với 2 module đó
   - *User Story:* Là một HR/Admin, tôi muốn xem hồ sơ, workspace, role, assignment và Face ID của nhân viên để nắm đầy đủ thông tin nhân sự.
   - *Acceptance Criteria:* Hiển thị thông tin user/tenant_user; role; workspace; assignment active; trạng thái Face ID; lịch sử cơ bản.
   - *DB Entities:* `users, tenant_users, user_roles, workspace_members, assignments, face_embeddings`
 - [x] **#38 — Tạo nhân viên thủ công** `P0` · 5sp · Nền tảng: Backend, Web Admin
+  - ✅ **Test tay thật — PASS, ĐÃ KHÓA (2026-08-16):** xem `docs/manual-tests/sprint-2-feature-38-create-employee-manual.md` — không có gap, đã xác nhận chính thức luồng "Vai trò dự kiến".
   - *Audit (2026-07-22):* ✅ ĐÃ XONG — bằng chứng: EmployeeController.createEmployee, test_create_employee.sh
   - *User Story:* Là một HR/Admin, tôi muốn tạo nhân viên mới trong tenant để bổ sung nhân sự không qua invite.
   - *Acceptance Criteria:* Nhập employee_code/name/phone/email/position; employee_code không trùng; kiểm tra plan limit; tạo user nếu cần.
   - *DB Entities:* `users, tenant_users, plan_limits, tenant_subscriptions, audit_logs`
-- [ ] **#39 — Cập nhật nhân viên** `P0` · 3sp · Nền tảng: Backend, Web Admin
+- [x] **#39 — Cập nhật nhân viên** `P0` · 3sp · Nền tảng: Backend, Web Admin
+  - ✅ **Test tay thật — PASS, ĐÃ KHÓA (2026-08-16):** xem `docs/manual-tests/sprint-2-feature-39-update-employee.md` — đã vá gap `national_id`: thêm cột `national_id` (migration V95), field trong Create/UpdateEmployeeRequest, mask bằng `@Masked` (cùng cơ chế email/phone, dựa trên quyền `employees:pii:read`), tự động mask trong audit log qua `MaskingUtils.PII_KEYS` (đã có sẵn key này). Ghi audit cho employee_status_changed cũng đã xác nhận hoạt động. Test live: set/patch national_id, xác nhận trả về đúng giá trị cho owner (có quyền PII).
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: EmployeeController.updateEmployee, test_update_employee.sh; thiếu: không có trường national_id; không ghi audit
   - *User Story:* Là một HR/Admin, tôi muốn cập nhật thông tin nhân viên để giữ hồ sơ nhân viên chính xác.
   - *Acceptance Criteria:* Cập nhật position/employment_type/status; mã hóa national_id; ghi audit; không sửa dữ liệu nhạy cảm nếu thiếu quyền.
   - *DB Entities:* `tenant_users, users, audit_logs`
-- [ ] **#40 — Tạm ngừng/nghỉ việc nhân viên** `P0` · 3sp · Nền tảng: Backend, Web Admin
+- [x] **#40 — Tạm ngừng/nghỉ việc nhân viên** `P0` · 3sp · Nền tảng: Backend, Web Admin
+  - ✅ **Test tay thật — PASS, ĐÃ KHÓA (2026-08-16):** xem `docs/manual-tests/sprint-2-feature-40-terminate-employee.md` — đã vá **gap nghiêm trọng**: `EmployeeService.changeEmployeeStatus` giờ set `assignment.status="cancelled"` (giống `AssignmentService.cancelAssignment`) cho mọi assignment đang active khi terminate, thay vì chỉ hủy Random Check đang chờ như trước. Đã thêm cột `terminated_at` (migration V95), set khi chuyển sang terminated, clear khi HR đảo ngược quyết định. Đã thêm ghi audit log `employee_status_changed` (trước đây KHÔNG có). Face ID tự thu hồi giữ nguyên hành vi đã đúng từ trước. Test live end-to-end trên tenant test: tạo employee+site+assignment (active) → terminate → xác nhận assignment chuyển "cancelled" trong DB, terminatedAt được set, audit log ghi nhận → reactivate → xác nhận terminatedAt về null.
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: EmployeeService.changeEmployeeStatus, test_change_employee_status.sh; thiếu: không có terminated_at; không tự hủy assignment/Face ID
   - *User Story:* Là một HR/Admin, tôi muốn đổi trạng thái nhân viên thành inactive/terminated để ngăn truy cập và chấm công sai.
   - *Acceptance Criteria:* Set status; terminated_at nếu nghỉ việc; revoke assignment active nếu policy yêu cầu; disable face profile nếu cần.
   - *DB Entities:* `tenant_users, assignments, face_embeddings, audit_logs`
-- [ ] **#41 — Import danh sách nhân viên** `P1` · 8sp · Nền tảng: Backend, Web Admin
+- [x] **#41 — Import danh sách nhân viên** `P1` · 8sp · Nền tảng: Backend, Web Admin
+  - ✅ **Test tay thật — PASS, ĐÃ KHÓA (2026-08-16):** xem `docs/manual-tests/sprint-2-feature-41-import-employees.md` — đã vá gap "không tải được file lỗi": thêm endpoint mới `POST /tenants/{id}/employees/import/errors-export` (multipart, cùng file đã import), tái sử dụng lại đúng logic validate của `importEmployees` (tách helper `validateImportRow`), trả về `.xlsx` chỉ chứa các dòng lỗi kèm cột `errors` gộp lý do — theo đúng pattern download file `.xlsx` hiện có (`EmployeeExportService`/`GET /export`). Test live: import file 3 dòng (1 hợp lệ, 2 lỗi) → gọi endpoint mới → tải về đúng .xlsx chỉ 2 dòng lỗi với lý do khớp JSON errors ban đầu.
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: EmployeeService.importEmployees, test_import_employees.sh; thiếu: không xuất được file lỗi tải về (chỉ trả JSON)
   - *User Story:* Là một HR/Admin, tôi muốn import nhân viên bằng file Excel để tạo dữ liệu nhanh khi triển khai.
   - *Acceptance Criteria:* Upload file; preview lỗi; kiểm tra trùng employee_code/email/phone; tạo theo batch; xuất file lỗi.

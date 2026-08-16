@@ -52,8 +52,16 @@ public class EmployeeDetailResponse {
     @Schema(description = "Workspace UUID of type=department (null if not linked to one). See /tenants/{tenantId}/workspaces.")
     private UUID departmentId;
 
+    @Masked
+    @Schema(description = "National ID (CCCD/CMND), masked unless caller has employees:pii:read")
+    private String nationalId;
+
     @Schema(description = "Employment status: active, inactive, terminated")
     private String status;
+
+    @Schema(description = "Timestamp this employee's status last became \"terminated\" (null if never "
+            + "terminated, or if terminated status was later reversed)")
+    private OffsetDateTime terminatedAt;
 
     @Schema(description = "Date of hire", example = "2024-01-15")
     private LocalDate hiredDate;

@@ -60,6 +60,19 @@ public class Employee {
     @Column(nullable = false, length = 20)
     private String status;
 
+    /** When this employee's status last became "terminated" — cleared if HR reverses the
+     *  decision (status moves away from terminated). Null if never terminated. #40 gap fix
+     *  (2026-08-16): status alone couldn't answer "since when has this person been gone". */
+    @Column(name = "terminated_at")
+    private OffsetDateTime terminatedAt;
+
+    /** National ID (CCCD/CMND) — same PII-masking convention as email/phone: stored plain,
+     *  masked in API responses based on the caller's employees:pii:read permission (see
+     *  PiiAccess). Not a separate at-rest-encryption mechanism, matching how email/phone are
+     *  already handled in this codebase (#39 gap fix, 2026-08-16). */
+    @Column(name = "national_id", length = 50)
+    private String nationalId;
+
     @Column(name = "hired_date")
     private LocalDate hiredDate;
 

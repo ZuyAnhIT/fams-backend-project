@@ -69,6 +69,11 @@ giữ nguyên ✅ ĐÃ KHÓA. Đồng thời xác nhận UI "tìm người thao 
 | 34 | Chấp nhận lời mời | ✅ Pass | ⬜ Chưa test | ✅ **PASS — ĐÃ KHÓA** (Web) | 2026-08-15 | Đã vá đủ AC: chấp nhận giờ tự tạo `WorkspaceMember` theo workspace mặc định của lời mời, ghi audit `invitation_accepted`, thêm notification `INVITATION_ACCEPTED` cho người mời — xác nhận qua API+DB thật. Mobile App chưa test (để dành đợt có thiết bị) |
 | 35 | Hủy lời mời | ✅ Pass | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-15 | Đã vá đủ AC: modal hủy giờ có ô nhập lý do (tùy chọn), backend lưu `cancelled_by`/`cancel_reason`/`cancelled_at`, ghi audit `invitation_cancelled` — xác nhận qua UI/DB thật, tooltip lý do hiện trên tag trạng thái |
 | 36 | Danh sách nhân viên | ✅ Pass | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-15 | Đã vá đủ AC: thêm filter Face ID (Đã đăng ký/Chưa đăng ký, join `face_profiles.status`) và filter Workspace riêng (join `workspace_members`, độc lập với filter Phòng ban cũ theo tên chuỗi) — cả 2 xác nhận qua UI thật, kể cả trường hợp kết hợp nhiều filter cùng lúc |
+| 37 | Xem chi tiết nhân viên | ✅ Pass | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-16 | Gap gốc (workspaces/assignments hardcode rỗng) đã xác nhận SỬA XONG qua code — không có gap mới |
+| 38 | Tạo nhân viên thủ công | ✅ Pass | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-16 | Không có gap; luồng "Vai trò dự kiến" xác nhận hoạt động đúng |
+| 39 | Cập nhật nhân viên | ✅ Pass | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-16 | Gap audit đã sửa từ trước; **gap `national_id` đã vá** (migration V95, mask kiểu email/phone) — test live PATCH nationalId pass |
+| 40 | Tạm ngừng/nghỉ việc nhân viên | ✅ Pass | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-16 | **Gap nghiêm trọng đã vá**: Assignment giờ tự chuyển "cancelled" khi terminate (giống AssignmentService.cancelAssignment); thêm terminated_at + audit log employee_status_changed — test live end-to-end pass |
+| 41 | Import danh sách nhân viên | ✅ Pass | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-16 | **Gap "không tải được file lỗi" đã vá**: endpoint mới `POST .../import/errors-export` trả .xlsx chỉ chứa dòng lỗi — test live pass, lý do lỗi khớp JSON gốc |
 
 ---
 
@@ -342,6 +347,72 @@ giữ nguyên ✅ ĐÃ KHÓA. Đồng thời xác nhận UI "tìm người thao 
   viên chưa có Face ID); lọc "Đã đăng ký" → đúng 0 kết quả (rỗng, không ai enrolled); lọc theo
   workspace "Phòng Kỹ thuật" (workspace vừa được gán tự động ở #34) → đúng hiện nhân viên đó —
   xác nhận filter mới hoạt động đúng và độc lập với filter Phòng ban cũ.
+
+---
+
+### #37 — Xem chi tiết nhân viên — ✅ PASS — ĐÃ KHÓA (2026-08-16)
+- Kịch bản: `docs/manual-tests/sprint-2-feature-37-employee-detail.md`. Gap gốc 07-22
+  ("workspaces/assignments hardcode rỗng") xác nhận qua code là ĐÃ SỬA từ trước — audit note cũ
+  đã lỗi thời, không phải gap thật hiện tại. `EmployeeService.getEmployee` lấy đúng dữ liệu thật
+  qua WorkspaceMemberRepository/AssignmentRepository. Response giờ có thêm `nationalId`/
+  `terminatedAt` (bổ sung cùng đợt fix #39/#40 bên dưới).
+
+### #38 — Tạo nhân viên thủ công — ✅ PASS — ĐÃ KHÓA (2026-08-16)
+- Kịch bản: `docs/manual-tests/sprint-2-feature-38-create-employee-manual.md`. Không có gap đã
+  biết. Luồng "Vai trò dự kiến" (`plannedRoleId`) xác nhận hoạt động đúng.
+
+### #39 — Cập nhật nhân viên — ✅ PASS — ĐÃ KHÓA (2026-08-16)
+- Kịch bản: `docs/manual-tests/sprint-2-feature-39-update-employee.md`. Gap ghi audit đã sửa
+  (`employee_updated` với before/after). **Gap `national_id` đã vá**: thêm cột `national_id`
+  (migration `V95__employee_terminated_at_and_national_id.sql`), field trong
+  `CreateEmployeeRequest`/`UpdateEmployeeRequest`, response field `nationalId` trên
+  `EmployeeResponse`/`EmployeeDetailResponse` với `@Masked` (cùng cơ chế mask email/phone hiện có,
+  dựa trên `employees:pii:read`/PLATFORM_ADMIN qua `PiiAccess`, không phải cơ chế mã hóa mới) —
+  và tự động mask trong audit log qua `MaskingUtils.PII_KEYS` (key `nationalId` đã có sẵn từ
+  trước, chỉ chưa được dùng). Test live API: PATCH `nationalId="001234567890"` trên tenant test →
+  response trả đúng giá trị cho owner (có quyền PII xem full). **Web Admin đã bổ sung UI (2026-08-16
+  cùng ngày):** ô "Số CCCD/CMND (Tùy chọn)" thêm vào `EmployeeFormModal.tsx` (modal tạo/sửa nhanh)
+  và `EmployeeForm.tsx` (tab "Thông tin cá nhân" trang chi tiết). Test qua UI thật (Playwright):
+  tạo nhân viên mới với CCCD `079099001234` qua modal → lưu → mở trang chi tiết → giá trị hiển thị
+  đúng, round-trip qua API thật không qua mock.
+
+### #40 — Tạm ngừng/nghỉ việc nhân viên — ✅ PASS — ĐÃ KHÓA (2026-08-16)
+- Kịch bản: `docs/manual-tests/sprint-2-feature-40-terminate-employee.md`. Face ID tự thu hồi khi
+  terminate giữ nguyên hành vi đúng từ trước. **Gap nghiêm trọng đã vá**: `changeEmployeeStatus`
+  giờ set `assignment.status="cancelled"` + save cho MỌI assignment đang active của nhân viên khi
+  terminate (giống hệt cách `AssignmentService.cancelAssignment` làm), thay vì trước đây chỉ hủy
+  Random Check đang chờ mà bỏ quên chính Assignment. Đã thêm cột `terminated_at` (migration V95),
+  set khi chuyển sang terminated, clear về null khi HR đảo ngược (chuyển khỏi terminated). Đã
+  thêm ghi audit log `employee_status_changed` (trước đây hàm này KHÔNG ghi audit gì cả).
+  **Test live end-to-end qua API** trên tenant test riêng (tạo mới employee + site + assignment
+  active): terminate → xác nhận trong DB assignment chuyển `status='cancelled'`, `terminatedAt`
+  được set đúng timestamp, audit log `employee_status_changed` xuất hiện → reactivate
+  (status=active) → xác nhận `terminatedAt` trả về `null` đúng như kỳ vọng. **Test lại qua UI thật
+  (Playwright, cùng ngày):** trang chi tiết thêm tag "Từ dd/MM/yyyy" cạnh trạng thái khi đã nghỉ
+  việc; sửa lại nội dung modal xác nhận trên `EmployeeListPage.tsx` (trước đây ghi sai "các phân
+  công hiện có không tự kết thúc" — nay đúng thực tế mới). Tạo nhân viên + assignment active mới
+  qua API, rồi terminate **qua đúng thao tác trên Web Admin thật** (bấm badge trạng thái → "Đánh
+  dấu Đã nghỉ việc" → xác nhận modal) → trang chi tiết hiện "Đã nghỉ" + "Từ 16/08/2026" → tab
+  "Workspace & Phân công" hiện tag "Đã hủy" trên assignment vừa gán — xác nhận gap nghiêm trọng đã
+  vá đúng, nhìn thấy trực tiếp trên giao diện chứ không chỉ qua DB.
+
+### #41 — Import danh sách nhân viên — ✅ PASS — ĐÃ KHÓA (2026-08-16)
+- Kịch bản: `docs/manual-tests/sprint-2-feature-41-import-employees.md`. **Gap "không tải được
+  file lỗi" đã vá**: thêm endpoint `POST /tenants/{tenantId}/employees/import/errors-export`
+  (multipart, nhận lại đúng file đã gửi cho `/import`), tái sử dụng logic validate từng dòng của
+  `importEmployees` qua helper `validateImportRow` mới tách ra (tránh trùng lặp, đảm bảo lý do lỗi
+  khớp 100% với response JSON gốc), trả về `.xlsx` chỉ gồm các dòng lỗi + cột `errors` gộp mọi lý
+  do của dòng đó — theo đúng pattern tải file `.xlsx` sẵn có trong codebase
+  (`EmployeeExportService`/`GET /export`, dùng Apache POI). Import gốc vẫn không ghi audit và
+  không hỗ trợ cột `plannedRoleId`/`departmentId` — hai điểm này không nằm trong AC gốc của #41
+  nên không sửa trong đợt này. **Test live qua API**: import file 3 dòng (1 hợp lệ IMP-001, 2 lỗi:
+  thiếu firstName + email sai định dạng, và hiredDate sai định dạng) → gọi endpoint mới với cùng
+  file → tải về đúng `.xlsx` chỉ chứa 2 dòng lỗi, cột `errors` khớp chính xác với JSON `errors`
+  trả về từ `/import` ban đầu. **Web Admin đã bổ sung UI (cùng ngày):** nút "Tải file lỗi (.xlsx)"
+  trong `ImportEmployeeModal.tsx`, hiện khi `failedCount > 0`, tự dùng lại file đang chọn trong
+  modal. Test qua UI thật (Playwright): mở modal Nhập Excel → upload file 3 dòng (tương tự trên)
+  → xác nhận kết quả "1 thành công, 2 lỗi / 3 dòng" hiện đúng trên UI → bấm nút mới → trình duyệt
+  tải về `import-errors.xlsx` → mở file: 2 dòng lỗi, nội dung khớp 100% với bảng lỗi hiển thị.
 
 ## Quy ước cập nhật file này (cho các phiên làm việc sau)
 

@@ -44,6 +44,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.time.LocalDate;
+import java.time.OffsetDateTime;
 import java.time.format.DateTimeParseException;
 import java.util.*;
 import java.util.regex.Pattern;
@@ -117,9 +118,11 @@ public class EmployeeService {
         m.put("lastName", e.getLastName());
         m.put("email", e.getEmail());
         m.put("phone", e.getPhone());
+        m.put("nationalId", e.getNationalId());
         m.put("position", e.getPosition());
         m.put("department", e.getDepartment());
         m.put("status", e.getStatus());
+        m.put("terminatedAt", e.getTerminatedAt() != null ? e.getTerminatedAt().toString() : null);
         m.put("hiredDate", e.getHiredDate() != null ? e.getHiredDate().toString() : null);
         return m;
     }
@@ -193,6 +196,7 @@ public class EmployeeService {
                 .position(request.getPosition())
                 .department(deptName)
                 .departmentId(deptId)
+                .nationalId(request.getNationalId())
                 .hiredDate(request.getHiredDate())
                 .avatarUrl(request.getAvatarUrl())
                 .plannedRoleId(request.getPlannedRoleId())
@@ -336,6 +340,8 @@ public class EmployeeService {
             employee.setPosition(request.getPosition().isBlank() ? null : request.getPosition());
         if (request.getDepartment() != null)
             employee.setDepartment(request.getDepartment().isBlank() ? null : request.getDepartment());
+        if (request.getNationalId() != null)
+            employee.setNationalId(request.getNationalId().isBlank() ? null : request.getNationalId());
         if (request.getHiredDate() != null)
             employee.setHiredDate(request.getHiredDate());
         if (request.getAvatarUrl() != null)
@@ -388,9 +394,36 @@ public class EmployeeService {
         Employee employee = employeeRepository.findByIdAndTenantIdAndDeletedAtIsNull(employeeId, tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Employee not found: " + employeeId));
 
+        Map<String, Object> before = employeeAuditSnapshot(employee);
+        String previousStatus = employee.getStatus();
         employee.setStatus(request.getStatus());
+
+        // #40 gap fix (2026-08-16): AC requires recording WHEN termination happened, not just
+        // the current status — a bare status column can't answer "since when has this person
+        // been gone" (payroll cutoffs, historical reports). Cleared if HR reverses the decision
+        // (status moves away from terminated), since the person is no longer terminated.
+        if ("terminated".equals(request.getStatus())) {
+            employee.setTerminatedAt(OffsetDateTime.now());
+        } else if (!"terminated".equals(previousStatus)) {
+            // no-op: wasn't terminated before, isn't now — nothing to clear
+        } else {
+            employee.setTerminatedAt(null);
+        }
+
         employeeRepository.save(employee);
         log.info("Employee status changed: id={} status={} tenantId={} by={}", employeeId, request.getStatus(), tenantId, callerUserId);
+
+        try {
+            auditLogService.record(
+                    tenantId, callerUserId, null,
+                    "Employee", employee.getId().toString(), "employee_status_changed",
+                    before, employeeAuditSnapshot(employee),
+                    com.fams.shared.security.HttpRequestUtils.currentRequestId(),
+                    com.fams.shared.security.HttpRequestUtils.currentIpAddress(),
+                    com.fams.shared.security.HttpRequestUtils.currentUserAgent());
+        } catch (Exception e) {
+            log.warn("Failed to record audit log for employee status change id={}: {}", employee.getId(), e.getMessage());
+        }
 
         // Biometric data retention: the purpose for holding a terminated employee's face
         // enrollment has ended, so revoke it immediately rather than leaving it to the weekly
@@ -412,6 +445,13 @@ public class EmployeeService {
             // no_response and raised a violation for someone no longer employed. Mirrors exactly
             // what AssignmentService.cancelAssignment already does for an HR-initiated cancel —
             // termination is just another way an assignment becomes invalid.
+            //
+            // #40 gap fix (2026-08-16): this used to ONLY cancel pending scheduled checks and
+            // never actually touched the Assignment row itself (unlike AssignmentService
+            // .cancelAssignment, which does `status=cancelled`) — confirmed live: a terminated
+            // employee's Assignment stayed "active" indefinitely, so the site still looked
+            // staffed by someone no longer employed. Now cancels the Assignment too, same as an
+            // HR-initiated cancel would.
             try {
                 List<Assignment> activeAssignments = assignmentRepository
                         .findByTenantIdAndEmployeeIdAndDeletedAtIsNullOrderByStartDateDesc(tenantId, employeeId)
@@ -419,14 +459,14 @@ public class EmployeeService {
                         .filter(a -> "active".equals(a.getStatus()))
                         .collect(Collectors.toList());
                 for (Assignment a : activeAssignments) {
+                    a.setStatus("cancelled");
+                    assignmentRepository.save(a);
                     int cancelled = scheduledCheckCancelService.cancelPendingByAssignment(a.getId());
-                    if (cancelled > 0) {
-                        log.info("Auto-cancelled {} scheduled check(s) due to employee termination: "
-                                + "employeeId={} assignmentId={}", cancelled, employeeId, a.getId());
-                    }
+                    log.info("Auto-cancelled assignment (and {} pending scheduled check(s)) due to employee "
+                            + "termination: employeeId={} assignmentId={}", cancelled, employeeId, a.getId());
                 }
             } catch (Exception e) {
-                log.warn("Failed to auto-cancel pending random checks on termination: employeeId={} error={}",
+                log.warn("Failed to auto-cancel assignments/pending random checks on termination: employeeId={} error={}",
                         employeeId, e.getMessage());
             }
         }
@@ -481,7 +521,9 @@ public class EmployeeService {
                 .position(employee.getPosition())
                 .department(employee.getDepartment())
                 .departmentId(employee.getDepartmentId())
+                .nationalId(employee.getNationalId())
                 .status(employee.getStatus())
+                .terminatedAt(employee.getTerminatedAt())
                 .hiredDate(employee.getHiredDate())
                 .avatarUrl(employee.getAvatarUrl())
                 .roles(roles)
@@ -595,41 +637,15 @@ public class EmployeeService {
                 String department = str(row, colIndex.get("department"));
                 String hiredDateStr = str(row, colIndex.get("hireddate"));
 
-                List<EmployeeImportError> rowErrors = new ArrayList<>();
-
-                if (firstName == null || firstName.isBlank())
-                    rowErrors.add(err(displayRow, "firstName", "First name is required"));
-                else if (firstName.length() > 100)
-                    rowErrors.add(err(displayRow, "firstName", "First name must be 100 characters or fewer"));
-
-                if (lastName == null || lastName.isBlank())
-                    rowErrors.add(err(displayRow, "lastName", "Last name is required"));
-                else if (lastName.length() > 100)
-                    rowErrors.add(err(displayRow, "lastName", "Last name must be 100 characters or fewer"));
-
-                if (email != null && !email.isBlank() && !EMAIL_PATTERN.matcher(email).matches())
-                    rowErrors.add(err(displayRow, "email", "Must be a valid email address"));
-
-                if (phone != null && phone.length() > 30)
-                    rowErrors.add(err(displayRow, "phone", "Phone must be 30 characters or fewer"));
-
-                if (code != null && !code.isBlank()) {
-                    if (code.length() > 50)
-                        rowErrors.add(err(displayRow, "employeeCode", "Employee code must be 50 characters or fewer"));
-                    else if (!CODE_PATTERN.matcher(code).matches())
-                        rowErrors.add(err(displayRow, "employeeCode", "Employee code may only contain letters, digits, hyphens, and underscores"));
-                    else if (codesSeenInBatch.contains(code))
-                        rowErrors.add(err(displayRow, "employeeCode", "Duplicate employee code in this import file"));
-                    else if (employeeRepository.existsByTenantIdAndEmployeeCodeAndDeletedAtIsNull(tenantId, code))
-                        rowErrors.add(err(displayRow, "employeeCode", "Employee code '" + code + "' already exists in this tenant"));
-                }
+                List<EmployeeImportError> rowErrors = validateImportRow(tenantId, displayRow,
+                        firstName, lastName, email, phone, code, hiredDateStr, codesSeenInBatch);
 
                 LocalDate hiredDate = null;
                 if (hiredDateStr != null && !hiredDateStr.isBlank()) {
                     try {
                         hiredDate = LocalDate.parse(hiredDateStr);
-                    } catch (DateTimeParseException e) {
-                        rowErrors.add(err(displayRow, "hiredDate", "Date must be in YYYY-MM-DD format"));
+                    } catch (DateTimeParseException ignored) {
+                        // already recorded as a rowError above
                     }
                 }
 
@@ -668,6 +684,144 @@ public class EmployeeService {
                 .failedCount(failedCount)
                 .errors(errors)
                 .build();
+    }
+
+    private List<EmployeeImportError> validateImportRow(UUID tenantId, int displayRow,
+            String firstName, String lastName, String email, String phone, String code,
+            String hiredDateStr, Set<String> codesSeenInBatch) {
+        List<EmployeeImportError> rowErrors = new ArrayList<>();
+
+        if (firstName == null || firstName.isBlank())
+            rowErrors.add(err(displayRow, "firstName", "First name is required"));
+        else if (firstName.length() > 100)
+            rowErrors.add(err(displayRow, "firstName", "First name must be 100 characters or fewer"));
+
+        if (lastName == null || lastName.isBlank())
+            rowErrors.add(err(displayRow, "lastName", "Last name is required"));
+        else if (lastName.length() > 100)
+            rowErrors.add(err(displayRow, "lastName", "Last name must be 100 characters or fewer"));
+
+        if (email != null && !email.isBlank() && !EMAIL_PATTERN.matcher(email).matches())
+            rowErrors.add(err(displayRow, "email", "Must be a valid email address"));
+
+        if (phone != null && phone.length() > 30)
+            rowErrors.add(err(displayRow, "phone", "Phone must be 30 characters or fewer"));
+
+        if (code != null && !code.isBlank()) {
+            if (code.length() > 50)
+                rowErrors.add(err(displayRow, "employeeCode", "Employee code must be 50 characters or fewer"));
+            else if (!CODE_PATTERN.matcher(code).matches())
+                rowErrors.add(err(displayRow, "employeeCode", "Employee code may only contain letters, digits, hyphens, and underscores"));
+            else if (codesSeenInBatch.contains(code))
+                rowErrors.add(err(displayRow, "employeeCode", "Duplicate employee code in this import file"));
+            else if (employeeRepository.existsByTenantIdAndEmployeeCodeAndDeletedAtIsNull(tenantId, code))
+                rowErrors.add(err(displayRow, "employeeCode", "Employee code '" + code + "' already exists in this tenant"));
+        }
+
+        if (hiredDateStr != null && !hiredDateStr.isBlank()) {
+            try {
+                LocalDate.parse(hiredDateStr);
+            } catch (DateTimeParseException e) {
+                rowErrors.add(err(displayRow, "hiredDate", "Date must be in YYYY-MM-DD format"));
+            }
+        }
+
+        return rowErrors;
+    }
+
+    /**
+     * #41 gap fix (2026-08-16): re-runs the same row validation used by {@link #importEmployees}
+     * against the same uploaded file, but instead of creating employees, builds a downloadable
+     * .xlsx containing only the rows that failed plus their error reasons — the AC required an
+     * "export lỗi" affordance that didn't exist before (errors were only ever returned as JSON).
+     * Kept stateless/re-validate-on-request rather than persisting the previous import's errors,
+     * since the import endpoint itself doesn't persist any import-run state today.
+     */
+    public byte[] exportImportErrors(UUID tenantId, MultipartFile file,
+                                      UUID callerUserId, boolean callerIsPlatformAdmin) {
+        tenantRepository.findByIdAndDeletedAtIsNull(tenantId)
+                .orElseThrow(() -> new ResourceNotFoundException("Tenant not found: " + tenantId));
+
+        if (!callerIsPlatformAdmin) {
+            Set<String> permissions = userRoleRepository
+                    .findPermissionNamesByUserIdAndTenantId(callerUserId, tenantId);
+            if (!permissions.contains("employees:create")) {
+                throw new AccessDeniedException("You do not have permission to create employees in this tenant");
+            }
+        }
+
+        try (Workbook in = new XSSFWorkbook(file.getInputStream());
+             Workbook out = new XSSFWorkbook()) {
+            Sheet sheet = in.getSheetAt(0);
+            Row header = sheet.getRow(0);
+            Sheet outSheet = out.createSheet("Errors");
+            String[] cols = {"row", "firstName", "lastName", "email", "phone", "employeeCode",
+                    "position", "department", "hiredDate", "errors"};
+            Row outHeader = outSheet.createRow(0);
+            for (int c = 0; c < cols.length; c++) outHeader.createCell(c).setCellValue(cols[c]);
+
+            if (header == null) {
+                return toBytes(out);
+            }
+
+            Map<String, Integer> colIndex = new HashMap<>();
+            for (Cell cell : header) {
+                colIndex.put(cell.getStringCellValue().trim().toLowerCase(), cell.getColumnIndex());
+            }
+
+            Set<String> codesSeenInBatch = new HashSet<>();
+            int outRowNum = 1;
+            for (int i = 1; i <= sheet.getLastRowNum(); i++) {
+                Row row = sheet.getRow(i);
+                if (row == null || isRowBlank(row)) continue;
+                int displayRow = i + 1;
+
+                String firstName  = str(row, colIndex.get("firstname"));
+                String lastName   = str(row, colIndex.get("lastname"));
+                String email      = str(row, colIndex.get("email"));
+                String phone      = str(row, colIndex.get("phone"));
+                String code       = str(row, colIndex.get("employeecode"));
+                String position   = str(row, colIndex.get("position"));
+                String department = str(row, colIndex.get("department"));
+                String hiredDateStr = str(row, colIndex.get("hireddate"));
+
+                List<EmployeeImportError> rowErrors = validateImportRow(tenantId, displayRow,
+                        firstName, lastName, email, phone, code, hiredDateStr, codesSeenInBatch);
+
+                if (rowErrors.isEmpty()) {
+                    if (code != null && !code.isBlank()) codesSeenInBatch.add(code);
+                    continue;
+                }
+
+                String joinedErrors = rowErrors.stream()
+                        .map(e -> e.getField() + ": " + e.getMessage())
+                        .collect(java.util.stream.Collectors.joining("; "));
+
+                Row outRow = outSheet.createRow(outRowNum++);
+                int c = 0;
+                outRow.createCell(c++).setCellValue(displayRow);
+                outRow.createCell(c++).setCellValue(firstName == null ? "" : firstName);
+                outRow.createCell(c++).setCellValue(lastName == null ? "" : lastName);
+                outRow.createCell(c++).setCellValue(email == null ? "" : email);
+                outRow.createCell(c++).setCellValue(phone == null ? "" : phone);
+                outRow.createCell(c++).setCellValue(code == null ? "" : code);
+                outRow.createCell(c++).setCellValue(position == null ? "" : position);
+                outRow.createCell(c++).setCellValue(department == null ? "" : department);
+                outRow.createCell(c++).setCellValue(hiredDateStr == null ? "" : hiredDateStr);
+                outRow.createCell(c).setCellValue(joinedErrors);
+            }
+
+            return toBytes(out);
+        } catch (IOException e) {
+            throw new IllegalArgumentException("Failed to read Excel file: " + e.getMessage());
+        }
+    }
+
+    private byte[] toBytes(Workbook workbook) throws IOException {
+        try (java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream()) {
+            workbook.write(bos);
+            return bos.toByteArray();
+        }
     }
 
     private static final DataFormatter DATA_FORMATTER = new DataFormatter();
@@ -720,7 +874,9 @@ public class EmployeeService {
                 .departmentId(e.getDepartmentId())
                 .plannedRoleId(e.getPlannedRoleId())
                 .plannedRoleName(plannedRoleName)
+                .nationalId(e.getNationalId())
                 .status(e.getStatus())
+                .terminatedAt(e.getTerminatedAt())
                 .hiredDate(e.getHiredDate())
                 .avatarUrl(e.getAvatarUrl())
                 .createdAt(e.getCreatedAt())

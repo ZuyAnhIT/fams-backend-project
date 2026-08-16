@@ -58,8 +58,16 @@ public class EmployeeResponse {
     @Schema(description = "Display name of plannedRoleId, for convenience (null if plannedRoleId is null)")
     private String plannedRoleName;
 
+    @Masked
+    @Schema(description = "National ID (CCCD/CMND), masked unless caller has employees:pii:read")
+    private String nationalId;
+
     @Schema(description = "Employment status: active, inactive, terminated")
     private String status;
+
+    @Schema(description = "Timestamp this employee's status last became \"terminated\" (null if never "
+            + "terminated, or if terminated status was later reversed)")
+    private OffsetDateTime terminatedAt;
 
     @Schema(description = "Date of hire", example = "2024-01-15")
     private LocalDate hiredDate;
