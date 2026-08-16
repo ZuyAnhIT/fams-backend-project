@@ -84,9 +84,11 @@ public class FaceIdService {
     private final FaceVerifyJobPublisher faceVerifyJobPublisher;
     private final LivenessChallengeRepository livenessChallengeRepository;
     private final EntityManager entityManager;
+    private final com.fams.modules.audit.service.AuditLogService auditLogService;
     private final int enrollMinPhotos;
     private final int enrollMaxPhotos;
     private final int verifyTimeoutSeconds;
+    private final String currentConsentVersion;
 
     public FaceIdService(FaceProfileRepository faceProfileRepository,
                          FaceVerifyRequestRepository faceVerifyRequestRepository,
@@ -98,9 +100,11 @@ public class FaceIdService {
                          FaceVerifyJobPublisher faceVerifyJobPublisher,
                          LivenessChallengeRepository livenessChallengeRepository,
                          EntityManager entityManager,
+                         com.fams.modules.audit.service.AuditLogService auditLogService,
                          @Value("${app.ai.enroll-min-photos:3}") int enrollMinPhotos,
                          @Value("${app.ai.enroll-max-photos:5}") int enrollMaxPhotos,
-                         @Value("${app.ai.verify-timeout-seconds:30}") int verifyTimeoutSeconds) {
+                         @Value("${app.ai.verify-timeout-seconds:30}") int verifyTimeoutSeconds,
+                         @Value("${app.faceid.consent-version:2026-08-v1}") String currentConsentVersion) {
         this.faceProfileRepository = faceProfileRepository;
         this.faceVerifyRequestRepository = faceVerifyRequestRepository;
         this.employeeRepository = employeeRepository;
@@ -111,9 +115,43 @@ public class FaceIdService {
         this.faceVerifyJobPublisher = faceVerifyJobPublisher;
         this.livenessChallengeRepository = livenessChallengeRepository;
         this.entityManager = entityManager;
+        this.auditLogService = auditLogService;
         this.enrollMinPhotos = enrollMinPhotos;
         this.enrollMaxPhotos = enrollMaxPhotos;
         this.verifyTimeoutSeconds = verifyTimeoutSeconds;
+        this.currentConsentVersion = currentConsentVersion;
+    }
+
+    /** "Chỉ consent current được dùng" (#48 AC): a consent given under an older text version
+     *  doesn't count once the version bumps — the employee must re-consent. Plain isConsentGiven()
+     *  is intentionally left alone (existing callers/DTO) so this stricter check is opt-in at each
+     *  enforcement point instead of silently changing behavior everywhere at once. */
+    private boolean isConsentCurrent(FaceProfile profile) {
+        return profile.isConsentGiven() && currentConsentVersion.equals(profile.getConsentVersion());
+    }
+
+    private Map<String, Object> faceIdAuditSnapshot(FaceProfile p) {
+        java.util.HashMap<String, Object> m = new java.util.HashMap<>();
+        m.put("status", p.getStatus());
+        m.put("reviewStatus", p.getReviewStatus());
+        m.put("consentGiven", p.isConsentGiven());
+        m.put("consentVersion", p.getConsentVersion());
+        return m;
+    }
+
+    private void recordAudit(UUID tenantId, UUID actorId, UUID employeeId, String action,
+                              Map<String, Object> before, Map<String, Object> after) {
+        try {
+            auditLogService.record(
+                    tenantId, actorId, null,
+                    "FaceProfile", employeeId.toString(), action,
+                    before, after,
+                    com.fams.shared.security.HttpRequestUtils.currentRequestId(),
+                    com.fams.shared.security.HttpRequestUtils.currentIpAddress(),
+                    com.fams.shared.security.HttpRequestUtils.currentUserAgent());
+        } catch (Exception e) {
+            log.warn("Failed to record audit log action={} employeeId={}: {}", action, employeeId, e.getMessage());
+        }
     }
 
     /** Re-reads non-biometric columns that fams-ai just wrote via its OWN direct SQL connection
@@ -165,13 +203,24 @@ public class FaceIdService {
                         .reviewStatus("none")
                         .build());
 
-        if (!profile.isConsentGiven()) {
+        Map<String, Object> before = faceIdAuditSnapshot(profile);
+
+        // #48 gap fix (2026-08-16): re-stamp whenever consent isn't CURRENT (not just when it was
+        // never given) — a policy version bump must require a fresh consent, and every consent now
+        // records which version/IP/device it came from for legal provenance (Nghị định
+        // 13/2023/NĐ-CP, GDPR Art.9), not just a bare boolean+timestamp.
+        if (!isConsentCurrent(profile)) {
             profile.setConsentGiven(true);
             profile.setConsentGivenAt(OffsetDateTime.now());
+            profile.setConsentVersion(currentConsentVersion);
+            profile.setConsentIp(com.fams.shared.security.HttpRequestUtils.currentIpAddress());
+            profile.setConsentDevice(com.fams.shared.security.HttpRequestUtils.currentUserAgent());
         }
 
         FaceProfile saved = faceProfileRepository.save(profile);
-        log.info("Face ID consent recorded tenantId={} employeeId={}", tenantId, employeeId);
+        log.info("Face ID consent recorded tenantId={} employeeId={} version={}",
+                tenantId, employeeId, currentConsentVersion);
+        recordAudit(tenantId, callerUserId, employeeId, "face_id_consent_given", before, faceIdAuditSnapshot(saved));
 
         return toDto(saved);
     }
@@ -209,8 +258,9 @@ public class FaceIdService {
                 .orElseThrow(() -> new IllegalStateException(
                         "Consent not recorded — call POST /face-id/consent first"));
 
-        if (!profile.isConsentGiven()) {
-            throw new IllegalStateException("Employee has not given consent for Face ID enrollment");
+        if (!isConsentCurrent(profile)) {
+            throw new IllegalStateException("Employee has not given CURRENT consent for Face ID enrollment "
+                    + "— consent is missing or was given under an older policy version, ask them to re-consent");
         }
         if ("pending".equals(profile.getReviewStatus())) {
             throw new IllegalStateException(
@@ -218,12 +268,17 @@ public class FaceIdService {
                             + "before submitting a new batch");
         }
 
+        Map<String, Object> before = faceIdAuditSnapshot(profile);
+
         // Never activates the profile directly — lands in pending_embedding for HR review.
         // See fams-ai's enroll.py for the anti-spoofing + same-person cross-check this now runs.
         aiServiceClient.enrollFace(tenantId, employeeId, photos);
 
         log.info("Face ID enrollment submitted for review tenantId={} employeeId={}", tenantId, employeeId);
-        return toDto(refreshed(profile));
+        FaceProfile refreshedProfile = refreshed(profile);
+        recordAudit(tenantId, callerUserId, employeeId, "face_id_enrollment_submitted_hr_assisted",
+                before, faceIdAuditSnapshot(refreshedProfile));
+        return toDto(refreshedProfile);
     }
 
     /** Starts an active-liveness challenge: server picks a random ordered sequence of actions
@@ -254,11 +309,12 @@ public class FaceIdService {
         // even exists) means an unconsented employee can never reach POST .../frames at all.
         if ("enroll".equals(purpose)) {
             boolean consented = faceProfileRepository.findByEmployeeIdAndTenantId(employeeId, tenantId)
-                    .map(FaceProfile::isConsentGiven)
+                    .map(this::isConsentCurrent)
                     .orElse(false);
             if (!consented) {
                 throw new IllegalStateException(
-                        "Consent not recorded — call POST /face-id/consent before starting an enrollment challenge");
+                        "Consent not recorded (or given under an older policy version) — call POST "
+                                + "/face-id/consent before starting an enrollment challenge");
             }
         }
 
@@ -324,8 +380,9 @@ public class FaceIdService {
                 .findByEmployeeIdAndTenantId(employeeId, tenantId)
                 .orElseThrow(() -> new IllegalStateException(
                         "Consent not recorded — call POST /face-id/consent first"));
-        if (!profile.isConsentGiven()) {
-            throw new IllegalStateException("Employee has not given consent for Face ID enrollment");
+        if (!isConsentCurrent(profile)) {
+            throw new IllegalStateException("Employee has not given CURRENT consent for Face ID enrollment "
+                    + "— consent is missing or was given under an older policy version, ask them to re-consent");
         }
         if ("pending".equals(profile.getReviewStatus())) {
             throw new IllegalStateException(
@@ -333,11 +390,15 @@ public class FaceIdService {
                             + "before submitting a new one");
         }
 
+        Map<String, Object> before = faceIdAuditSnapshot(profile);
         aiServiceClient.enrollFromChallenge(tenantId, employeeId, challengeId);
 
         log.info("Face ID enrollment (active liveness) submitted for review tenantId={} employeeId={}",
                 tenantId, employeeId);
-        return toDto(refreshed(profile));
+        FaceProfile refreshedProfile = refreshed(profile);
+        recordAudit(tenantId, callerUserId, employeeId, "face_id_enrollment_submitted_self_service",
+                before, faceIdAuditSnapshot(refreshedProfile));
+        return toDto(refreshedProfile);
     }
 
     @Transactional
@@ -362,6 +423,7 @@ public class FaceIdService {
                 .orElseThrow(() -> new ResourceNotFoundException(
                         "No pending Face ID submission for employee: " + employeeId));
 
+        Map<String, Object> before = faceIdAuditSnapshot(profile);
         aiServiceClient.approveFace(tenantId, employeeId);
 
         refreshed(profile);
@@ -369,6 +431,7 @@ public class FaceIdService {
         profile.setReviewedAt(OffsetDateTime.now());
         FaceProfile saved = faceProfileRepository.save(profile);
         log.info("Face ID enrollment approved tenantId={} employeeId={} by={}", tenantId, employeeId, callerUserId);
+        recordAudit(tenantId, callerUserId, employeeId, "face_id_enrollment_approved", before, faceIdAuditSnapshot(saved));
 
         return toDto(saved);
     }
@@ -393,6 +456,7 @@ public class FaceIdService {
                 .orElseThrow(() -> new ResourceNotFoundException(
                         "No pending Face ID submission for employee: " + employeeId));
 
+        Map<String, Object> before = faceIdAuditSnapshot(profile);
         aiServiceClient.rejectFace(tenantId, employeeId, request.getReason());
 
         refreshed(profile);
@@ -401,6 +465,9 @@ public class FaceIdService {
         FaceProfile saved = faceProfileRepository.save(profile);
         log.info("Face ID enrollment rejected tenantId={} employeeId={} by={} reason={}",
                 tenantId, employeeId, callerUserId, request.getReason());
+        Map<String, Object> after = faceIdAuditSnapshot(saved);
+        after.put("rejectionReason", request.getReason());
+        recordAudit(tenantId, callerUserId, employeeId, "face_id_enrollment_rejected", before, after);
 
         return toDto(saved);
     }
@@ -490,7 +557,7 @@ public class FaceIdService {
     }
 
     @Transactional
-    public FaceIdStatusDto revokeFace(UUID tenantId, UUID employeeId,
+    public FaceIdStatusDto revokeFace(UUID tenantId, UUID employeeId, String reason,
                                       UUID callerUserId, boolean callerIsPlatformAdmin) {
         Employee employee = employeeRepository
                 .findByIdAndTenantIdAndDeletedAtIsNull(employeeId, tenantId)
@@ -503,10 +570,21 @@ public class FaceIdService {
                 .orElseThrow(() -> new ResourceNotFoundException(
                         "Face ID profile not found for employee: " + employeeId));
 
+        Map<String, Object> before = faceIdAuditSnapshot(profile);
         aiServiceClient.revokeFace(tenantId, employeeId);
 
-        log.info("Face ID revoked tenantId={} employeeId={}", tenantId, employeeId);
-        return toDto(refreshed(profile));
+        // #51 gap fix (2026-08-16): deleted_reason/deleted_by are pure business fields (not
+        // biometric), so it's safe for Java to set+save them right after fams-ai's own write —
+        // refresh() first to pick up what fams-ai just wrote (status/revoked_at/embedding_deleted),
+        // THEN layer these two fields on top, so neither writer clobbers the other.
+        FaceProfile refreshedProfile = refreshed(profile);
+        refreshedProfile.setDeletedReason(reason);
+        refreshedProfile.setDeletedBy(callerUserId);
+        FaceProfile saved = faceProfileRepository.save(refreshedProfile);
+
+        log.info("Face ID revoked tenantId={} employeeId={} by={} reason={}", tenantId, employeeId, callerUserId, reason);
+        recordAudit(tenantId, callerUserId, employeeId, "face_id_revoked", before, faceIdAuditSnapshot(saved));
+        return toDto(saved);
     }
 
     /** System-triggered revoke on employee termination — bypasses the normal caller/permission
@@ -526,8 +604,16 @@ public class FaceIdService {
             return;
         }
 
+        Map<String, Object> before = faceIdAuditSnapshot(profile);
         aiServiceClient.revokeFace(tenantId, employeeId);
+
+        FaceProfile refreshedProfile = refreshed(profile);
+        refreshedProfile.setDeletedReason("Employee terminated (auto-revoke)");
+        refreshedProfile.setDeletedBy(null);
+        FaceProfile saved = faceProfileRepository.save(refreshedProfile);
+
         log.info("Face ID auto-revoked on termination tenantId={} employeeId={}", tenantId, employeeId);
+        recordAudit(tenantId, null, employeeId, "face_id_auto_revoked_on_termination", before, faceIdAuditSnapshot(saved));
     }
 
     @Transactional(readOnly = true)
@@ -661,8 +747,11 @@ public class FaceIdService {
                 .status(profile.getStatus())
                 .consentGiven(profile.isConsentGiven())
                 .consentGivenAt(profile.getConsentGivenAt())
+                .consentVersion(profile.getConsentVersion())
                 .enrolledAt(profile.getEnrolledAt())
                 .revokedAt(profile.getRevokedAt())
+                .deletedReason(profile.getDeletedReason())
+                .deletedBy(profile.getDeletedBy())
                 .reviewStatus(profile.getReviewStatus())
                 .pendingPhotoCount(profile.getPendingPhotoCount())
                 .submittedAt(profile.getSubmittedAt())

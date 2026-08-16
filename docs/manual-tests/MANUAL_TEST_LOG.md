@@ -80,6 +80,10 @@ giữ nguyên ✅ ĐÃ KHÓA. Đồng thời xác nhận UI "tìm người thao 
 | 45 | Cập nhật workspace | ✅ Pass | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-16 | Chặn vòng lặp parent hoạt động đúng; **gap đã vá**: ghi audit `workspace_updated` với before/after |
 | 46 | Gán nhân viên vào workspace | ✅ Pass | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-16 | **Gap đã vá**: thêm is_primary + effective_from (migration V96), enforce 1 primary/nhân viên ở cả tầng app lẫn DB unique index; kèm vá 1 race condition + 1 lỗi JSON key trùng phát hiện lúc test |
 | 47 | Chuyển workspace cho nhân viên | ✅ Pass | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-16 | **Gap đã vá**: left_at riêng biệt với deletedAt, is_primary carry-over khi chuyển (có thể override) |
+| 48 | Ghi nhận đồng ý Face ID | ✅ Pass | ✅ Pass | ✅ **PASS — ĐÃ KHÓA** | 2026-08-16 | **Gap đã vá**: consent_version/ip/device lưu đầy đủ (migration V97), enforce đúng "chỉ consent current". Test live qua App thật (web+camera giả lập): đúng bỏ qua consent sheet khi đã current, camera/liveness challenge render đúng |
+| 49 | Đăng ký Face ID | ✅ Pass | ✅ Pass | ✅ **PASS — ĐÃ KHÓA** | 2026-08-16 | AC gốc lỗi thời (quality_score không tồn tại, dùng InsightFace local — không sửa). **Gap audit đã vá**. Web Admin + App (Claude qua camera giả lập, User xác nhận nốt trên thiết bị thật: chụp ảnh thật, liveness fail, khác người, rate limit) đều pass |
+| 50 | HR xem trạng thái Face ID | ✅ Pass | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-16 | Luồng duyệt với ảnh tham chiếu thật test live qua UI pass; quality_score không tồn tại (gap kiến trúc, không sửa) |
+| 51 | Xóa/vô hiệu hóa Face ID | ✅ Pass | ✅ Pass | ✅ **PASS — ĐÃ KHÓA** | 2026-08-16 | **Gap đã vá**: deleted_reason/deleted_by + audit log, modal Web Admin có ô nhập lý do. Test live end-to-end qua cả App thật (tự thu hồi) và Web Admin |
 
 ---
 
@@ -475,6 +479,62 @@ giữ nguyên ✅ ĐÃ KHÓA. Đồng thời xác nhận UI "tìm người thao 
   workspace chính sang workspace mới (không override) → toast "Chuyển phòng ban thành công!" →
   xác nhận DB: bản ghi mới có `is_primary=true` (carry-over đúng), bản ghi cũ có `left_at` được
   set.
+
+### #48 — Ghi nhận đồng ý Face ID — ✅ PASS — ĐÃ KHÓA (2026-08-16)
+- Kịch bản: `docs/manual-tests/sprint-2-feature-48-faceid-consent.md`. **Gap "thiếu
+  version/hash/ip/device" đã vá**: thêm cột `consent_version`/`consent_ip`/`consent_device`
+  (migration `V97__face_profile_consent_metadata_and_revoke_reason.sql`), version do backend tự
+  quyết định (không tin client), IP/device tự lấy từ request. AC "chỉ consent current được dùng"
+  giờ thực sự được enforce qua `isConsentCurrent()` ở mọi điểm gate enrollment. Thêm audit log
+  `face_id_consent_given`. **Test live qua API+DB pass toàn bộ**: version/ip/device lưu đúng,
+  idempotent khi version không đổi (không re-stamp), HR vẫn bị chặn 403 khi cố consent thay người
+  khác (giữ nguyên thiết kế đúng từ trước). **Web Admin xác nhận qua UI thật**: tab Sinh trắc học
+  hiện đúng "Đã đồng ý (phiên bản 2026-08-v1)". **Mobile App cũng đã test live** bằng cách tự chạy
+  App thật ở chế độ `expo start --web` + camera giả lập của Chromium: đăng nhập App thật, vào Hồ sơ
+  → Face ID → "Đăng ký Face ID" → xác nhận màn hình **bỏ qua đúng** consent sheet (vì consent đã
+  current) và đi thẳng vào hướng dẫn liveness → bấm "Bắt đầu xác minh" → gọi thật API
+  `liveness-challenge` (200 OK) → camera thật hiện ra đúng UI (khung dẫn, đếm ngược, nút chụp).
+
+### #49 — Đăng ký Face ID — ✅ PASS — ĐÃ KHÓA (2026-08-16)
+- Kịch bản: `docs/manual-tests/sprint-2-feature-49-faceid-enroll.md`. AC gốc lỗi thời về kiến
+  trúc: `quality_score`/`provider`/`aws_face_id` không tồn tại trong hệ thống (dùng InsightFace
+  chạy local, không phải AWS Rekognition) — **quyết định không sửa** (thêm field giả không có ý
+  nghĩa), khuyến nghị cập nhật lại AC. **Gap "không ghi audit" đã vá**: thêm audit log cho cả 4
+  hành động (submit HR-assisted/self-service, approve, reject). **Test live qua UI thật (Web
+  Admin)**: HR upload ảnh fixture thật → hồ sơ vào `pending` đúng → ảnh tham chiếu hiện đúng → bấm
+  "Duyệt hồ sơ" → toast thành công, trạng thái chuyển "Đã đăng ký" ngay lập tức → audit log
+  `face_id_enrollment_submitted_hr_assisted` + `face_id_enrollment_approved` xác nhận có trong DB.
+  **Mobile App test live**: Claude chạy App thật (web + camera giả lập) tới sát bước chụp — camera
+  hiện đúng UI, App tự nhận diện đúng là không có khuôn mặt thật trong khung (camera giả chỉ phát
+  test pattern) nên không tự chụp, hành vi đúng. **User đã tự xác nhận nốt phần còn lại trên thiết
+  bị thật (2026-08-16)**: chụp 3 ảnh + submit thành công, chặn đúng khi liveness fail (ảnh in/màn
+  hình), chặn đúng khi 2 ảnh không cùng 1 người, chặn đúng rate limit sau 5 lần thử trong 10 phút —
+  tất cả hoạt động ổn.
+
+### #50 — HR xem trạng thái Face ID — ✅ PASS — ĐÃ KHÓA (2026-08-16)
+- Kịch bản: `docs/manual-tests/sprint-2-feature-50-faceid-hr-view.md`. Xác nhận "ĐÃ XONG" từ audit
+  gốc về cơ bản đúng: danh sách/filter/tìm kiếm/enrolledAt hoạt động tốt. `quality_score` không
+  tồn tại (gap kiến trúc, không sửa — giống #49). "Không hiển thị ảnh nếu thiếu quyền" nằm ở
+  endpoint riêng (`.../pending-review/photo`), gate bằng quyền + site-scope. **Phát hiện lớn ngoài
+  AC gốc, đã test live qua UI thật**: luồng duyệt với ảnh tham chiếu thật hiện đúng ngay tại tab
+  Sinh trắc học của nhân viên (không chỉ ở tab "Chờ duyệt" riêng), chống duyệt mù hoạt động đúng.
+  Không có mutation nào ở #50 nên không cần thêm audit log riêng — gap audit chung nằm ở #48/#49/#51.
+
+### #51 — Xóa/vô hiệu hóa Face ID — ✅ PASS — ĐÃ KHÓA (2026-08-16)
+- Kịch bản: `docs/manual-tests/sprint-2-feature-51-faceid-revoke.md`. **Gap "thiếu
+  deleted_reason/deleted_by; không ghi audit FACE_DELETE" đã vá**: thêm cột (cùng migration V97 với
+  #48), `DELETE .../face-id` nhận thêm query param `reason` tùy chọn, audit log `face_id_revoked` +
+  `face_id_auto_revoked_on_termination`. Xử lý đúng thứ tự ghi giữa Java (deleted_reason/deleted_by)
+  và fams-ai/Python (status/revoked_at) để không ghi đè lẫn nhau. AC nhắc tên cột
+  `tenant_users.face_registered` đã lỗi thời — hệ thống dùng `face_profiles.status='revoked'` làm
+  nguồn sự thật duy nhất, hiệu quả tương đương. **Web Admin đã bổ sung UI**: nút "Thu hồi Face ID"
+  giờ mở modal có ô nhập lý do (giống UX luồng "Từ chối" đã có). **Test live end-to-end qua UI
+  thật**: HR duyệt 1 hồ sơ pending trước, rồi mở modal thu hồi, nhập lý do "Nhân viên yêu cầu rút
+  lại đồng ý (test UI)" → thu hồi thành công → dòng "Lý do thu hồi" trên tab hiện đúng y hệt nội
+  dung đã nhập, khớp DB (`deleted_reason`/`deleted_by` đúng). **Mobile App cũng đã test live**: chạy
+  App thật, tự thu hồi Face ID qua đúng nút trên màn hình Hồ sơ → modal xác nhận trong App hiện
+  đúng nội dung cảnh báo (không có ô lý do, đúng thiết kế có chủ đích khác Web Admin) → xác nhận →
+  toast "Đã thu hồi Face ID" → trạng thái đổi ngay lập tức, nút chuyển lại thành "Đăng ký Face ID".
 
 ## Quy ước cập nhật file này (cho các phiên làm việc sau)
 

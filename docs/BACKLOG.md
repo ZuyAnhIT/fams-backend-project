@@ -483,7 +483,8 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 
 #### Consent
 
-- [ ] **#48 — Ghi nhận đồng ý Face ID** `P0` · 5sp · Nền tảng: Backend, Mobile App
+- [x] **#48 — Ghi nhận đồng ý Face ID** `P0` · 5sp · Nền tảng: Backend, Mobile App
+  - ✅ **Test tay thật — PASS, ĐÃ KHÓA (2026-08-16):** xem `docs/manual-tests/sprint-2-feature-48-faceid-consent.md` — **gap version/hash/ip/device đã vá** (migration V97), enforce đúng "chỉ consent current"; test live Backend+Web+Mobile App (chạy App thật qua expo web + camera giả lập) đều pass.
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: FaceIdService.giveConsent, test_consent.sh; thiếu: chỉ lưu cờ+thời gian, thiếu version/hash/ip/device
   - *User Story:* Là một nhân viên, tôi muốn xác nhận đồng ý sử dụng dữ liệu khuôn mặt để đáp ứng yêu cầu bảo mật và pháp lý.
   - *Acceptance Criteria:* Hiển thị nội dung consent; user xác nhận; lưu consent_version/hash/ip/device; chỉ consent current được dùng.
@@ -491,12 +492,14 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 
 #### Đăng ký khuôn mặt
 
-- [ ] **#49 — Đăng ký Face ID** `P0` · 8sp · Nền tảng: Backend, Mobile App, Queue/AI/Automation
+- [x] **#49 — Đăng ký Face ID** `P0` · 8sp · Nền tảng: Backend, Mobile App, Queue/AI/Automation
+  - ✅ **Test tay thật — PASS, ĐÃ KHÓA (2026-08-16):** xem `docs/manual-tests/sprint-2-feature-49-faceid-enroll.md` — AC gốc lỗi thời (quality_score/provider không tồn tại, dùng InsightFace local — không sửa). **Gap audit đã vá**. Web Admin + Mobile App (Claude qua camera giả lập, User xác nhận nốt trên thiết bị thật) đều pass.
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: FaceIdService.enrollFace, test_enroll.sh; thiếu: không check quality_score/lưu provider ở tầng Java
   - *User Story:* Là một nhân viên, tôi muốn chụp ảnh đăng ký khuôn mặt để sử dụng Face ID khi chấm công.
   - *Acceptance Criteria:* Yêu cầu consent current; chụp 3-5 ảnh; kiểm tra quality_score; lưu provider/aws_face_id; set face_registered=true.
   - *DB Entities:* `face_embeddings, face_id_consents, tenant_users, audit_logs`
 - [x] **#50 — HR xem trạng thái Face ID** `P0` · 3sp · Nền tảng: Backend, Web Admin
+  - ✅ **Test tay thật — PASS, ĐÃ KHÓA (2026-08-16):** xem `docs/manual-tests/sprint-2-feature-50-faceid-hr-view.md` — danh sách/filter/enrolledAt đúng; luồng duyệt với ảnh tham chiếu thật test live qua UI pass; quality_score không tồn tại (gap kiến trúc, không sửa).
   - *Audit (2026-07-22):* ✅ ĐÃ XONG — bằng chứng: ReportController /face-id/enrollment, test_face_id_report.sh
   - *User Story:* Là một HR/Admin, tôi muốn xem nhân viên nào đã/chưa đăng ký Face ID để theo dõi onboarding.
   - *Acceptance Criteria:* Danh sách lọc face_registered; xem quality_score/registered_at; không hiển thị ảnh nếu thiếu quyền.
@@ -504,7 +507,8 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 
 #### Thu hồi Face ID
 
-- [ ] **#51 — Xóa/vô hiệu hóa Face ID** `P1` · 5sp · Nền tảng: Backend, Web Admin, Mobile App
+- [x] **#51 — Xóa/vô hiệu hóa Face ID** `P1` · 5sp · Nền tảng: Backend, Web Admin, Mobile App
+  - ✅ **Test tay thật — PASS, ĐÃ KHÓA (2026-08-16):** xem `docs/manual-tests/sprint-2-feature-51-faceid-revoke.md` — **gap deleted_reason/deleted_by + audit đã vá**, modal Web Admin có ô nhập lý do. Test live end-to-end qua cả Web Admin và Mobile App (App thật, tự thu hồi) đều pass.
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: FaceIdService.revokeFace, test_revoke.sh; thiếu: thiếu deleted_reason/deleted_by; không ghi audit FACE_DELETE
   - *User Story:* Là một HR/Admin hoặc nhân viên theo quyền, tôi muốn thu hồi hồ sơ Face ID để xử lý nghỉ việc hoặc rút consent.
   - *Acceptance Criteria:* Set is_active=false; lưu deleted_reason/deleted_by; cập nhật tenant_users.face_registered=false; ghi audit FACE_DELETE.

@@ -33,11 +33,22 @@ public class FaceIdStatusDto {
     @Schema(description = "When consent was given (UTC)", nullable = true)
     private OffsetDateTime consentGivenAt;
 
+    @Schema(description = "Consent text version the employee agreed to — a policy update bumps "
+            + "this, invalidating older consents (see isConsentGiven's current-ness check)", nullable = true)
+    private String consentVersion;
+
     @Schema(description = "When enrollment was completed (UTC)", nullable = true)
     private OffsetDateTime enrolledAt;
 
     @Schema(description = "When Face ID was revoked (UTC, null if not revoked)", nullable = true)
     private OffsetDateTime revokedAt;
+
+    @Schema(description = "Why Face ID was revoked, null if not revoked or reason wasn't captured", nullable = true)
+    private String deletedReason;
+
+    @Schema(description = "Who revoked this Face ID — null if system-triggered (e.g. auto-revoke "
+            + "on employee termination) or never revoked", nullable = true)
+    private UUID deletedBy;
 
     @Schema(description = "Review state of the most recent submission: none | pending | rejected",
             example = "pending")
