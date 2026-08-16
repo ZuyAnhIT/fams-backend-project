@@ -74,6 +74,12 @@ giữ nguyên ✅ ĐÃ KHÓA. Đồng thời xác nhận UI "tìm người thao 
 | 39 | Cập nhật nhân viên | ✅ Pass | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-16 | Gap audit đã sửa từ trước; **gap `national_id` đã vá** (migration V95, mask kiểu email/phone) — test live PATCH nationalId pass |
 | 40 | Tạm ngừng/nghỉ việc nhân viên | ✅ Pass | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-16 | **Gap nghiêm trọng đã vá**: Assignment giờ tự chuyển "cancelled" khi terminate (giống AssignmentService.cancelAssignment); thêm terminated_at + audit log employee_status_changed — test live end-to-end pass |
 | 41 | Import danh sách nhân viên | ✅ Pass | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-16 | **Gap "không tải được file lỗi" đã vá**: endpoint mới `POST .../import/errors-export` trả .xlsx chỉ chứa dòng lỗi — test live pass, lý do lỗi khớp JSON gốc |
+| 42 | Export danh sách nhân viên | ✅ Pass | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-16 | **Gap đã vá**: cột `nationalId` giờ có trong file export, mask đúng theo quyền PII |
+| 43 | Tạo workspace | ✅ Pass | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-16 | **Gap đã vá**: ghi audit `workspace_created` đầy đủ, đúng pattern Employee/RBAC/Tenant |
+| 44 | Danh sách workspace | ✅ Pass | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-16 | Gap "thiếu số thành viên" xác nhận SỬA XONG qua UI thật, tự cập nhật real-time |
+| 45 | Cập nhật workspace | ✅ Pass | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-16 | Chặn vòng lặp parent hoạt động đúng; **gap đã vá**: ghi audit `workspace_updated` với before/after |
+| 46 | Gán nhân viên vào workspace | ✅ Pass | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-16 | **Gap đã vá**: thêm is_primary + effective_from (migration V96), enforce 1 primary/nhân viên ở cả tầng app lẫn DB unique index; kèm vá 1 race condition + 1 lỗi JSON key trùng phát hiện lúc test |
+| 47 | Chuyển workspace cho nhân viên | ✅ Pass | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-16 | **Gap đã vá**: left_at riêng biệt với deletedAt, is_primary carry-over khi chuyển (có thể override) |
 
 ---
 
@@ -413,6 +419,62 @@ giữ nguyên ✅ ĐÃ KHÓA. Đồng thời xác nhận UI "tìm người thao 
   modal. Test qua UI thật (Playwright): mở modal Nhập Excel → upload file 3 dòng (tương tự trên)
   → xác nhận kết quả "1 thành công, 2 lỗi / 3 dòng" hiện đúng trên UI → bấm nút mới → trình duyệt
   tải về `import-errors.xlsx` → mở file: 2 dòng lỗi, nội dung khớp 100% với bảng lỗi hiển thị.
+
+### #42 — Export danh sách nhân viên — ✅ PASS — ĐÃ KHÓA (2026-08-16)
+- Kịch bản: `docs/manual-tests/sprint-2-feature-42-export-employees.md`. Mask email/phone theo
+  quyền `employees:pii:read` hoạt động đúng, filter/site-scope được tôn trọng (giữ nguyên từ
+  trước). **Gap đã vá**: thêm cột `nationalId` vào `HEADERS` và vòng ghi dữ liệu của
+  `EmployeeExportService`, mask bằng literal `"***"` khi không có quyền PII (khớp cách
+  `Masked.MaskType.DEFAULT` mask trong JSON API). Test live: PATCH nationalId → export → mở file
+  → cột `nationalId` xuất hiện đúng vị trí, giá trị đúng.
+
+### #43 — Tạo workspace — ✅ PASS — ĐÃ KHÓA (2026-08-16)
+- Kịch bản: `docs/manual-tests/sprint-2-feature-43-create-workspace.md`. **Gap "không ghi audit"
+  đã vá**: `WorkspaceService.createWorkspace` giờ gọi `auditLogService.record(...)` đúng pattern
+  Employee/RBAC/Tenant, action `workspace_created`. Test live: tạo workspace → `audit_logs` có bản
+  ghi đúng entity_id.
+
+### #44 — Danh sách workspace — ✅ PASS — ĐÃ KHÓA (2026-08-16)
+- Kịch bản: `docs/manual-tests/sprint-2-feature-44-list-workspace.md`. Gap gốc "thiếu số thành
+  viên trong response" xác nhận SỬA XONG — `listWorkspaces`/`/tree` trả về
+  `activeMemberCount`/`childWorkspaceCount` qua batch-load. Test qua UI thật: cây tổ chức hiện
+  đúng "X người" theo từng workspace, tự cập nhật ngay sau khi gán/chuyển thành viên.
+
+### #45 — Cập nhật workspace — ✅ PASS — ĐÃ KHÓA (2026-08-16)
+- Kịch bản: `docs/manual-tests/sprint-2-feature-45-update-workspace.md`. AC "không cho tạo vòng
+  lặp parent" xác nhận ĐÃ CÓ và đúng — `isDescendant(...)` chặn set parent mới là hậu duệ của
+  workspace đang sửa, cộng với chặn tự làm cha của chính mình. **Gap "không ghi audit" đã vá**
+  (cùng cơ chế với #43): action `workspace_updated` với before/after snapshot.
+
+### #46 — Gán nhân viên vào workspace — ✅ PASS — ĐÃ KHÓA (2026-08-16)
+- Kịch bản: `docs/manual-tests/sprint-2-feature-46-assign-workspace-member.md`. **Gap "thiếu
+  effective_from/is_primary" đã vá**: thêm cột `is_primary`, `effective_from`, `left_at`
+  (migration `V96__workspace_member_primary_and_effective_dates.sql`). Enforce "chỉ 1 primary
+  active" ở 2 tầng: ứng dụng (tự động demote primary cũ) + DB (partial unique index
+  `idx_workspace_members_one_primary_per_employee`). Web Admin: `AddMemberModal.tsx` thêm
+  DatePicker "Ngày hiệu lực" + Switch "Đặt làm workspace chính"; tag vàng "Chính" hiện ở cả danh
+  sách thành viên workspace và tab Workspace của trang chi tiết nhân viên.
+  **2 bug phát hiện và vá ngay trong lúc test sống**: (1) race condition Hibernate flush-order
+  (INSERT chạy trước UPDATE demote trong cùng transaction) gây vi phạm unique constraint — vá bằng
+  `saveAndFlush`; (2) Lombok+Jackson serialize `boolean isPrimary` ra CẢ HAI key `"isPrimary"` VÀ
+  `"primary"` trùng lặp (đúng gotcha "Lombok isXxx() duplicate JSON keys" đã ghi nhận từ audit RBAC
+  trước) — vá bằng `@JsonProperty("isPrimary")` + `@JsonIgnoreProperties({"primary"})`.
+  **Test live end-to-end qua UI thật**: gán nhân viên vào workspace mới với switch "chính" bật →
+  workspace mới ngay lập tức có tag "Chính", workspace cũ tự động mất tag — xác nhận demote hoạt
+  động đúng ở cả 2 nơi hiển thị (đồng bộ). DB xác nhận: đúng 1 dòng `is_primary=true` cho mỗi nhân
+  viên.
+
+### #47 — Chuyển workspace cho nhân viên — ✅ PASS — ĐÃ KHÓA (2026-08-16)
+- Kịch bản: `docs/manual-tests/sprint-2-feature-47-transfer-workspace-member.md`. **Gap "thiếu
+  is_primary/effective date" đã vá** (cùng migration V96 với #46): bản ghi cũ khi transfer giờ có
+  `left_at` riêng biệt với `deletedAt` chung; `isPrimary` carry-over mặc định sang membership mới
+  (có thể override qua dropdown 3 lựa chọn trên `TransferMemberModal.tsx`: Giữ nguyên / Đặt làm
+  chính / Không phải chính); `effectiveFrom` cho membership mới cũng chỉnh được qua DatePicker mới
+  thêm. Yêu cầu quyền CẢ HAI `workspace_members:create` VÀ `:delete` giữ nguyên (đúng từ trước,
+  không phải gap). **Test live qua đúng thao tác trên Web Admin thật**: chuyển 1 nhân viên đang có
+  workspace chính sang workspace mới (không override) → toast "Chuyển phòng ban thành công!" →
+  xác nhận DB: bản ghi mới có `is_primary=true` (carry-over đúng), bản ghi cũ có `left_at` được
+  set.
 
 ## Quy ước cập nhật file này (cho các phiên làm việc sau)
 

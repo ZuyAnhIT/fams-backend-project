@@ -435,6 +435,7 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
   - *Acceptance Criteria:* Upload file; preview lỗi; kiểm tra trùng employee_code/email/phone; tạo theo batch; xuất file lỗi.
   - *DB Entities:* `users, tenant_users, workspace_members, audit_logs`
 - [x] **#42 — Export danh sách nhân viên** `P2` · 2sp · Nền tảng: Backend, Web Admin
+  - ✅ **Test tay thật — PASS, ĐÃ KHÓA (2026-08-16):** xem `docs/manual-tests/sprint-2-feature-42-export-employees.md` — mask PII theo quyền đúng; **gap `national_id` đã vá**: cột giờ có trong file export, mask literal `"***"` khi thiếu quyền PII.
   - *Audit (2026-07-22):* ✅ ĐÃ XONG — bằng chứng: EmployeeExportService, test_export_employees.sh
   - *User Story:* Là một HR/Admin, tôi muốn xuất danh sách nhân viên theo bộ lọc để phục vụ quản trị nội bộ.
   - *Acceptance Criteria:* Xuất CSV/XLSX; tôn trọng filter hiện tại; không xuất national_id nếu thiếu quyền.
@@ -445,16 +446,19 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 #### Workspace
 
 - [x] **#43 — Tạo workspace** `P0` · 3sp · Nền tảng: Backend, Web Admin
+  - ✅ **Test tay thật — PASS, ĐÃ KHÓA (2026-08-16):** xem `docs/manual-tests/sprint-2-feature-43-create-workspace.md` — **gap "không ghi audit" đã vá**, ghi action `workspace_created` đúng pattern Employee/RBAC/Tenant.
   - *Audit (2026-07-22):* ✅ ĐÃ XONG — bằng chứng: WorkspaceService.createWorkspace, test_create_workspace.sh; thiếu: không ghi audit
   - *User Story:* Là một Company Admin, tôi muốn tạo phòng ban/đội nhóm để tổ chức nhân sự theo cấu trúc công ty.
   - *Acceptance Criteria:* Nhập name/code/parent; code không trùng trong tenant; hỗ trợ cây workspace; ghi audit.
   - *DB Entities:* `workspaces, audit_logs`
-- [ ] **#44 — Danh sách workspace** `P0` · 3sp · Nền tảng: Backend, Web Admin
+- [x] **#44 — Danh sách workspace** `P0` · 3sp · Nền tảng: Backend, Web Admin
+  - ✅ **Test tay thật — PASS, ĐÃ KHÓA (2026-08-16):** xem `docs/manual-tests/sprint-2-feature-44-list-workspace.md` — gap gốc "thiếu số thành viên" xác nhận SỬA XONG qua UI thật, tự cập nhật real-time.
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: WorkspaceService.listWorkspaces, test_list_workspace.sh; thiếu: thiếu số thành viên trong response
   - *User Story:* Là một Company Admin, tôi muốn xem cây workspace có tìm kiếm và lọc trạng thái để quản lý cơ cấu tổ chức.
   - *Acceptance Criteria:* Hiển thị dạng tree/list; tìm theo name/code; lọc active; xem số thành viên.
   - *DB Entities:* `workspaces, workspace_members`
 - [x] **#45 — Cập nhật workspace** `P0` · 3sp · Nền tảng: Backend, Web Admin
+  - ✅ **Test tay thật — PASS, ĐÃ KHÓA (2026-08-16):** xem `docs/manual-tests/sprint-2-feature-45-update-workspace.md` — chặn vòng lặp parent hoạt động đúng; **gap "không ghi audit" đã vá**, action `workspace_updated` với before/after.
   - *Audit (2026-07-22):* ✅ ĐÃ XONG — bằng chứng: WorkspaceService.updateWorkspace; thiếu: không ghi audit
   - *User Story:* Là một Company Admin, tôi muốn sửa tên, mã, mô tả hoặc workspace cha để giữ cơ cấu tổ chức đúng.
   - *Acceptance Criteria:* Không cho tạo vòng lặp parent; code không trùng; ghi audit.
@@ -462,12 +466,14 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 
 #### Workspace Member
 
-- [ ] **#46 — Gán nhân viên vào workspace** `P0` · 5sp · Nền tảng: Backend, Web Admin
+- [x] **#46 — Gán nhân viên vào workspace** `P0` · 5sp · Nền tảng: Backend, Web Admin
+  - ✅ **Test tay thật — PASS, ĐÃ KHÓA (2026-08-16):** xem `docs/manual-tests/sprint-2-feature-46-assign-workspace-member.md` — **gap `is_primary`/`effective_from` đã vá** (migration V96), enforce 1 primary/nhân viên ở cả tầng app lẫn DB unique index, UI có DatePicker + switch "Đặt làm chính", tag "Chính" hiển thị đồng bộ. Vá thêm 1 race condition (Hibernate flush order) và 1 lỗi JSON key trùng (Lombok/Jackson) phát hiện lúc test sống.
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: WorkspaceMemberService.assignMember, test_workspace_members.sh; thiếu: không có effective_from/is_primary
   - *User Story:* Là một HR/Admin, tôi muốn thêm nhân viên vào workspace với vai trò phù hợp để phân nhóm nhân sự rõ ràng.
   - *Acceptance Criteria:* Chọn role_in_workspace; status active; effective_from; chỉ một primary workspace active; ghi audit.
   - *DB Entities:* `workspace_members, workspaces, tenant_users, audit_logs`
-- [ ] **#47 — Chuyển workspace cho nhân viên** `P1` · 5sp · Nền tảng: Backend, Web Admin
+- [x] **#47 — Chuyển workspace cho nhân viên** `P1` · 5sp · Nền tảng: Backend, Web Admin
+  - ✅ **Test tay thật — PASS, ĐÃ KHÓA (2026-08-16):** xem `docs/manual-tests/sprint-2-feature-47-transfer-workspace-member.md` — **gap `left_at`/`is_primary` đã vá** (cùng migration V96): `left_at` riêng biệt với `deletedAt`, `isPrimary` carry-over khi chuyển (override được qua UI). Test qua đúng thao tác trên Web Admin thật.
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: WorkspaceMemberService.transferMember, test_transfer_workspace_member.sh; thiếu: giữ lịch sử tốt nhưng thiếu is_primary/effective date
   - *User Story:* Là một HR/Admin, tôi muốn chuyển nhân viên từ workspace này sang workspace khác để cập nhật tổ chức theo thực tế.
   - *Acceptance Criteria:* Đóng membership cũ bằng left_at/effective_to; tạo membership mới; cập nhật is_primary; giữ lịch sử.

@@ -566,6 +566,7 @@ public class EmployeeService {
                         .workspaceId(m.getWorkspaceId())
                         .workspaceName(workspaceNamesById.get(m.getWorkspaceId()))
                         .role(m.getRole())
+                        .isPrimary(m.isPrimary())
                         .assignedAt(m.getCreatedAt())
                         .build())
                 .toList();
