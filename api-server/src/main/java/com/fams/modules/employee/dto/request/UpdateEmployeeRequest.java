@@ -41,6 +41,10 @@ public class UpdateEmployeeRequest {
     @Size(max = 100)
     private String department;
 
+    @Schema(description = "National ID / CCCD / CMND", example = "001234567890")
+    @Size(max = 50)
+    private String nationalId;
+
     @Schema(description = "Date of hire", example = "2024-01-15")
     private LocalDate hiredDate;
 

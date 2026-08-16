@@ -44,6 +44,10 @@ public class CreateEmployeeRequest {
     @Size(max = 100)
     private String department;
 
+    @Schema(description = "National ID / CCCD / CMND (optional)", example = "001234567890")
+    @Size(max = 50)
+    private String nationalId;
+
     @Schema(description = "Date of hire (optional)", example = "2024-01-15")
     private LocalDate hiredDate;
 

@@ -102,6 +102,35 @@ public class EmployeeController {
     }
 
     @Operation(
+        summary = "Export failed import rows to Excel",
+        description = "Re-validates the same file previously submitted to /import and returns a downloadable " +
+                      ".xlsx containing only the rows that failed, plus the reason(s) each one failed. " +
+                      "Requires employees:create permission (same as the import endpoint)."
+    )
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Excel file of failed rows returned",
+            content = @Content(mediaType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Invalid or unreadable file"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Unauthorized"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "Insufficient permissions"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "Tenant not found")
+    })
+    @PreAuthorize("hasAuthority('employees:create')")
+    @PostMapping(value = "/import/errors-export", consumes = "multipart/form-data")
+    public ResponseEntity<byte[]> exportImportErrors(
+            @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
+            @Parameter(description = "Same Excel file (.xlsx) previously submitted to /import") @RequestParam("file") MultipartFile file,
+            @AuthenticationPrincipal FamsUserDetails userDetails) {
+        log.info("Export import errors tenantId={} file={} by={}", tenantId, file.getOriginalFilename(), userDetails.getUserId());
+        byte[] data = employeeService.exportImportErrors(
+                tenantId, file, userDetails.getUserId(), userDetails.isPlatformAdmin());
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"import-errors.xlsx\"")
+                .contentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+                .body(data);
+    }
+
+    @Operation(
         summary = "List employees",
         description = "Returns a paginated, searchable, filterable list of employees within a tenant. " +
                       "Search matches first name, last name, email, employee code, and position. " +
