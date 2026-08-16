@@ -31,6 +31,17 @@ public class FaceProfile {
     @Column(name = "consent_given_at")
     private OffsetDateTime consentGivenAt;
 
+    /** Which version of the consent text the employee agreed to — lets a later policy update
+     *  invalidate old consents (see FaceIdService.CURRENT_CONSENT_VERSION / isConsentCurrent). */
+    @Column(name = "consent_version", length = 20)
+    private String consentVersion;
+
+    @Column(name = "consent_ip", length = 64)
+    private String consentIp;
+
+    @Column(name = "consent_device")
+    private String consentDevice;
+
     @Column(name = "status", nullable = false, length = 20)
     private String status;
 
@@ -42,6 +53,17 @@ public class FaceProfile {
 
     @Column(name = "revoked_at")
     private OffsetDateTime revokedAt;
+
+    /** Why this profile was revoked — captured by Java (not fams-ai) since it's a pure business
+     *  field, not a biometric one. Null for auto-revoke-on-termination's system reason text is
+     *  still populated (see FaceIdService.autoRevokeOnTermination) so "why" is never a mystery. */
+    @Column(name = "deleted_reason", length = 500)
+    private String deletedReason;
+
+    /** Who triggered the revoke — null when system-triggered (e.g. auto-revoke on termination),
+     *  distinct from a blank/forgotten field. */
+    @Column(name = "deleted_by")
+    private UUID deletedBy;
 
     @Column(name = "embedding_deleted", nullable = false)
     private boolean embeddingDeleted;

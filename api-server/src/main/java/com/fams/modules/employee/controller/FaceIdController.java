@@ -106,10 +106,13 @@ public class FaceIdController {
     public ResponseEntity<ApiResponse<FaceIdStatusDto>> revoke(
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
             @Parameter(description = "Employee UUID") @PathVariable UUID employeeId,
+            @Parameter(description = "Optional reason for the revoke (e.g. 'Nghỉ việc', 'Nhân viên yêu cầu rút "
+                    + "consent') — recorded on the profile for later audit/traceability")
+            @RequestParam(required = false) String reason,
             @AuthenticationPrincipal FamsUserDetails userDetails) {
-        log.info("Face ID revoke tenantId={} employeeId={} by={}", tenantId, employeeId, userDetails.getUserId());
+        log.info("Face ID revoke tenantId={} employeeId={} by={} reason={}", tenantId, employeeId, userDetails.getUserId(), reason);
         FaceIdStatusDto response = faceIdService.revokeFace(
-                tenantId, employeeId, userDetails.getUserId(), userDetails.isPlatformAdmin());
+                tenantId, employeeId, reason, userDetails.getUserId(), userDetails.isPlatformAdmin());
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 
