@@ -29,7 +29,7 @@ import java.util.UUID;
 public class EmployeeExportService {
 
     private static final String[] HEADERS = {
-        "employeeCode", "firstName", "lastName", "email", "phone",
+        "employeeCode", "firstName", "lastName", "email", "phone", "nationalId",
         "position", "department", "status", "hiredDate", "createdAt"
     };
 
@@ -120,11 +120,15 @@ public class EmployeeExportService {
                 row.createCell(2).setCellValue(nullSafe(e.getLastName()));
                 row.createCell(3).setCellValue(bypassMasking ? nullSafe(e.getEmail()) : nullSafe(MaskingUtils.maskEmail(e.getEmail())));
                 row.createCell(4).setCellValue(bypassMasking ? nullSafe(e.getPhone()) : nullSafe(MaskingUtils.maskPhone(e.getPhone())));
-                row.createCell(5).setCellValue(nullSafe(e.getPosition()));
-                row.createCell(6).setCellValue(nullSafe(e.getDepartment()));
-                row.createCell(7).setCellValue(nullSafe(e.getStatus()));
-                row.createCell(8).setCellValue(e.getHiredDate() != null ? e.getHiredDate().toString() : "");
-                row.createCell(9).setCellValue(e.getCreatedAt() != null ? e.getCreatedAt().toLocalDate().toString() : "");
+                // nationalId has no dedicated mask format (see Masked.MaskType.DEFAULT /
+                // MaskedSerializer) — masked value is the fixed literal "***", same as the JSON
+                // API, not a partial-reveal format like email/phone.
+                row.createCell(5).setCellValue(bypassMasking ? nullSafe(e.getNationalId()) : (e.getNationalId() != null ? "***" : ""));
+                row.createCell(6).setCellValue(nullSafe(e.getPosition()));
+                row.createCell(7).setCellValue(nullSafe(e.getDepartment()));
+                row.createCell(8).setCellValue(nullSafe(e.getStatus()));
+                row.createCell(9).setCellValue(e.getHiredDate() != null ? e.getHiredDate().toString() : "");
+                row.createCell(10).setCellValue(e.getCreatedAt() != null ? e.getCreatedAt().toLocalDate().toString() : "");
             }
 
             for (int i = 0; i < HEADERS.length; i++) {

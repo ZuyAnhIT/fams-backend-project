@@ -37,15 +37,28 @@ public class WorkspaceService {
     private final TenantRepository tenantRepository;
     private final UserRoleRepository userRoleRepository;
     private final WorkspaceMemberRepository workspaceMemberRepository;
+    private final com.fams.modules.audit.service.AuditLogService auditLogService;
 
     public WorkspaceService(WorkspaceRepository workspaceRepository,
                             TenantRepository tenantRepository,
                             UserRoleRepository userRoleRepository,
-                            WorkspaceMemberRepository workspaceMemberRepository) {
+                            WorkspaceMemberRepository workspaceMemberRepository,
+                            com.fams.modules.audit.service.AuditLogService auditLogService) {
         this.workspaceRepository = workspaceRepository;
         this.tenantRepository = tenantRepository;
         this.userRoleRepository = userRoleRepository;
         this.workspaceMemberRepository = workspaceMemberRepository;
+        this.auditLogService = auditLogService;
+    }
+
+    private Map<String, Object> workspaceAuditSnapshot(Workspace w) {
+        Map<String, Object> m = new HashMap<>();
+        m.put("name", w.getName());
+        m.put("description", w.getDescription());
+        m.put("type", w.getType());
+        m.put("parentId", w.getParentId() != null ? w.getParentId().toString() : null);
+        m.put("status", w.getStatus());
+        return m;
     }
 
     @Transactional
@@ -88,6 +101,19 @@ public class WorkspaceService {
 
         workspaceRepository.save(workspace);
         log.info("Workspace created: id={} tenantId={} by={}", workspace.getId(), tenantId, callerUserId);
+
+        try {
+            auditLogService.record(
+                    tenantId, callerUserId, null,
+                    "Workspace", workspace.getId().toString(), "workspace_created",
+                    null, workspaceAuditSnapshot(workspace),
+                    com.fams.shared.security.HttpRequestUtils.currentRequestId(),
+                    com.fams.shared.security.HttpRequestUtils.currentIpAddress(),
+                    com.fams.shared.security.HttpRequestUtils.currentUserAgent());
+        } catch (Exception e) {
+            log.warn("Failed to record audit log for workspace create id={}: {}", workspace.getId(), e.getMessage());
+        }
+
         return toResponse(workspace, 0L, 0L);
     }
 
@@ -216,6 +242,8 @@ public class WorkspaceService {
         Workspace workspace = workspaceRepository.findByIdAndTenantIdAndDeletedAtIsNull(workspaceId, tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Workspace not found: " + workspaceId));
 
+        Map<String, Object> before = workspaceAuditSnapshot(workspace);
+
         if (StringUtils.hasText(request.getName())) {
             String newName = request.getName().trim();
             if (!newName.equalsIgnoreCase(workspace.getName())
@@ -261,6 +289,19 @@ public class WorkspaceService {
 
         workspaceRepository.save(workspace);
         log.info("Workspace updated: id={} tenantId={} by={}", workspaceId, tenantId, callerUserId);
+
+        try {
+            auditLogService.record(
+                    tenantId, callerUserId, null,
+                    "Workspace", workspace.getId().toString(), "workspace_updated",
+                    before, workspaceAuditSnapshot(workspace),
+                    com.fams.shared.security.HttpRequestUtils.currentRequestId(),
+                    com.fams.shared.security.HttpRequestUtils.currentIpAddress(),
+                    com.fams.shared.security.HttpRequestUtils.currentUserAgent());
+        } catch (Exception e) {
+            log.warn("Failed to record audit log for workspace update id={}: {}", workspace.getId(), e.getMessage());
+        }
+
         return toResponseWithCounts(workspace);
     }
 

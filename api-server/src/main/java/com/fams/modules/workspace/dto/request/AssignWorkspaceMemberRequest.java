@@ -5,6 +5,7 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import lombok.Data;
 
+import java.time.LocalDate;
 import java.util.UUID;
 
 @Data
@@ -18,4 +19,13 @@ public class AssignWorkspaceMemberRequest {
             example = "member", allowableValues = {"member", "lead", "manager"})
     @Pattern(regexp = "^(member|lead|manager)$", message = "Role must be 'member', 'lead', or 'manager'")
     private String role;
+
+    @Schema(description = "Date this membership starts (optional, default: today). Can be back- or "
+            + "future-dated.", example = "2026-09-01")
+    private LocalDate effectiveFrom;
+
+    @Schema(description = "Mark this as the employee's primary workspace (optional). If true, any "
+            + "existing primary membership for this employee is automatically demoted. If omitted, "
+            + "defaults to true only when the employee has no other active primary workspace yet.")
+    private Boolean isPrimary;
 }

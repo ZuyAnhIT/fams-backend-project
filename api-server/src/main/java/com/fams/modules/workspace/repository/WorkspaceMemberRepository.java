@@ -26,6 +26,12 @@ public interface WorkspaceMemberRepository extends JpaRepository<WorkspaceMember
      *  on the employee detail screen. */
     List<WorkspaceMember> findByEmployeeIdAndTenantIdAndDeletedAtIsNull(UUID employeeId, UUID tenantId);
 
+    /** The employee's current primary membership (if any) — used to auto-demote the old primary
+     *  when a new one is assigned/transferred in as primary. At most one such row can exist per
+     *  (tenant, employee), enforced by a DB partial unique index (see V96 migration). */
+    Optional<WorkspaceMember> findByEmployeeIdAndTenantIdAndIsPrimaryTrueAndDeletedAtIsNull(
+            UUID employeeId, UUID tenantId);
+
     long countByWorkspaceIdAndDeletedAtIsNull(UUID workspaceId);
 
     /** Batch-counts active members per workspace for a page of workspaces

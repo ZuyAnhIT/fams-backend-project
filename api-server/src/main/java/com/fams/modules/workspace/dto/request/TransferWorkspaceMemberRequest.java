@@ -5,6 +5,7 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import lombok.Data;
 
+import java.time.LocalDate;
 import java.util.UUID;
 
 @Data
@@ -19,4 +20,13 @@ public class TransferWorkspaceMemberRequest {
             example = "member", allowableValues = {"member", "lead", "manager"})
     @Pattern(regexp = "^(member|lead|manager)$", message = "Role must be 'member', 'lead', or 'manager'")
     private String role;
+
+    @Schema(description = "Date the new membership starts (optional, default: today).",
+            example = "2026-09-01")
+    private LocalDate effectiveFrom;
+
+    @Schema(description = "Whether the new membership should be primary (optional, default: "
+            + "inherits the isPrimary flag from the membership being transferred, so a primary "
+            + "workspace stays primary after a transfer unless explicitly overridden).")
+    private Boolean isPrimary;
 }
