@@ -40,6 +40,34 @@ public final class NotificationEventTypeCatalog {
                     "Kiểm tra ngẫu nhiên",
                     "Gửi khi hệ thống yêu cầu bạn phản hồi một lượt kiểm tra ngẫu nhiên (vị trí/khuôn mặt).",
                     true,
+                    true),
+            new NotificationEventTypeInfo(
+                    // Must match com.fams.modules.employee.constant.InvitationEventTypes.EMPLOYEE_INVITED
+                    "EMPLOYEE_INVITED",
+                    "Được mời vào công ty",
+                    "Gửi khi bạn được mời tham gia một công ty (chỉ áp dụng nếu bạn đã có tài khoản FAMS).",
+                    true,
+                    true),
+            new NotificationEventTypeInfo(
+                    // Must match com.fams.modules.employee.constant.InvitationEventTypes.INVITATION_ACCEPTED
+                    "INVITATION_ACCEPTED",
+                    "Lời mời đã được chấp nhận",
+                    "Gửi cho người gửi lời mời khi người được mời chấp nhận tham gia.",
+                    true,
+                    false),
+            new NotificationEventTypeInfo(
+                    // Must match com.fams.modules.rbac.constant.RoleEventTypes.ROLE_ASSIGNED
+                    "ROLE_ASSIGNED",
+                    "Được gán vai trò mới",
+                    "Gửi khi bạn được gán một vai trò (role) mới trong một công ty.",
+                    true,
+                    false),
+            new NotificationEventTypeInfo(
+                    // Must match com.fams.modules.rbac.constant.RoleEventTypes.ROLE_REVOKED
+                    "ROLE_REVOKED",
+                    "Bị thu hồi vai trò",
+                    "Gửi khi một vai trò (role) bạn đang giữ bị thu hồi trong một công ty.",
+                    true,
                     true)
     );
 

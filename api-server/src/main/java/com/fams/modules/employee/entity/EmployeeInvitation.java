@@ -37,6 +37,12 @@ public class EmployeeInvitation {
     @Column(name = "role_id")
     private UUID roleId;
 
+    /** Optional workspace to assign the invitee to (as a WorkspaceMember) once they accept —
+     *  see EmployeeInvitationService#acceptInvitation. Null = no automatic workspace assignment,
+     *  same as before this field existed. */
+    @Column(name = "workspace_id")
+    private UUID workspaceId;
+
     @Column(length = 20)
     private String phone;
 
@@ -57,6 +63,15 @@ public class EmployeeInvitation {
 
     @Column(name = "deleted_at")
     private OffsetDateTime deletedAt;
+
+    @Column(name = "cancelled_by")
+    private UUID cancelledBy;
+
+    @Column(name = "cancel_reason", length = 500)
+    private String cancelReason;
+
+    @Column(name = "cancelled_at")
+    private OffsetDateTime cancelledAt;
 
     @PrePersist
     protected void onCreate() {

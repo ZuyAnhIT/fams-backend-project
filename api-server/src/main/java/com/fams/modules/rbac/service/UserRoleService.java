@@ -10,6 +10,7 @@ import com.fams.modules.rbac.dto.response.MyRoleResponse;
 import com.fams.modules.rbac.dto.response.RoleMemberResponse;
 import com.fams.modules.rbac.dto.response.SiteRefResponse;
 import com.fams.modules.rbac.dto.response.UserRoleResponse;
+import com.fams.modules.rbac.constant.RoleEventTypes;
 import com.fams.modules.rbac.entity.Role;
 import com.fams.modules.rbac.entity.UserRole;
 import com.fams.modules.rbac.repository.RoleRepository;
@@ -19,12 +20,15 @@ import com.fams.modules.site.repository.SiteRepository;
 import com.fams.modules.tenant.entity.Tenant;
 import com.fams.modules.tenant.repository.TenantRepository;
 import com.fams.modules.audit.service.AuditLogService;
+import com.fams.modules.notification.service.NotificationService;
+import com.fams.shared.exception.BusinessException;
 import com.fams.shared.exception.DuplicateResourceException;
 import com.fams.shared.exception.ResourceNotFoundException;
 import com.fams.shared.security.HttpRequestUtils;
 import com.fams.shared.security.JwtAuthFilter;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -32,6 +36,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -50,6 +55,7 @@ public class UserRoleService {
     private final SiteRepository siteRepository;
     private final StringRedisTemplate redis;
     private final AuditLogService auditLogService;
+    private final NotificationService notificationService;
 
     public UserRoleService(UserRoleRepository userRoleRepository,
                            UserRepository userRepository,
@@ -57,7 +63,8 @@ public class UserRoleService {
                            TenantRepository tenantRepository,
                            SiteRepository siteRepository,
                            StringRedisTemplate redis,
-                           AuditLogService auditLogService) {
+                           AuditLogService auditLogService,
+                           NotificationService notificationService) {
         this.userRoleRepository = userRoleRepository;
         this.userRepository = userRepository;
         this.roleRepository = roleRepository;
@@ -65,6 +72,18 @@ public class UserRoleService {
         this.siteRepository = siteRepository;
         this.redis = redis;
         this.auditLogService = auditLogService;
+        this.notificationService = notificationService;
+    }
+
+    /** A notification failure must never break the role assign/revoke flow that triggered it —
+     *  same defensive pattern as RandomCheckDispatchService's own notification call. */
+    private void notifySafely(UUID tenantId, UUID userId, String eventType, String title, String body,
+                               Map<String, Object> metadata) {
+        try {
+            notificationService.createNotification(tenantId, userId, eventType, title, body, metadata);
+        } catch (Exception ex) {
+            log.warn("Failed to send {} notification to userId={}: {}", eventType, userId, ex.getMessage());
+        }
     }
 
     /** #31 (docs/api/backend-feature-audit-2026-08-07.md): granting/revoking who holds a role
@@ -118,8 +137,68 @@ public class UserRoleService {
         redis.delete(JwtAuthFilter.PERMS_CACHE_PREFIX + userId + ":platform");
     }
 
-    @Transactional(readOnly = true)
+    /**
+     * A tenant's owner (tenants.owner_id) should never lose access to their own company just
+     * because their role assignment was removed — ownership is a separate, permanent
+     * relationship from role assignments (see docs/reviews/backend/
+     * rbac-role-permission-audit-2026-08-13.md mục 10). Confirmed as a REAL, reproducible
+     * self-lockout during 2026-08-15 manual QA: an owner with zero active roles in their own
+     * tenant disappeared entirely from the "select company" screen despite owner_id being
+     * untouched, with no recovery path short of a direct DB fix. Called on login, tenant
+     * switch, and whenever "my roles" is queried, so this state is healed transparently
+     * before we ever compute what the caller can see/do — re-granting TENANT_ADMIN is a
+     * no-op if they already hold an active role in every tenant they own.
+     */
+    @Transactional
+    public void selfHealOwnerRoles(UUID userId) {
+        List<Tenant> ownedTenants = tenantRepository.findAllByOwnerIdAndDeletedAtIsNull(userId);
+        if (ownedTenants.isEmpty()) {
+            return;
+        }
+        for (Tenant tenant : ownedTenants) {
+            if (userRoleRepository.existsByUserIdAndTenantIdAndDeletedAtIsNull(userId, tenant.getId())) {
+                continue;
+            }
+            Role tenantAdminRole = roleRepository.findByNameAndTenantIdIsNull("TENANT_ADMIN").orElse(null);
+            if (tenantAdminRole == null) {
+                log.warn("Cannot self-heal owner role for userId={} tenantId={}: TENANT_ADMIN role missing",
+                        userId, tenant.getId());
+                continue;
+            }
+
+            // uq_user_roles is (user_id, role_id, tenant_id) WITHOUT excluding soft-deleted
+            // rows — if this owner previously held (and lost) TENANT_ADMIN here, a plain
+            // INSERT would violate that constraint. Reactivate the existing row instead,
+            // exactly like assignRole's own reactivate-or-create pattern.
+            List<UserRole> existing = userRoleRepository
+                    .findByUserIdAndRoleIdAndTenantId(userId, tenantAdminRole.getId(), tenant.getId());
+            UserRole healed;
+            if (!existing.isEmpty()) {
+                healed = existing.get(0);
+                healed.setDeletedAt(null);
+                healed.setAssignedBy(userId);
+                healed = userRoleRepository.save(healed);
+            } else {
+                healed = UserRole.builder()
+                        .userId(userId)
+                        .role(tenantAdminRole)
+                        .tenantId(tenant.getId())
+                        .assignedBy(userId)
+                        .siteIds(new HashSet<>())
+                        .build();
+                healed = userRoleRepository.save(healed);
+            }
+            evictPermissionCache(userId, tenant.getId());
+            log.warn("Self-healed missing owner role: userId={} tenantId={} userRoleId={}",
+                    userId, tenant.getId(), healed.getId());
+            recordUserRoleAudit(tenant.getId(), userId, "role_self_healed", healed.getId(), null,
+                    userRoleAuditSnapshot(healed));
+        }
+    }
+
+    @Transactional
     public List<MyRoleResponse> getCurrentUserRoles(UUID userId) {
+        selfHealOwnerRoles(userId);
         List<UserRole> assignments = userRoleRepository.findAllActiveByUserId(userId);
 
         // Issue #3 (docs/issues/ISSUES.md): a user may hold roles across several tenants
@@ -253,7 +332,7 @@ public class UserRoleService {
         UUID targetUserId = request.getUserId();
         UUID roleId = request.getRoleId();
 
-        tenantRepository.findByIdAndDeletedAtIsNull(tenantId)
+        Tenant tenant = tenantRepository.findByIdAndDeletedAtIsNull(tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Tenant not found: " + tenantId));
 
         if (!callerIsPlatformAdmin) {
@@ -321,6 +400,7 @@ public class UserRoleService {
                     saved.getId(), targetUserId, roleId, tenantId, siteIds, callerUserId);
             recordUserRoleAudit(tenantId, callerUserId, "role_assigned", saved.getId(), null,
                     userRoleAuditSnapshot(saved));
+            notifyRoleAssigned(tenantId, tenant.getName(), targetUserId, role.getName());
             return toResponse(saved);
         }
 
@@ -338,8 +418,19 @@ public class UserRoleService {
                 assignment.getId(), targetUserId, roleId, tenantId, siteIds, callerUserId);
         recordUserRoleAudit(tenantId, callerUserId, "role_assigned", assignment.getId(), null,
                 userRoleAuditSnapshot(assignment));
+        notifyRoleAssigned(tenantId, tenant.getName(), targetUserId, role.getName());
 
         return toResponse(assignment);
+    }
+
+    private void notifyRoleAssigned(UUID tenantId, String tenantName, UUID targetUserId, String roleName) {
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("tenantId", tenantId.toString());
+        metadata.put("roleName", roleName);
+        notifySafely(tenantId, targetUserId, RoleEventTypes.ROLE_ASSIGNED,
+                "Bạn được gán vai trò mới",
+                "Bạn vừa được gán vai trò \"" + roleName + "\" trong " + tenantName + ".",
+                metadata);
     }
 
     /**
@@ -370,7 +461,7 @@ public class UserRoleService {
         for (UUID userId : request.getUserIds()) {
             try {
                 if (request.getRevokeRoleId() != null) {
-                    revokeRoleIfHeld(userId, request.getRevokeRoleId(), tenantId, callerUserId);
+                    revokeRoleIfHeld(userId, request.getRevokeRoleId(), tenantId, callerUserId, callerIsPlatformAdmin);
                 }
 
                 AssignRoleRequest single = new AssignRoleRequest();
@@ -402,18 +493,53 @@ public class UserRoleService {
     }
 
     /** Best-effort companion to bulkAssignRole's revokeRoleId — silently no-ops if the user
-     *  never held that role (nothing to revoke isn't an error in a bulk "move everyone" call). */
-    private void revokeRoleIfHeld(UUID userId, UUID roleId, UUID tenantId, UUID callerUserId) {
+     *  never held that role (nothing to revoke isn't an error in a bulk "move everyone" call).
+     *  Still subject to the last-admin guard: if this would strip the tenant's last
+     *  roles:update holder, it throws (caught per-user by bulkAssignRole's own try/catch, so
+     *  it surfaces as one failed row rather than aborting the whole batch). */
+    private void revokeRoleIfHeld(UUID userId, UUID roleId, UUID tenantId, UUID callerUserId,
+                                   boolean callerIsPlatformAdmin) {
         userRoleRepository.findByUserIdAndRoleIdAndTenantId(userId, roleId, tenantId).stream()
                 .filter(ur -> ur.getDeletedAt() == null)
                 .findFirst()
                 .ifPresent(ur -> {
+                    assertNotLastAdminHolder(ur, callerIsPlatformAdmin);
                     Map<String, Object> before = userRoleAuditSnapshot(ur);
                     ur.setDeletedAt(OffsetDateTime.now());
                     userRoleRepository.save(ur);
                     evictPermissionCache(userId, tenantId);
                     recordUserRoleAudit(tenantId, callerUserId, "role_revoked", ur.getId(), before, null);
                 });
+    }
+
+    /**
+     * Prevents revoking the last remaining `roles:update` holder in a tenant — without this,
+     * a single revoke could strip every admin capability from a company, leaving nobody able
+     * to manage roles/members ever again. Confirmed as a REAL, reproducible self-lockout
+     * during 2026-08-15 manual QA (see docs/reviews/backend/
+     * rbac-role-permission-audit-2026-08-13.md mục 10): revoking a tenant's last TENANT_ADMIN
+     * succeeded silently and left the tenant with no visible membership at all. Platform
+     * Admins are exempt — they're the intended recovery channel for genuinely stuck tenants.
+     */
+    private void assertNotLastAdminHolder(UserRole assignment, boolean callerIsPlatformAdmin) {
+        if (callerIsPlatformAdmin || assignment.getTenantId() == null) {
+            return;
+        }
+        boolean grantsRoleManagement = assignment.getRole().getPermissions().stream()
+                .anyMatch(p -> "roles:update".equals(p.getName()));
+        if (!grantsRoleManagement) {
+            return;
+        }
+        long remainingHolders = userRoleRepository.countDistinctActiveHoldersOfPermissionInTenant(
+                assignment.getTenantId(), "roles:update");
+        if (remainingHolders <= 1) {
+            throw new BusinessException(
+                    "LAST_ADMIN_ROLE",
+                    "Không thể thu hồi role này vì đây là quyền quản trị vai trò cuối cùng của công ty — "
+                            + "hãy gán quyền quản trị cho người khác trước khi thu hồi role này.",
+                    HttpStatus.CONFLICT,
+                    "Refusing to revoke the last roles:update holder in tenant " + assignment.getTenantId());
+        }
     }
 
     private Map<String, Object> userRoleAuditSnapshot(UserRole ur) {
@@ -508,6 +634,8 @@ public class UserRoleService {
             }
         }
 
+        assertNotLastAdminHolder(assignment, callerIsPlatformAdmin);
+
         Map<String, Object> before = userRoleAuditSnapshot(assignment);
         assignment.setDeletedAt(OffsetDateTime.now());
         userRoleRepository.save(assignment);
@@ -519,6 +647,19 @@ public class UserRoleService {
         log.info("Revoked role assignment: userRoleId={} userId={} role={} tenantId={} by={}",
                 userRoleId, assignment.getUserId(), assignment.getRole().getName(), tenantId, callerUserId);
         recordUserRoleAudit(tenantId, callerUserId, "role_revoked", userRoleId, before, null);
+
+        if (tenantId != null) {
+            String tenantName = tenantRepository.findByIdAndDeletedAtIsNull(tenantId)
+                    .map(Tenant::getName).orElse("công ty");
+            Map<String, Object> metadata = new LinkedHashMap<>();
+            metadata.put("tenantId", tenantId.toString());
+            metadata.put("roleName", assignment.getRole().getName());
+            notifySafely(tenantId, assignment.getUserId(), RoleEventTypes.ROLE_REVOKED,
+                    "Vai trò của bạn đã bị thu hồi",
+                    "Vai trò \"" + assignment.getRole().getName() + "\" của bạn trong " + tenantName
+                            + " đã bị thu hồi.",
+                    metadata);
+        }
     }
 
     private UserRoleResponse toResponse(UserRole ur) {

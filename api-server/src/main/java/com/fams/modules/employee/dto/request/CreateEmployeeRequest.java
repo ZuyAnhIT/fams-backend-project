@@ -52,4 +52,10 @@ public class CreateEmployeeRequest {
 
     @Schema(description = "Workspace UUID of type=department (optional — links employee to an org-chart workspace and syncs the department name field). See /tenants/{tenantId}/workspaces.", example = "3fa85f64-5717-4562-b3fc-2c963f66afa6")
     private UUID departmentId;
+
+    @Schema(description = "Intended role UUID for this person once they're invited/linked to a login account "
+            + "(optional) — this profile has no account yet so no real role assignment happens now, but if an "
+            + "invitation is later sent for the same email with no explicit role, this one is used instead of "
+            + "defaulting to EMPLOYEE.")
+    private UUID plannedRoleId;
 }

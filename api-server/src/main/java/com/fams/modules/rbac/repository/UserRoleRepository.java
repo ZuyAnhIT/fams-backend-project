@@ -114,6 +114,23 @@ public interface UserRoleRepository extends JpaRepository<UserRole, UUID> {
         long getCnt();
     }
 
+    /** Counts distinct people who currently hold ANY role granting `permissionName` in a
+     *  tenant — spans every role (system or custom) that includes it, unlike
+     *  {@link #countActiveByRoleIdInAndTenantId} which counts by a single role id. Used by
+     *  UserRoleService's last-admin guard: before revoking a role that grants roles:update,
+     *  confirm at least one other holder remains, so a tenant can never end up with nobody
+     *  able to manage its own roles/members. */
+    @Query("""
+            SELECT COUNT(DISTINCT ur.userId) FROM UserRole ur
+            JOIN ur.role r
+            JOIN r.permissions p
+            WHERE ur.tenantId = :tenantId
+              AND p.name = :permissionName
+              AND ur.deletedAt IS NULL
+            """)
+    long countDistinctActiveHoldersOfPermissionInTenant(
+            @Param("tenantId") UUID tenantId, @Param("permissionName") String permissionName);
+
     @Query("SELECT ur FROM UserRole ur JOIN FETCH ur.role WHERE ur.id = :id AND ur.deletedAt IS NULL")
     java.util.Optional<UserRole> findActiveById(@Param("id") UUID id);
 

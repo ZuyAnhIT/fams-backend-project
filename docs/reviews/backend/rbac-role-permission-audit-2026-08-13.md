@@ -261,7 +261,127 @@ nhưng chưa từng được tạo hồ sơ HR (VD: chủ mới nhận qua "Chuy
   role qua UI thật → người đó biến mất khỏi bảng ngay lập tức, đúng như kỳ vọng.
 - Đã dọn toàn bộ dữ liệu test (tenant, user, user_roles, audit_logs synthetic) sau khi xác minh.
 
-## 10. Kết luận chung
+## 10. ⚠️ Tự khóa vĩnh viễn khi thu hồi role admin cuối cùng — xác nhận qua test tự động (2026-08-15)
+
+Trong đợt chạy tự động lại kịch bản test #24-31 (Playwright, trên 1 tenant thật mới tạo riêng cho
+test), case 4/5 của #30 (Thu hồi role) xác nhận một gap đã nêu từ audit gốc (07-22:
+"không có safeguard mất admin cuối") là **có thật, và hậu quả nặng hơn dự đoán ban đầu**:
+
+- Thu hồi role `TENANT_ADMIN` cuối cùng của 1 tenant (kể cả tự thu hồi role của chính chủ sở hữu)
+  **thành công không cảnh báo** — `DELETE /user-roles/{id}` trả 200 bình thường, không có bất kỳ
+  kiểm tra "đây có phải admin cuối cùng không" nào trong `UserRoleService.revokeRole`.
+- Dự đoán ban đầu trong kịch bản test là: "chủ sở hữu vẫn còn quyền vì ownership tách biệt role,
+  chỉ mất quyền vào màn Vai trò". **Thực tế nặng hơn**: đăng nhập lại sau khi mất role duy nhất
+  trong tenant, màn "Chọn công ty làm việc" báo **"Bạn chưa thuộc công ty nào — hãy tạo một công
+  ty mới để bắt đầu"** — hệ thống frontend xác định "user thuộc công ty nào" hoàn toàn dựa vào
+  `user_roles` đang active, **không tính đến `tenants.owner_id`** (đã xác nhận bằng query DB:
+  `owner_id` không đổi, vẫn đúng người này, nhưng họ không còn cách nào để vào lại tenant của
+  chính mình qua UI).
+- Với tenant chỉ có đúng 1 người quản trị (tình huống phổ biến — mọi tenant self-service mới tạo
+  đều bắt đầu ở trạng thái này), đây là **tự khóa vĩnh viễn không có đường phục hồi** ngoài can
+  thiệp trực tiếp vào DB. Không có endpoint "khôi phục quyền chủ sở hữu", không có luồng UI nào
+  khác cứu được. Đã tái hiện và tự phục hồi được trong lúc test **chỉ vì** tenant test khi đó
+  tình cờ có thêm 1 tài khoản thứ hai còn giữ `roles:update` — tình huống này sẽ không tồn tại ở
+  một tenant 1-admin thật.
+
+**Đã sửa (2026-08-15), cả 3 hướng đề xuất — user chọn làm đủ:**
+
+1. **Chặn ở gốc — safeguard "admin cuối cùng":** `UserRoleService.assertNotLastAdminHolder`,
+   gọi trong cả `revokeRole` và `bulkAssignRole`'s `revokeRoleIfHeld`. Trước khi thu hồi 1
+   `user_role`, nếu role đó cấp quyền `roles:update`, đếm
+   (`UserRoleRepository.countDistinctActiveHoldersOfPermissionInTenant`) xem tenant còn ai khác
+   giữ `roles:update` không — nếu đây là người cuối cùng, chặn 409 với thông báo tiếng Việt rõ
+   ràng ("Không thể thu hồi role này vì đây là quyền quản trị vai trò cuối cùng của công ty —
+   hãy gán quyền quản trị cho người khác trước khi thu hồi role này."). Platform Admin được
+   miễn trừ (kênh hỗ trợ chính đáng cho tenant thực sự bị kẹt). Đã test qua UI thật (RoleMembersModal
+   trên màn Vai trò & Phân quyền): chủ sở hữu duy nhất tự thu hồi role của mình bị chặn đúng, toast
+   hiện thông báo trên; khi có ≥2 người giữ `roles:update`, thu hồi 1 người vẫn hoạt động bình
+   thường (không chặn nhầm).
+2. **Sửa gốc "biến mất khỏi công ty của chính mình" — tự phục hồi (self-heal):**
+   `UserRoleService.selfHealOwnerRoles(userId)` — với mọi tenant mà `tenants.owner_id = userId`,
+   nếu người đó đang giữ 0 role active trong tenant đó, tự động gán lại (hoặc kích hoạt lại bản ghi
+   `user_role` cũ nếu còn, tránh đụng unique constraint `uq_user_roles` không loại trừ bản ghi đã
+   xóa mềm) role `TENANT_ADMIN`, ghi audit `role_self_healed`. Gọi ở 3 điểm: `AuthService.login`
+   (trước khi chọn primary tenant/role cho JWT), `AuthService.switchTenant`, và
+   `UserRoleService.getCurrentUserRoles` (nguồn dữ liệu của `GET /roles/me`, dùng bởi màn "Chọn
+   công ty làm việc"). Đã tái hiện đúng kịch bản gốc và xác nhận đã hết: Platform Admin force-revoke
+   role admin cuối cùng của 1 tenant → owner đăng nhập lại → **tự động phục hồi hoàn toàn về
+   TENANT_ADMIN, vào thẳng dashboard, không còn màn "Chọn công ty làm việc" chặn đường, không cần
+   can thiệp DB**.
+3. **Chưa làm riêng lẻ mục "cảnh báo xác nhận trước khi gửi request"** — không cần thiết nữa vì
+   mục 1 đã chặn cứng ở backend (an toàn hơn 1 cảnh báo có thể bấm nhầm "Đồng ý"), và mục 2 đã có
+   lưới an toàn thứ hai nếu safeguard 1 bị bypass theo cách nào đó trong tương lai.
+
+## 11. Vá 4 gap #33-36 (mời/chấp nhận/hủy lời mời, danh sách nhân viên) + bổ sung notification cho invite/role-change (2026-08-15)
+
+Đợt test tự động #32-36 (xem mục trước) phát hiện 4 tính năng không đạt đủ Acceptance Criteria
+gốc, cộng với 1 khoảng trống logic nghiệp vụ rộng hơn: **toàn hệ thống chỉ có đúng 1 nơi tạo
+notification** (`RandomCheckDispatchService`) — mời/chấp nhận/hủy lời mời và gán/thu hồi role đều
+không thông báo cho ai cả. Đã vá toàn bộ trong cùng đợt:
+
+- **Migration V93**: thêm `employee_invitations.workspace_id`, `.cancelled_by`, `.cancel_reason`,
+  `.cancelled_at`.
+- **#33 Mời nhân viên**: `InviteEmployeeRequest` thêm `workspaceId` (validate active workspace
+  cùng tenant); modal mời (Web) thêm ô chọn workspace; ghi audit `invitation_sent`; nếu email mời
+  đã có tài khoản FAMS, gửi notification `EMPLOYEE_INVITED`.
+- **#34 Chấp nhận lời mời**: sau khi Employee được resolve (tạo mới hoặc link bản ghi cũ),
+  best-effort tạo `WorkspaceMember` cho workspace mặc định của lời mời (bỏ qua an toàn nếu
+  workspace đã bị xóa/vô hiệu hóa, không chặn cả luồng accept); ghi audit `invitation_accepted`;
+  gửi notification `INVITATION_ACCEPTED` cho người đã mời.
+- **#35 Hủy lời mời**: lưu `cancelledBy`/`cancelReason`/`cancelledAt` trực tiếp trên bản ghi (không
+  chỉ audit log); modal Hủy (Web) thêm ô nhập lý do tùy chọn; ghi audit `invitation_cancelled`;
+  tooltip lý do hiện trên tag trạng thái "Đã hủy" ở màn Lời mời đã gửi.
+- **#36 Danh sách nhân viên**: `EmployeeSpecification` thêm 2 predicate mới qua subquery —
+  `faceRegistered` (join `face_profiles.status = 'enrolled'`) và `workspaceId` (join
+  `workspace_members`, active) — tách biệt hoàn toàn với filter "Phòng ban" cũ (chỉ so tên chuỗi
+  trên `Employee.department`, giữ nguyên không đổi). Web Admin thêm 2 ô lọc mới cạnh ô Phòng ban.
+- **Notification cho role assign/revoke** (không nằm trong #33-36 nhưng cùng gốc vấn đề, user yêu
+  cầu bổ sung): `UserRoleService.assignRole`/`revokeRole` giờ gửi `ROLE_ASSIGNED`/`ROLE_REVOKED`
+  cho người bị ảnh hưởng — đặc biệt quan trọng sau đợt vá "tự khóa vĩnh viễn" ở mục 10, người dùng
+  giờ biết ngay khi role của mình đổi thay vì tự phát hiện lúc bị 403.
+- Catalog `NotificationEventTypeCatalog` cập nhật đủ 4 event type mới (`EMPLOYEE_INVITED`,
+  `INVITATION_ACCEPTED`, `ROLE_ASSIGNED`, `ROLE_REVOKED`) để hiện đúng trong màn cài đặt thông báo
+  của user.
+
+**Đã test lại toàn bộ end-to-end** trên 1 tenant thật mới tạo riêng: tạo workspace → mời kèm
+workspace → xác nhận `workspace_id` lưu đúng + audit + notification tới người được mời (đã có tài
+khoản) → chấp nhận → xác nhận `WorkspaceMember` tạo đúng + audit + notification tới người mời →
+hủy 1 lời mời khác kèm lý do → xác nhận `cancelled_by`/`cancel_reason`/`cancelled_at` lưu đúng +
+audit → lọc danh sách nhân viên theo Face ID (cả 2 chiều) và theo workspace vừa gán tự động (xác
+nhận chéo với kết quả của #34) → gán rồi thu hồi role cho cùng người, xác nhận cả 2 notification
+xuất hiện đúng trong màn "Thông báo" thật của người đó. Toàn bộ đã dọn dữ liệu test sau khi xác
+minh. #33-36 nâng từ 🟡 PASS MỘT PHẦN lên ✅ PASS — ĐÃ KHÓA (trừ #34 phần Mobile App chưa test).
+
+## 12. Vá lỗi "chọn role khi mời không hiện gợi ý, mặc định EMPLOYEE" (2026-08-16)
+
+User phản ánh: modal "Mời tham gia (gửi email)" không hiện role tùy chỉnh của công ty để chọn,
+khiến việc mời luôn rơi về mặc định EMPLOYEE dù công ty đã tạo role riêng. Kiểm tra sống (tạo 1
+role tùy chỉnh thật, mở modal, xem đúng request gọi API) xác nhận đúng và tìm ra gốc rễ:
+
+- **Nguyên nhân:** `InviteEmployeeModal.tsx` gọi `useRolesQuery({ size: 100 })` — **thiếu tham số
+  `tenantId`**. Khi thiếu `tenantId`, `RoleSpecification` (backend) chỉ trả về 4 role hệ thống
+  dùng chung toàn platform (`TENANT_ADMIN/HR_MANAGER/SITE_SUPERVISOR/EMPLOYEE`), không bao giờ
+  trả về role tùy chỉnh của tenant (khác `tenantId`). Đối chiếu 2 modal khác dùng chung API này —
+  `AssignRoleModal` (Gán Role trên hồ sơ nhân viên) và `BulkAssignRoleModal` (Gán role hàng loạt)
+  — cả 2 đều truyền `tenantId` đúng và hiển thị đủ role, xác nhận đây là lỗi cục bộ chỉ ở
+  `InviteEmployeeModal`, không phải lỗi hệ thống chung.
+- **Đã sửa:** thêm `tenantId` (+ `isActive: true`) vào lệnh gọi, bỏ luôn phần lọc lại phía client
+  (dư thừa, server đã lọc đúng).
+- **Bổ sung theo yêu cầu user** — "tạo nhân viên thủ công cũng cần chọn được role đúng, truyền
+  vào khi mời": màn "Thêm hồ sơ (chưa cần đăng nhập)" (`EmployeeFormModal`) tạo hồ sơ HR chưa có
+  tài khoản đăng nhập, nên chưa thể gán `UserRole` thật ngay lúc đó. Thêm cột
+  `employees.planned_role_id` (migration V94) + ô "Vai trò dự kiến (Tùy chọn)" trên form này để
+  lưu lại Ý ĐỊNH — khi sau này gửi lời mời cho đúng email đó mà HR không chọn role tường minh,
+  `EmployeeInvitationService.sendInvitation` tự lấy `plannedRoleId` của hồ sơ chưa liên kết thay
+  vì để trống (dẫn tới mặc định EMPLOYEE lúc accept). Không đổi hành vi khi HR chọn role tường
+  minh lúc mời — role dự kiến chỉ là fallback.
+- **Đã test end-to-end thật** trên 1 tenant mới: tạo role tùy chỉnh → xác nhận cả 3 modal
+  (Mời qua email, Gán Role, Gán role hàng loạt) đều hiện đúng role đó → tạo hồ sơ thủ công chọn
+  "Vai trò dự kiến" = role tùy chỉnh → mời đúng email đó, CỐ Ý để trống ô role → xác nhận
+  `employee_invitations.role_id` tự động là role tùy chỉnh (không null, không phải role EMPLOYEE)
+  → chấp nhận lời mời → xác nhận `user_roles` cuối cùng đúng role tùy chỉnh.
+
+## 13. Kết luận chung
 
 - **Role & seed permission theo role: đạt yêu cầu**, đúng thứ bậc nghiệp vụ.
 - **Danh mục permission trong DB rộng hơn thực tế enforce** — khoảng 23/78 permission (~30%)
@@ -296,3 +416,10 @@ nhưng chưa từng được tạo hồ sơ HR (VD: chủ mới nhận qua "Chuy
   đang giữ" role hệ thống dùng chung; tính năng mới "Thành viên công ty"
   (`GET /tenants/{id}/members`, trang riêng ở Web Admin) — gộp toàn bộ người có quyền truy cập
   công ty (owner/admin/HR/giám sát/nhân viên), không chỉ người có hồ sơ HR như màn Employee cũ.
+- **Đã xử lý xong (2026-08-15, mục 10):** Tự khóa vĩnh viễn khi thu hồi role admin cuối cùng —
+  vá cả 2 gốc: safeguard chặn thu hồi (`UserRoleService.assertNotLastAdminHolder`, 409 rõ ràng)
+  và tự phục hồi (`UserRoleService.selfHealOwnerRoles`, gọi ở login/switch-tenant/`GET /roles/me`)
+  cho chủ sở hữu tenant lỡ mất hết role. Đã tái hiện đúng kịch bản gốc bằng Platform Admin
+  force-revoke rồi xác nhận owner tự phục hồi hoàn toàn khi đăng nhập lại, không cần can thiệp
+  DB. #30 (Thu hồi role, `docs/manual-tests/sprint-1-feature-30-revoke-role.md`) nâng từ 🟡 PASS
+  MỘT PHẦN lên ✅ PASS — ĐÃ KHÓA.

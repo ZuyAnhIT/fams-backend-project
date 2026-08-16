@@ -50,6 +50,14 @@ public class EmployeeResponse {
     @Schema(description = "Workspace UUID of type=department (null if not linked to one). See /tenants/{tenantId}/workspaces.")
     private UUID departmentId;
 
+    @Schema(description = "Intended role UUID for this person once invited/linked to a login account "
+            + "(null if none set) — only meaningful while hasEmployeeProfile-style login-less, not a real "
+            + "UserRole assignment.")
+    private UUID plannedRoleId;
+
+    @Schema(description = "Display name of plannedRoleId, for convenience (null if plannedRoleId is null)")
+    private String plannedRoleName;
+
     @Schema(description = "Employment status: active, inactive, terminated")
     private String status;
 

@@ -49,4 +49,8 @@ public class UpdateEmployeeRequest {
 
     @Schema(description = "Workspace UUID of type=department (optional — links employee to an org-chart workspace and syncs the department name field). See /tenants/{tenantId}/workspaces.", example = "3fa85f64-5717-4562-b3fc-2c963f66afa6")
     private UUID departmentId;
+
+    @Schema(description = "Intended role UUID for this person once they're invited/linked to a login account "
+            + "(optional, only meaningful while the profile has no account yet).")
+    private UUID plannedRoleId;
 }

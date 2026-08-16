@@ -20,4 +20,10 @@ public interface TenantRepository extends JpaRepository<Tenant, UUID>, JpaSpecif
     long countByStatusAndDeletedAtIsNull(String status);
 
     List<Tenant> findAllByIdInAndDeletedAtIsNull(Collection<UUID> ids);
+
+    /** Used to self-heal a tenant owner's missing role assignment (see
+     *  UserRoleService#selfHealOwnerRoles) — ownership is a separate, permanent relationship
+     *  from role assignments, so we need to find every tenant a user owns regardless of
+     *  whether they currently hold any active role in it. */
+    List<Tenant> findAllByOwnerIdAndDeletedAtIsNull(UUID ownerId);
 }
