@@ -29,12 +29,26 @@ public class GeofenceResponse {
     @Schema(description = "Buffer distance in metres around the polygon", example = "50")
     private int bufferMeters;
 
+    @Schema(description = "Computed polygon area in square metres. Approximate — derived via an " +
+                          "equirectangular projection at the polygon's mean latitude (shoelace formula), " +
+                          "which is accurate to well under 1% for site-scale boundaries (up to a few km²).",
+            example = "12450.75")
+    private Double areaSqm;
+
+    @Schema(description = "Optional reason provided for this change. Always null for the initial creation " +
+                          "(task 56); may be present on update versions (task 57).")
+    private String changeReason;
+
     @Schema(description = "Status: 'active' (current boundary) or 'superseded' (replaced by a newer version)",
             example = "active")
     private String status;
 
     @Schema(description = "UUID of the user who created this geofence version")
     private UUID createdBy;
+
+    @Schema(description = "Display name of the user who created this geofence version, resolved from " +
+                          "createdBy. Null if the user could not be resolved.")
+    private String createdByName;
 
     @Schema(description = "Creation timestamp")
     private OffsetDateTime createdAt;
