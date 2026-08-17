@@ -675,7 +675,7 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 #### Lịch sử chấm công
 
 - [x] **#77 — Nhân viên xem lịch sử chấm công** `P0` · 3sp · Nền tảng: Backend, Mobile App
-  - *Audit (2026-07-22):* ✅ ĐÃ XONG — bằng chứng: getCheckinHistory, test_checkin_history.sh
+  - *Audit (2026-08-17):* ✅ ĐÃ XONG + VÁ THÊM — thêm UI lọc status/tháng trên App + filter theo site mới (cả 2 tầng, theo quyết định chủ dự án). Test live: `docs/manual-tests/sprint-3-feature-77-employee-checkin-history.md`.
   - *User Story:* Là một nhân viên, tôi muốn xem lịch sử check-in/out theo ngày để tự kiểm tra công của mình.
   - *Acceptance Criteria:* Lọc theo tháng/site/status; hiển thị giờ vào/ra, tổng phút, lỗi; phân trang.
   - *DB Entities:* `checkins, attendance_summaries`
@@ -683,12 +683,12 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 #### Quản lý chấm công
 
 - [x] **#78 — HR xem danh sách check-in** `P0` · 5sp · Nền tảng: Backend, Web Admin
-  - *Audit (2026-07-22):* ✅ ĐÃ XONG — bằng chứng: listCheckins, test_hr_list_checkins.sh
+  - *Audit (2026-08-17):* ✅ ĐÃ XONG, xác nhận qua test live — filter cốt lõi đúng. `invalid_reason`/`source`: quyết định chủ dự án không cần thêm. Test: `docs/manual-tests/sprint-3-feature-78-hr-list-checkins.md`.
   - *User Story:* Là một HR/Admin, tôi muốn xem danh sách check-in/out có tìm kiếm, lọc, sort, phân trang để kiểm soát dữ liệu chấm công.
   - *Acceptance Criteria:* Lọc date, site, employee, status, source, invalid_reason; sort occurred_at; xem ảnh/vị trí nếu có quyền.
   - *DB Entities:* `checkins, tenant_users, sites`
 - [x] **#79 — HR xem chi tiết check-in** `P0` · 3sp · Nền tảng: Backend, Web Admin
-  - *Audit (2026-07-22):* ✅ ĐÃ XONG — bằng chứng: getCheckinDetail, test_hr_checkin_detail.sh
+  - *Audit (2026-08-17):* ✅ ĐÃ XONG + VÁ THÊM — endpoint HR override giờ ghi audit `checkin_overridden` (trước đây thiếu). Không selfie/distance (đúng thiết kế, không sửa). Test: `docs/manual-tests/sprint-3-feature-79-hr-checkin-detail.md`.
   - *User Story:* Là một HR/Admin, tôi muốn xem đầy đủ bằng chứng của một check-in để xử lý tranh chấp và lỗi.
   - *Acceptance Criteria:* Hiển thị GPS, accuracy, geofence, distance, face score, selfie, device, source, pair check-in/out.
   - *DB Entities:* `checkins, site_geofences, face_embeddings`

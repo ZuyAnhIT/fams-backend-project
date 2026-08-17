@@ -109,6 +109,9 @@ giữ nguyên ✅ ĐÃ KHÓA. Đồng thời xác nhận UI "tìm người thao 
 | 74 | Tính work_minutes cho cặp check-in/out | — | ✅ Pass | ✅ **PASS — ĐÃ KHÓA** | 2026-08-17 | 2 gap thật xác nhận (không trừ break; tính cả khi pending_review) — **chủ dự án quyết định giữ nguyên cả 2**, không sửa |
 | 75 | Check-in offline và đồng bộ | — | ✅ Pass | ✅ **PASS — ĐÃ KHÓA** | 2026-08-17 | Audit gốc SAI 2/3 điểm (lệch giờ thiết bị đã có sẵn). **Đã vá thêm**: liveness thụ động cho ảnh offline (cùng #69) + ghi audit `checkin_submitted`. Thiếu test script tự động riêng (không chặn khóa) |
 | 76 | Hiển thị kết quả check-in/out | — | ✅ Pass | ✅ **PASS — ĐÃ KHÓA** | 2026-08-17 | Đúng bản chất AC, lý do hiện qua trường có cấu trúc. Thiếu nút "thử lại" tường minh (nhỏ, không sửa). Script `test_checkin_result.sh` 8/8 pass |
+| 77 | Nhân viên xem lịch sử chấm công | ✅ Pass | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-17 | **2 gap đã vá (quyết định chủ dự án)**: thêm UI lọc status/tháng trên App (backend đã có sẵn) + thêm mới filter theo site (cả backend lẫn App). Test live qua UI thật, xác nhận filter kết hợp đúng kiểu AND |
+| 78 | HR xem danh sách check-in | — | ✅ Pass | ✅ **PASS — ĐÃ KHÓA** | 2026-08-17 | Filter cốt lõi đúng. `invalid_reason`/`source` — **quyết định chủ dự án: không cần thêm**, giữ nguyên |
+| 79 | HR xem chi tiết check-in | — | ✅ Pass | ✅ **PASS — ĐÃ KHÓA** | 2026-08-17 | **Gap đã vá**: endpoint HR override (PATCH .../override) giờ ghi audit `checkin_overridden`. Xác nhận qua DB thật. Đúng phần cốt lõi còn lại (không selfie/distance, đã biết từ trước) |
 
 ---
 

@@ -611,7 +611,7 @@ public class CheckinService {
     public PageResponse<CheckinResponse> getCheckinHistory(UUID tenantId, UUID callerUserId,
                                                             OffsetDateTime from, OffsetDateTime to,
                                                             int page, int size) {
-        return getCheckinHistory(tenantId, callerUserId, null, from, to, page, size);
+        return getCheckinHistory(tenantId, callerUserId, null, null, from, to, page, size);
     }
 
     /** @param status found via audit (2026-08-02) — lets an employee filter their own history to
@@ -619,20 +619,25 @@ public class CheckinService {
      *  employee-facing half of the same "needs my attention" inbox as ViolationService
      *  #listMyViolations (the two are still separate lists, since a checkin and a violation are
      *  genuinely different objects, but both are now at least individually filterable/findable
-     *  instead of the employee having to page through everything). */
+     *  instead of the employee having to page through everything).
+     *  @param siteId #77 gap fix (2026-08-17): an employee working multiple sites had no way to
+     *  narrow their own history down to one — the spec already supported a siteId predicate
+     *  (used by the HR-facing #78 listCheckins), it just wasn't wired into this employee-facing
+     *  overload. Omit to see every site, same as before this fix. */
     @Transactional(readOnly = true)
-    public PageResponse<CheckinResponse> getCheckinHistory(UUID tenantId, UUID callerUserId, String status,
+    public PageResponse<CheckinResponse> getCheckinHistory(UUID tenantId, UUID callerUserId, UUID siteId,
+                                                            String status,
                                                             OffsetDateTime from, OffsetDateTime to,
                                                             int page, int size) {
         Employee employee = resolveEmployee(tenantId, callerUserId);
 
         PageRequest pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "checkInAt"));
         Specification<CheckinRecord> spec =
-                CheckinSpecification.build(tenantId, employee.getId(), null, status, from, to);
+                CheckinSpecification.build(tenantId, employee.getId(), siteId, status, from, to);
         Page<CheckinRecord> resultPage = checkinRepository.findAll(spec, pageable);
 
-        log.info("Check-in history: tenantId={} employeeId={} from={} to={} total={}",
-                tenantId, employee.getId(), from, to, resultPage.getTotalElements());
+        log.info("Check-in history: tenantId={} employeeId={} siteId={} from={} to={} total={}",
+                tenantId, employee.getId(), siteId, from, to, resultPage.getTotalElements());
 
         return toPageResponse(resultPage, toCheckinResponsesBatch(resultPage.getContent()));
     }
@@ -795,6 +800,7 @@ public class CheckinService {
                     "Check-in is already in status '" + request.getStatus() + "' — no change needed");
         }
 
+        String oldStatus = record.getStatus();
         record.setStatus(request.getStatus());
         record.setNote(request.getReason());
         record.setOverriddenBy(callerUserId);
@@ -802,6 +808,10 @@ public class CheckinService {
         checkinRepository.save(record);
 
         log.info("HR override checkin: checkinId={} newStatus={} by={}", checkinId, request.getStatus(), callerUserId);
+        recordAudit(tenantId, callerUserId, record.getId(), "checkin_overridden", java.util.Map.of(
+                "oldStatus", oldStatus,
+                "newStatus", request.getStatus(),
+                "reason", request.getReason()));
 
         attendanceSummaryService.recomputeForCheckin(record);
 

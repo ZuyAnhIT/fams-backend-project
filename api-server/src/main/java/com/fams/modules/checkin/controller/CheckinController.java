@@ -169,7 +169,8 @@ public class CheckinController {
         summary = "Get employee check-in history",
         description = "Returns a paginated list of the authenticated employee's check-in records, " +
                       "sorted newest first. " +
-                      "Optionally filter by date range using 'from' and 'to' (ISO-8601 OffsetDateTime, e.g. 2026-06-01T00:00:00Z). " +
+                      "Optionally filter by site, status, and/or date range using 'from' and 'to' " +
+                      "(ISO-8601 OffsetDateTime, e.g. 2026-06-01T00:00:00Z). " +
                       "Each record includes the human-readable 'message' field. " +
                       "Requires checkins:read permission."
     )
@@ -188,6 +189,9 @@ public class CheckinController {
     @GetMapping("/history")
     public ResponseEntity<ApiResponse<PageResponse<CheckinResponse>>> getCheckinHistory(
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
+            @Parameter(description = "Filter by site UUID — an employee working multiple sites can "
+                    + "narrow their history down to one")
+                @RequestParam(required = false) UUID siteId,
             @Parameter(description = "Filter by status (e.g. pass status=pending_review to see only "
                     + "check-ins currently needing an explanation)")
                 @RequestParam(required = false) String status,
@@ -201,10 +205,10 @@ public class CheckinController {
                 @RequestParam(defaultValue = "20") int size,
             @AuthenticationPrincipal FamsUserDetails userDetails) {
         size = Math.min(size, 100);
-        log.info("Check-in history tenantId={} userId={} status={} from={} to={} page={} size={}",
-                tenantId, userDetails.getUserId(), status, from, to, page, size);
-        PageResponse<CheckinResponse> result =
-                checkinService.getCheckinHistory(tenantId, userDetails.getUserId(), status, from, to, page, size);
+        log.info("Check-in history tenantId={} userId={} siteId={} status={} from={} to={} page={} size={}",
+                tenantId, userDetails.getUserId(), siteId, status, from, to, page, size);
+        PageResponse<CheckinResponse> result = checkinService.getCheckinHistory(
+                tenantId, userDetails.getUserId(), siteId, status, from, to, page, size);
         return ResponseEntity.ok(ApiResponse.success(result));
     }
 
