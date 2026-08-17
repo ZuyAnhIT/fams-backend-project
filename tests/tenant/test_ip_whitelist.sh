@@ -69,7 +69,7 @@ add_response=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/tenants/$TENANT_ID/ip-whitelists" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d '{"ipAddress":"192.168.1.140","label":"Office IP","applicableRoleNames":["TENANT_ADMIN"]}')
+    -d '{"ipAddress":"192.168.1.130","label":"Office IP","applicableRoleNames":["TENANT_ADMIN"]}')
 add_body=$(echo "$add_response" | head -n -1)
 add_status=$(echo "$add_response" | tail -n 1)
 
@@ -77,7 +77,7 @@ if [ "$add_status" -eq 201 ]; then
     ENTRY_ID=$(echo "$add_body" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
     ip=$(echo "$add_body" | grep -o '"ipAddress":"[^"]*"' | cut -d'"' -f4)
     has_role=$(echo "$add_body" | grep -c '"TENANT_ADMIN"' || true)
-    if [ "$ip" = "192.168.1.140" ] && [ "$has_role" -ge 1 ] && [ -n "$ENTRY_ID" ]; then
+    if [ "$ip" = "192.168.1.130" ] && [ "$has_role" -ge 1 ] && [ -n "$ENTRY_ID" ]; then
         echo "PASS: Add IPv4 entry (HTTP 201, id=$ENTRY_ID ip=$ip applicableRoleNames=[TENANT_ADMIN])"
         PASS=$((PASS + 1))
     else

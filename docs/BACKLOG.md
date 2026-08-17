@@ -518,22 +518,26 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 
 #### Công trình
 
-- [ ] **#52 — Tạo công trình** `P0` · 5sp · Nền tảng: Backend, Web Admin
+- [x] **#52 — Tạo công trình** `P0` · 5sp · Nền tảng: Backend, Web Admin
+  - ✅ **Test tay thật — PASS, ĐÃ KHÓA (2026-08-16):** xem `docs/manual-tests/sprint-2-feature-52-create-site.md` — province/workspace là gap kiến trúc (không sửa); supervisor làm qua Assignment riêng, không thiếu hẳn; plan limit hoạt động đúng; **gap đã vá**: ghi audit `site_created`.
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: SiteService.createSite, test_create_site.sh; thiếu: không có trường province, không liên kết workspace/supervisor
   - *User Story:* Là một HR/Admin, tôi muốn tạo site/công trình mới để quản lý địa điểm chấm công.
   - *Acceptance Criteria:* Nhập code/name/address/province/center; code không trùng; kiểm tra plan limit max_sites; gán workspace/supervisor.
   - *DB Entities:* `sites, workspaces, tenant_users, plan_limits, audit_logs`
-- [ ] **#53 — Danh sách công trình** `P0` · 3sp · Nền tảng: Backend, Web Admin, Mobile App
+- [x] **#53 — Danh sách công trình** `P0` · 3sp · Nền tảng: Backend, Web Admin, Mobile App
+  - ✅ **Test tay thật — PASS, ĐÃ KHÓA (2026-08-16):** xem `docs/manual-tests/sprint-2-feature-53-list-sites.md` — filter province/workspace, sort start_date là gap kiến trúc (không sửa); site-scope filter cho SITE_SUPERVISOR hoạt động đúng.
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: SiteService.listSites, test_list_sites.sh; thiếu: thiếu filter province/workspace (trường không tồn tại)
   - *User Story:* Là một HR/Admin, tôi muốn xem công trình có tìm kiếm, lọc, sort, phân trang để quản lý nhiều site dễ dàng.
   - *Acceptance Criteria:* Tìm theo code/name/address; lọc status/province/workspace; sort start_date; phân trang.
   - *DB Entities:* `sites, workspaces`
-- [ ] **#54 — Xem chi tiết công trình** `P0` · 3sp · Nền tảng: Backend, Web Admin, Mobile App
+- [x] **#54 — Xem chi tiết công trình** `P0` · 3sp · Nền tảng: Backend, Web Admin, Mobile App
+  - ✅ **Test tay thật — PASS, ĐÃ KHÓA (2026-08-16):** xem `docs/manual-tests/sprint-2-feature-54-site-detail.md` — **gap đã vá**: supervisor giờ hiện ngay ở card chính (field `supervisors` mới lấy từ Assignment); site-scope 403 hoạt động đúng.
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: SiteService.getSiteDetail, test_get_site_detail.sh; thiếu: không hiển thị supervisor (Site không có trường này)
   - *User Story:* Là một HR/Admin/Supervisor, tôi muốn xem thông tin site, geofence, ca, nhân viên đang phân công để theo dõi vận hành công trình.
   - *Acceptance Criteria:* Hiển thị site detail; bản đồ tâm; geofence active; shift default; assignment active; supervisor.
   - *DB Entities:* `sites, site_geofences, shift_templates, assignments`
-- [ ] **#55 — Cập nhật công trình** `P0` · 3sp · Nền tảng: Backend, Web Admin
+- [x] **#55 — Cập nhật công trình** `P0` · 3sp · Nền tảng: Backend, Web Admin
+  - ✅ **Test tay thật — PASS, ĐÃ KHÓA (2026-08-16):** xem `docs/manual-tests/sprint-2-feature-55-update-site.md` — supervisor không sửa qua form này (đúng kiến trúc); gap "validate status yếu" xác nhận là nghiên cứu sai (đã có @Pattern từ trước); **gap thật đã vá**: ghi audit `site_updated`.
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: SiteService.updateSite, test_update_site.sh; thiếu: không có trường supervisor để cập nhật
   - *User Story:* Là một HR/Admin, tôi muốn sửa thông tin công trình để đảm bảo dữ liệu công trình chính xác.
   - *Acceptance Criteria:* Cập nhật name/address/status/supervisor; validate status; ghi audit.

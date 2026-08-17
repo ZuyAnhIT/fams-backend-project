@@ -48,6 +48,9 @@ public class SiteService {
     private final AssignmentService assignmentService;
     private final PlanLimitEnforcementService planLimitEnforcementService;
     private final RandomCheckConfigRepository randomCheckConfigRepository;
+    private final com.fams.modules.audit.service.AuditLogService auditLogService;
+
+    private static final Set<String> VALID_STATUSES = Set.of("active", "inactive");
 
     public SiteService(SiteRepository siteRepository,
                        TenantRepository tenantRepository,
@@ -57,7 +60,8 @@ public class SiteService {
                        ShiftService shiftService,
                        AssignmentService assignmentService,
                        PlanLimitEnforcementService planLimitEnforcementService,
-                       RandomCheckConfigRepository randomCheckConfigRepository) {
+                       RandomCheckConfigRepository randomCheckConfigRepository,
+                       com.fams.modules.audit.service.AuditLogService auditLogService) {
         this.siteRepository = siteRepository;
         this.tenantRepository = tenantRepository;
         this.userRoleRepository = userRoleRepository;
@@ -67,6 +71,44 @@ public class SiteService {
         this.assignmentService = assignmentService;
         this.planLimitEnforcementService = planLimitEnforcementService;
         this.randomCheckConfigRepository = randomCheckConfigRepository;
+        this.auditLogService = auditLogService;
+    }
+
+    private java.util.Map<String, Object> siteAuditSnapshot(Site s) {
+        java.util.Map<String, Object> m = new java.util.HashMap<>();
+        m.put("name", s.getName());
+        m.put("code", s.getCode());
+        m.put("address", s.getAddress());
+        m.put("status", s.getStatus());
+        m.put("checkinPolicy", s.getCheckinPolicy());
+        m.put("timezone", s.getTimezone());
+        return m;
+    }
+
+    private void recordAudit(UUID tenantId, UUID actorId, UUID siteId, String action,
+                              java.util.Map<String, Object> before, java.util.Map<String, Object> after) {
+        try {
+            auditLogService.record(
+                    tenantId, actorId, null,
+                    "Site", siteId.toString(), action,
+                    before, after,
+                    com.fams.shared.security.HttpRequestUtils.currentRequestId(),
+                    com.fams.shared.security.HttpRequestUtils.currentIpAddress(),
+                    com.fams.shared.security.HttpRequestUtils.currentUserAgent());
+        } catch (Exception e) {
+            log.warn("Failed to record audit log action={} siteId={}: {}", action, siteId, e.getMessage());
+        }
+    }
+
+    /** #55 gap fix: status previously had no application-level whitelist — relied solely on the
+     *  DB CHECK constraint, so an invalid value sent directly via API (bypassing the Web Admin's
+     *  fixed dropdown) would surface as a raw DataIntegrityViolationException / 500 instead of a
+     *  clean 400. */
+    private void validateStatus(String status) {
+        if (!VALID_STATUSES.contains(status)) {
+            throw new IllegalArgumentException(
+                    "status must be one of " + VALID_STATUSES + ", got '" + status + "'");
+        }
     }
 
     @Transactional
@@ -123,6 +165,7 @@ public class SiteService {
 
         siteRepository.save(site);
         log.info("Site created: id={} tenantId={} by={}", site.getId(), tenantId, callerUserId);
+        recordAudit(tenantId, callerUserId, site.getId(), "site_created", null, siteAuditSnapshot(site));
         return toResponse(site);
     }
 
@@ -178,6 +221,8 @@ public class SiteService {
         Site site = siteRepository.findByIdAndTenantIdAndDeletedAtIsNull(siteId, tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Site not found: " + siteId));
 
+        java.util.Map<String, Object> before = siteAuditSnapshot(site);
+
         if (StringUtils.hasText(request.getName())) {
             String newName = request.getName().trim();
             if (!newName.equalsIgnoreCase(site.getName())
@@ -215,7 +260,11 @@ public class SiteService {
             validateTimezone(newTimezone);
             site.setTimezone(newTimezone);
         }
-        if (StringUtils.hasText(request.getStatus()))   site.setStatus(request.getStatus());
+        if (StringUtils.hasText(request.getStatus())) {
+            String newStatus = request.getStatus().trim();
+            validateStatus(newStatus);
+            site.setStatus(newStatus);
+        }
         if (StringUtils.hasText(request.getCheckinPolicy())) {
             String newPolicy = request.getCheckinPolicy().trim();
             validateCheckinPolicy(newPolicy);
@@ -224,6 +273,7 @@ public class SiteService {
 
         siteRepository.save(site);
         log.info("Site updated: id={} tenantId={} by={}", siteId, tenantId, callerUserId);
+        recordAudit(tenantId, callerUserId, site.getId(), "site_updated", before, siteAuditSnapshot(site));
         return toResponse(site);
     }
 
@@ -287,6 +337,13 @@ public class SiteService {
                 .geofence(geofenceService.findActiveGeofenceForSite(site.getId()).orElse(null))
                 .shifts(shiftService.findActiveShiftsForSite(site.getId()))
                 .activeAssignmentCount((int) assignmentService.countActiveAssignmentsForSite(site.getId()))
+                .supervisors(assignmentService.getActiveSupervisorEmployeesForSite(tenantId, site.getId()).stream()
+                        .map(e -> SiteDetailResponse.SupervisorSummary.builder()
+                                .id(e.getId())
+                                .employeeCode(e.getEmployeeCode())
+                                .fullName((e.getFirstName() + " " + e.getLastName()).trim())
+                                .build())
+                        .toList())
                 .createdAt(site.getCreatedAt())
                 .updatedAt(site.getUpdatedAt())
                 .build();
