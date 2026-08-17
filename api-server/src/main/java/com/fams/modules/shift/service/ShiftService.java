@@ -1,5 +1,6 @@
 package com.fams.modules.shift.service;
 
+import com.fams.modules.audit.service.AuditLogService;
 import com.fams.modules.rbac.repository.UserRoleRepository;
 import com.fams.modules.shift.dto.request.ConfigureShiftOtRequest;
 import com.fams.modules.shift.dto.request.CreateShiftRequest;
@@ -7,12 +8,14 @@ import com.fams.modules.shift.dto.request.UpdateShiftRequest;
 import com.fams.modules.shift.dto.response.ShiftResponse;
 import com.fams.modules.shift.entity.Shift;
 import com.fams.modules.shift.repository.ShiftRepository;
+import com.fams.modules.shift.specification.ShiftSpecification;
 import com.fams.modules.assignment.repository.AssignmentRepository;
 import com.fams.modules.site.repository.SiteRepository;
 import com.fams.modules.tenant.repository.TenantRepository;
 import com.fams.shared.exception.DuplicateResourceException;
 import com.fams.shared.exception.ResourceNotFoundException;
 import com.fams.shared.pagination.PageResponse;
+import com.fams.shared.security.HttpRequestUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -24,6 +27,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -38,17 +42,60 @@ public class ShiftService {
     private final TenantRepository tenantRepository;
     private final UserRoleRepository userRoleRepository;
     private final AssignmentRepository assignmentRepository;
+    private final AuditLogService auditLogService;
 
     public ShiftService(ShiftRepository shiftRepository,
                         SiteRepository siteRepository,
                         TenantRepository tenantRepository,
                         UserRoleRepository userRoleRepository,
-                        AssignmentRepository assignmentRepository) {
+                        AssignmentRepository assignmentRepository,
+                        AuditLogService auditLogService) {
         this.shiftRepository = shiftRepository;
         this.siteRepository = siteRepository;
         this.tenantRepository = tenantRepository;
         this.userRoleRepository = userRoleRepository;
         this.assignmentRepository = assignmentRepository;
+        this.auditLogService = auditLogService;
+    }
+
+    private void clearExistingDefaultShift(UUID siteId) {
+        shiftRepository.findBySiteIdAndIsDefaultTrueAndDeletedAtIsNull(siteId)
+                .ifPresent(existing -> {
+                    existing.setDefault(false);
+                    shiftRepository.saveAndFlush(existing);
+                });
+    }
+
+    private Map<String, Object> shiftAuditSnapshot(Shift s) {
+        Map<String, Object> map = new LinkedHashMap<>();
+        map.put("siteId", s.getSiteId());
+        map.put("name", s.getName());
+        map.put("startTime", String.valueOf(s.getStartTime()));
+        map.put("endTime", String.valueOf(s.getEndTime()));
+        map.put("allowOvernight", s.isAllowOvernight());
+        map.put("allowOvertime", s.isAllowOvertime());
+        map.put("earlyCheckinMinutes", s.getEarlyCheckinMinutes());
+        map.put("lateCheckoutMinutes", s.getLateCheckoutMinutes());
+        map.put("maxOtMinutesPerDay", s.getMaxOtMinutesPerDay());
+        map.put("maxOtMinutesPerWeek", s.getMaxOtMinutesPerWeek());
+        map.put("status", s.getStatus());
+        map.put("isDefault", s.isDefault());
+        return map;
+    }
+
+    private void recordAudit(UUID tenantId, UUID actorId, UUID shiftId, String action,
+                              Map<String, Object> before, Map<String, Object> after) {
+        try {
+            auditLogService.record(
+                    tenantId, actorId, null,
+                    "Shift", shiftId.toString(), action,
+                    before, after,
+                    HttpRequestUtils.currentRequestId(),
+                    HttpRequestUtils.currentIpAddress(),
+                    HttpRequestUtils.currentUserAgent());
+        } catch (Exception e) {
+            log.warn("Failed to record audit log action={} shiftId={}: {}", action, shiftId, e.getMessage());
+        }
     }
 
     @Transactional
@@ -81,6 +128,10 @@ public class ShiftService {
             validateCheckinPolicy(request.getCheckinPolicyOverride());
         }
 
+        if (request.isDefaultShift()) {
+            clearExistingDefaultShift(siteId);
+        }
+
         Shift shift = Shift.builder()
                 .siteId(siteId)
                 .tenantId(tenantId)
@@ -90,11 +141,13 @@ public class ShiftService {
                 .allowOvernight(request.isAllowOvernight())
                 .status("active")
                 .checkinPolicyOverride(request.getCheckinPolicyOverride())
+                .isDefault(request.isDefaultShift())
                 .createdBy(callerUserId)
                 .build();
 
         shiftRepository.save(shift);
         log.info("Shift created: id={} siteId={} tenantId={} by={}", shift.getId(), siteId, tenantId, callerUserId);
+        recordAudit(tenantId, callerUserId, shift.getId(), "shift_created", null, shiftAuditSnapshot(shift));
         return toResponse(shift);
     }
 
@@ -131,6 +184,8 @@ public class ShiftService {
                     + "must be provided");
         }
 
+        Map<String, Object> before = shiftAuditSnapshot(shift);
+
         if (request.getAllowOvertime() != null)       shift.setAllowOvertime(request.getAllowOvertime());
         if (request.getEarlyCheckinMinutes() != null) shift.setEarlyCheckinMinutes(request.getEarlyCheckinMinutes());
         if (request.getLateCheckoutMinutes() != null) shift.setLateCheckoutMinutes(request.getLateCheckoutMinutes());
@@ -151,6 +206,7 @@ public class ShiftService {
 
         shiftRepository.save(shift);
         log.info("Shift OT configured: shiftId={} siteId={} tenantId={} by={}", shiftId, siteId, tenantId, callerUserId);
+        recordAudit(tenantId, callerUserId, shiftId, "shift_ot_configured", before, shiftAuditSnapshot(shift));
         return toResponse(shift);
     }
 
@@ -176,6 +232,8 @@ public class ShiftService {
         Shift shift = shiftRepository.findByIdAndSiteIdAndTenantIdAndDeletedAtIsNull(shiftId, siteId, tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Shift not found: " + shiftId));
 
+        Map<String, Object> before = shiftAuditSnapshot(shift);
+
         if (StringUtils.hasText(request.getName())) {
             String newName = request.getName().trim();
             if (!newName.equalsIgnoreCase(shift.getName())
@@ -198,10 +256,18 @@ public class ShiftService {
             shift.setCheckinPolicyOverride(request.getCheckinPolicyOverride());
         }
 
+        if (request.getDefaultShift() != null) {
+            if (request.getDefaultShift() && !shift.isDefault()) {
+                clearExistingDefaultShift(siteId);
+            }
+            shift.setDefault(request.getDefaultShift());
+        }
+
         validateShiftTimes(shift.getStartTime(), shift.getEndTime(), shift.isAllowOvernight());
 
         shiftRepository.save(shift);
         log.info("Shift updated: id={} siteId={} tenantId={} by={}", shiftId, siteId, tenantId, callerUserId);
+        recordAudit(tenantId, callerUserId, shiftId, "shift_updated", before, shiftAuditSnapshot(shift));
         return toResponse(shift);
     }
 
@@ -233,7 +299,8 @@ public class ShiftService {
 
     @Transactional(readOnly = true)
     public PageResponse<ShiftResponse> listShifts(UUID tenantId, UUID siteId,
-                                                  String status, int page, int size,
+                                                  String status, String search, Boolean isDefault,
+                                                  int page, int size,
                                                   UUID callerUserId, boolean callerIsPlatformAdmin) {
         tenantRepository.findByIdAndDeletedAtIsNull(tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Tenant not found: " + tenantId));
@@ -251,9 +318,8 @@ public class ShiftService {
                 .orElseThrow(() -> new ResourceNotFoundException("Site not found: " + siteId));
 
         Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.ASC, "startTime"));
-        Page<Shift> resultPage = StringUtils.hasText(status)
-                ? shiftRepository.findBySiteIdAndTenantIdAndStatusAndDeletedAtIsNull(siteId, tenantId, status, pageable)
-                : shiftRepository.findBySiteIdAndTenantIdAndDeletedAtIsNull(siteId, tenantId, pageable);
+        Page<Shift> resultPage = shiftRepository.findAll(
+                ShiftSpecification.build(siteId, tenantId, status, isDefault, search), pageable);
 
         List<UUID> shiftIds = resultPage.getContent().stream().map(Shift::getId).toList();
         Map<UUID, Long> historyCounts = new HashMap<>();
@@ -297,9 +363,11 @@ public class ShiftService {
                             + "deleted — use deactivate instead to preserve history");
         }
 
+        Map<String, Object> before = shiftAuditSnapshot(shift);
         shift.setDeletedAt(java.time.OffsetDateTime.now());
         shiftRepository.save(shift);
         log.info("Shift deleted: id={} siteId={} tenantId={} by={}", shiftId, siteId, tenantId, callerUserId);
+        recordAudit(tenantId, callerUserId, shiftId, "shift_deleted", before, null);
     }
 
     @Transactional(readOnly = true)
@@ -330,6 +398,7 @@ public class ShiftService {
                 .maxOtMinutesPerDay(s.getMaxOtMinutesPerDay())
                 .maxOtMinutesPerWeek(s.getMaxOtMinutesPerWeek())
                 .status(s.getStatus())
+                .defaultShift(s.isDefault())
                 .checkinPolicyOverride(s.getCheckinPolicyOverride())
                 .assignmentHistoryCount(assignmentHistoryCount)
                 .canDelete(assignmentHistoryCount == 0)

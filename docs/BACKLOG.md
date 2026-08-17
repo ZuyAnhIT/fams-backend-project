@@ -567,23 +567,23 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 
 #### Ca làm việc
 
-- [ ] **#59 — Tạo ca làm việc** `P0` · 5sp · Nền tảng: Backend, Web Admin
-  - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: ShiftService.createShift, test_create_shift.sh; thiếu: model giờ đơn giản (không JSON schedule), không có cờ default/standard_hours
+- [x] **#59 — Tạo ca làm việc** `P0` · 5sp · Nền tảng: Backend, Web Admin
+  - *Audit (2026-08-17):* ✅ ĐÃ VÁ — thêm `is_default` (migration V99, unique 1 mặc định/site) + audit `shift_created`. code/standard_hours/JSON-schedule là khác biệt kiến trúc có chủ đích, không sửa. Test live: `docs/manual-tests/sprint-2-feature-59-create-shift.md`.
   - *User Story:* Là một HR/Admin, tôi muốn tạo shift template cho site để áp dụng giờ làm chuẩn cho nhân viên.
   - *Acceptance Criteria:* Nhập code/name/schedule/grace/standard_hours; validate JSON schedule; có thể đặt default.
   - *DB Entities:* `shift_templates, sites, audit_logs`
 - [x] **#60 — Cấu hình OT và giới hạn giờ** `P0` · 5sp · Nền tảng: Backend, Web Admin
-  - *Audit (2026-07-22):* ✅ ĐÃ XONG — bằng chứng: ShiftService.configureOt, test_shift_ot_config.sh
+  - *Audit (2026-08-17):* ✅ ĐÃ XONG + VÁ THÊM — audit gốc đúng, đã mở rộng OT ngày/tuần từ trước; thêm audit `shift_ot_configured`. Test live: `docs/manual-tests/sprint-2-feature-60-shift-ot-config.md`.
   - *User Story:* Là một HR/Admin, tôi muốn thiết lập allow_overtime, early_checkin_minutes, late_checkout_minutes để tính công đúng policy.
   - *Acceptance Criteria:* Bật/tắt OT; nhập phút check-in sớm/check-out muộn; áp dụng khi check-in/out và tính attendance.
   - *DB Entities:* `shift_templates, checkins, attendance_summaries`
-- [ ] **#61 — Danh sách ca theo site** `P0` · 3sp · Nền tảng: Backend, Web Admin
-  - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: ShiftService.listShifts, test_list_shifts.sh; thiếu: không tìm theo tên/mã, không có khái niệm 'default'
+- [x] **#61 — Danh sách ca theo site** `P0` · 3sp · Nền tảng: Backend, Web Admin
+  - *Audit (2026-08-17):* ✅ ĐÃ VÁ — thêm tìm theo tên (`search`) + lọc `isDefault`, dùng `JpaSpecificationExecutor` (Criteria API) sau khi JPQL `CAST(:param)` gây lỗi cast bytea trên tham số null. Test live: `docs/manual-tests/sprint-2-feature-61-list-shifts.md`.
   - *User Story:* Là một HR/Admin, tôi muốn xem ca làm việc của công trình để quản lý lịch làm việc.
   - *Acceptance Criteria:* Tìm theo code/name; lọc active/default; sort; chỉ một ca default active mỗi site.
   - *DB Entities:* `shift_templates`
 - [x] **#62 — Cập nhật hoặc ngừng dùng ca** `P0` · 3sp · Nền tảng: Backend, Web Admin
-  - *Audit (2026-07-22):* ✅ ĐÃ XONG — bằng chứng: ShiftService.updateShift, test_update_shift.sh; thiếu: không có endpoint xóa cứng nên lịch sử luôn được giữ
+  - *Audit (2026-08-17):* ✅ ĐÃ XONG + VÁ THÊM — audit gốc "không có endpoint xóa cứng" xác nhận LỖI THỜI (endpoint có thật, chặn đúng điều kiện); thêm audit `shift_updated`/`shift_deleted`. Test live: `docs/manual-tests/sprint-2-feature-62-update-deactivate-shift.md`.
   - *User Story:* Là một HR/Admin, tôi muốn sửa hoặc deactivate shift template để thay đổi giờ làm không mất lịch sử.
   - *Acceptance Criteria:* Không xóa ca đã được assignment dùng; deactivate ca cũ; ghi audit.
   - *DB Entities:* `shift_templates, assignments, audit_logs`

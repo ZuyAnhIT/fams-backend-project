@@ -76,7 +76,8 @@ public class ShiftController {
     @Operation(
         summary = "List shift templates",
         description = "Returns a paginated list of shift templates for a site, ordered by start time ascending. " +
-                      "Optionally filter by status (active | inactive). " +
+                      "Optionally filter by status (active | inactive), by isDefault, and/or search by name " +
+                      "(case-insensitive substring match). " +
                       "Requires shifts:list permission."
     )
     @ApiResponses({
@@ -95,12 +96,14 @@ public class ShiftController {
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
             @Parameter(description = "Site UUID")   @PathVariable UUID siteId,
             @Parameter(description = "Filter by status: active | inactive") @RequestParam(required = false) String status,
+            @Parameter(description = "Search by shift name (case-insensitive substring match)") @RequestParam(required = false) String search,
+            @Parameter(description = "Filter by whether the shift is the site's default") @RequestParam(required = false) Boolean isDefault,
             @Parameter(description = "Page index (0-based)") @RequestParam(defaultValue = "0") @Min(0) int page,
             @Parameter(description = "Page size") @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size,
             @AuthenticationPrincipal FamsUserDetails userDetails) {
         log.info("List shifts siteId={} tenantId={} by={}", siteId, tenantId, userDetails.getUserId());
         PageResponse<ShiftResponse> response = shiftService.listShifts(
-                tenantId, siteId, status, page, size, userDetails.getUserId(), userDetails.isPlatformAdmin());
+                tenantId, siteId, status, search, isDefault, page, size, userDetails.getUserId(), userDetails.isPlatformAdmin());
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 

@@ -1,6 +1,7 @@
 package com.fams.modules.shift.dto.request;
 
 import com.fasterxml.jackson.annotation.JsonFormat;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
@@ -42,4 +43,10 @@ public class UpdateShiftRequest {
 
     @Schema(description = "Set to true to explicitly clear the override and inherit the site's policy again")
     private boolean clearCheckinPolicyOverride;
+
+    // See CreateShiftRequest for why this isn't named isDefault directly.
+    @JsonProperty("isDefault")
+    @Schema(description = "Set as the default shift for this site (clears the previous default, if any) "
+            + "or unset it. Omit to leave unchanged.", nullable = true)
+    private Boolean defaultShift;
 }

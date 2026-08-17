@@ -1,6 +1,7 @@
 package com.fams.modules.shift.dto.request;
 
 import com.fasterxml.jackson.annotation.JsonFormat;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -37,4 +38,14 @@ public class CreateShiftRequest {
             + "site). Omit/null to inherit the site's policy.", nullable = true,
             allowableValues = {"gps_only", "gps_face", "gps_face_liveness"})
     private String checkinPolicyOverride;
+
+    // Field deliberately NOT named isDefault: Lombok's accessor generation for a boolean field
+    // already prefixed with "is" produces getter isDefault()/setter setDefault() — two DIFFERENT
+    // property names by Jackson's own convention, so a request body's "isDefault" would silently
+    // fail to bind. @JsonProperty pins the wire name explicitly (same pattern as SavedFilter).
+    @JsonProperty("isDefault")
+    @Schema(description = "Set as the default shift for this site — pre-selected when creating an "
+            + "assignment. Setting true clears the previous default, if any. Purely advisory, does "
+            + "not affect check-in/check-out behavior.", example = "false", defaultValue = "false")
+    private boolean defaultShift = false;
 }
