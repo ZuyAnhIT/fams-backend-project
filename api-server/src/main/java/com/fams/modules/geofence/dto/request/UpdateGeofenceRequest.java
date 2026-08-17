@@ -26,4 +26,13 @@ public class UpdateGeofenceRequest {
             example = "100")
     @Min(value = 0, message = "bufferMeters must be 0 or greater")
     private Integer bufferMeters;
+
+    @Schema(
+        description = "Optional free-text reason for this change (e.g. why the polygon or buffer was " +
+                      "redrawn). Recommended for large boundary changes so the history timeline stays " +
+                      "auditable, but not enforced as mandatory.",
+        example = "Điều chỉnh theo ranh giới thực tế đo đạc lại"
+    )
+    @Size(max = 500, message = "changeReason must be at most 500 characters")
+    private String changeReason;
 }

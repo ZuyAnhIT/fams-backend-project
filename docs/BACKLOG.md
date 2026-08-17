@@ -547,18 +547,18 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 
 #### Geofence
 
-- [ ] **#56 — Tạo geofence cho công trình** `P0` · 8sp · Nền tảng: Backend, Web Admin
-  - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: GeofenceService.createGeofence, test_create_geofence.sh; thiếu: không tính area_sqm
+- [x] **#56 — Tạo geofence cho công trình** `P0` · 8sp · Nền tảng: Backend, Web Admin
+  - *Audit (2026-08-17):* ✅ ĐÃ VÁ — `area_sqm` tính qua shoelace/equirectangular (migration V98) + ghi audit `geofence_created`. Bảng `geofence_histories` riêng không tồn tại — xác nhận là kiến trúc versioning có chủ đích trong bảng `geofences`, không phải thiếu sót. Test live: `docs/manual-tests/sprint-2-feature-56-create-geofence.md`.
   - *User Story:* Là một HR/Admin, tôi muốn vẽ vùng geofence trên bản đồ để xác định khu vực check-in hợp lệ.
   - *Acceptance Criteria:* Vẽ polygon hợp lệ; nhập buffer; tính area_sqm; chỉ một/multiple geofence active theo policy; ghi history created.
   - *DB Entities:* `site_geofences, geofence_histories, audit_logs`
-- [ ] **#57 — Sửa geofence** `P0` · 8sp · Nền tảng: Backend, Web Admin
-  - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: GeofenceService.updateGeofence, test_update_geofence.sh; thiếu: không bắt buộc change_reason, không tính area
+- [x] **#57 — Sửa geofence** `P0` · 8sp · Nền tảng: Backend, Web Admin
+  - *Audit (2026-08-17):* ✅ ĐÃ VÁ — `changeReason` thêm dưới dạng TÙY CHỌN (không bắt buộc — quyết định nghiệp vụ, theo tiền lệ #51) + tính lại area mỗi lần sửa + ghi audit `geofence_updated` với old/new snapshot đầy đủ. Test live: `docs/manual-tests/sprint-2-feature-57-update-geofence.md`.
   - *User Story:* Là một HR/Admin, tôi muốn cập nhật polygon hoặc buffer để phản ánh ranh giới công trình thực tế.
   - *Acceptance Criteria:* Lưu old/new polygon, buffer, area; bắt buộc change_reason khi thay đổi lớn; ghi audit và history.
   - *DB Entities:* `site_geofences, geofence_histories, audit_logs`
-- [ ] **#58 — Xem lịch sử geofence** `P1` · 3sp · Nền tảng: Backend, Web Admin
-  - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: GeofenceService.listGeofenceHistory, test_geofence_history.sh; thiếu: lịch sử là versioning trong bảng geofences (không phải bảng geofence_histories riêng); thiếu change_type/diff diện tích
+- [x] **#58 — Xem lịch sử geofence** `P1` · 3sp · Nền tảng: Backend, Web Admin
+  - *Audit (2026-08-17):* ✅ ĐÃ VÁ — `changed_by` giờ resolve ra tên thật (`createdByName` qua UserRepository) thay vì UUID thô — gap quan trọng nhất, ảnh hưởng trực tiếp khả năng audit. `area_sqm` cũ/mới xem được qua so sánh các dòng lịch sử (nhờ #56/#57). `change_type` tường minh cố ý KHÔNG làm (lý do trong kịch bản test). Versioning trong bảng `geofences` xác nhận là thiết kế có chủ đích. Test live: `docs/manual-tests/sprint-2-feature-58-geofence-history.md`.
   - *User Story:* Là một HR/Admin, tôi muốn xem timeline thay đổi geofence để audit tranh chấp vị trí.
   - *Acceptance Criteria:* Hiển thị change_type, changed_by, changed_at, reason, diện tích cũ/mới; xem trên bản đồ nếu có.
   - *DB Entities:* `geofence_histories, site_geofences, users`

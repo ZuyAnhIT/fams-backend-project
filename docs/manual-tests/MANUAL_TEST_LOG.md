@@ -88,6 +88,9 @@ giữ nguyên ✅ ĐÃ KHÓA. Đồng thời xác nhận UI "tìm người thao 
 | 53 | Danh sách công trình | ✅ Pass | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-16 | Filter province/workspace, sort start_date là gap kiến trúc (không sửa); site-scope filter cho SITE_SUPERVISOR hoạt động đúng (xác nhận qua code) |
 | 54 | Xem chi tiết công trình | ✅ Pass | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-16 | **Gap đã vá**: supervisor giờ hiện ngay ở card chính (field `supervisors` mới, lấy từ Assignment); site-scope 403 hoạt động đúng |
 | 55 | Cập nhật công trình | ✅ Pass | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-16 | Supervisor không sửa qua form này (đúng kiến trúc); gap "validate status yếu" xác nhận là NGHIÊN CỨU SAI (đã có @Pattern từ trước); **gap thật đã vá**: ghi audit `site_updated` |
+| 56 | Tạo geofence cho công trình | ✅ Pass | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-17 | **Gap đã vá**: tính `area_sqm` (shoelace + equirectangular tại vĩ độ trung bình, migration V98) + ghi audit `geofence_created`; versioning trong bảng `geofences` (không có bảng history riêng) xác nhận là thiết kế có chủ đích |
+| 57 | Sửa geofence | ✅ Pass | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-17 | **Gap đã vá**: `change_reason` (tùy chọn, không bắt buộc — theo tiền lệ #51) + tính lại area mỗi lần sửa + ghi audit `geofence_updated` với old/new snapshot đầy đủ kèm changeReason |
+| 58 | Xem lịch sử geofence | ✅ Pass | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-17 | **Gap quan trọng nhất đã vá**: `changed_by` giờ hiện tên thật (`createdByName`, resolve qua UserRepository, batch-load tránh N+1) thay vì UUID thô; `change_type` tường minh cố ý KHÔNG làm (đã ghi rõ lý do trong kịch bản) |
 
 ---
 
@@ -582,6 +585,40 @@ giữ nguyên ✅ ĐÃ KHÓA. Đồng thời xác nhận UI "tìm người thao 
   `auditLogService.record(...)`, action `site_updated` với before/after. Test live: sửa mô tả site
   → `audit_logs` có đúng bản ghi `site_updated`. Bài học ghi lại trong kịch bản: luôn test live để
   xác nhận trước khi kết luận gap, không chỉ dựa vào đọc code tĩnh.
+
+### #56 — Tạo geofence cho công trình — ✅ PASS — ĐÃ KHÓA (2026-08-17)
+- Kịch bản: `docs/manual-tests/sprint-2-feature-56-create-geofence.md`. **Gap `area_sqm` đã vá**:
+  migration `V98__geofence_area_change_reason.sql` thêm cột `area_sqm DOUBLE PRECISION`,
+  `GeofenceService.computeAreaSqm()` tính bằng công thức shoelace trên hệ tọa độ phẳng quy chiếu
+  equirectangular tại vĩ độ trung bình polygon (đủ chính xác cho quy mô công trình). **Gap mới
+  phát hiện "không ghi audit" cũng đã vá**: action `geofence_created`. Test live: tạo geofence
+  polygon thật (~100m×130m gần Hồ Hoàn Kiếm) qua API → `areaSqm: 13810.98` khớp tính tay; UI thật
+  (Playwright) hiện đúng "Diện tích: ~13.810,98 m²" trên thẻ Vùng chấm công; `audit_logs` có đúng
+  bản ghi `geofence_created`. Script tự động `test_create_geofence.sh` 13/13 pass, không hồi quy.
+
+### #57 — Sửa geofence — ✅ PASS — ĐÃ KHÓA (2026-08-17)
+- Kịch bản: `docs/manual-tests/sprint-2-feature-57-update-geofence.md`. **Cả 2 gap đã vá**: thêm
+  `changeReason` (tùy chọn, không bắt buộc — quyết định nghiệp vụ theo tiền lệ #51 Face ID revoke
+  reason) và tính lại `area_sqm` mỗi lần tạo phiên bản mới; thêm audit `geofence_updated` với
+  snapshot before/after đầy đủ (bao gồm `changeReason` trong `new_value` khi có nhập). Test live
+  qua UI thật (Playwright): mở modal sửa geofence đã có, ô "Lý do thay đổi (Tùy chọn)" chỉ hiện khi
+  sửa (không hiện khi tạo mới), điền lý do + đổi buffer → lưu thành công → xác nhận `audit_logs` có
+  đúng `old_value`/`new_value` kèm lý do. Script tự động `test_update_geofence.sh` 12/12 pass,
+  không hồi quy.
+
+### #58 — Xem lịch sử geofence — ✅ PASS — ĐÃ KHÓA (2026-08-17)
+- Kịch bản: `docs/manual-tests/sprint-2-feature-58-geofence-history.md`. Thiết kế versioning trong
+  bảng `geofences` (không có bảng `geofence_histories` riêng) xác nhận là kiến trúc có chủ đích,
+  giữ nguyên. **Gap quan trọng nhất đã vá**: `changed_by` giờ trả về `createdByName` (tên thật,
+  resolve qua `UserRepository`/`User.displayName`, batch-load theo trang để tránh N+1 query) thay
+  vì chỉ UUID thô — ảnh hưởng trực tiếp khả năng tra cứu "ai đã sửa geofence" phục vụ audit tranh
+  chấp vị trí (đúng mục đích AC gốc). `change_type` tường minh cố ý KHÔNG làm — lý do đã ghi trong
+  kịch bản (rủi ro định nghĩa ngưỡng cao hơn giá trị mang lại ở giai đoạn này). Test live qua UI
+  thật (Playwright, viewport rộng để thấy đủ bảng): cột "Người thay đổi" hiện đúng "Platform Admin"
+  ở cả 3 dòng lịch sử, cột "Diện tích"/"Lý do thay đổi" mới cũng hiện đúng. Script tự động
+  `test_geofence_history.sh` 10/10 pass, không hồi quy.
+
+---
 
 ## Quy ước cập nhật file này (cho các phiên làm việc sau)
 

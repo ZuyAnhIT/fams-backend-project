@@ -34,6 +34,12 @@ public class Geofence {
     @Column(name = "buffer_meters", nullable = false)
     private int bufferMeters;
 
+    @Column(name = "area_sqm")
+    private Double areaSqm;
+
+    @Column(name = "change_reason", columnDefinition = "TEXT")
+    private String changeReason;
+
     @Column(nullable = false, length = 20)
     private String status;
 
