@@ -622,52 +622,52 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 #### Chấm công
 
 - [x] **#67 — Hiển thị site được phép check-in** `P0` · 3sp · Nền tảng: Backend, Mobile App
-  - *Audit (2026-07-22):* ✅ ĐÃ XONG — bằng chứng: CheckinController.getAvailableSites, test_available_sites.sh
+  - *Audit (2026-08-17):* ✅ ĐÃ XONG, xác nhận qua test live — tính theo timezone từng site, đầy đủ hơn AC. Test: `docs/manual-tests/sprint-3-feature-67-available-sites.md`.
   - *User Story:* Là một nhân viên mobile, tôi muốn xem các công trình mình được phân công hôm nay để chọn đúng nơi chấm công.
   - *Acceptance Criteria:* App lấy assignment active hôm nay; hiển thị site, ca, trạng thái check-in/out; không hiển thị site không được phân công.
   - *DB Entities:* `assignments, sites, shift_templates, checkins`
 - [x] **#68 — Check-in GPS cơ bản** `P0` · 8sp · Nền tảng: Backend, Mobile App
-  - *Audit (2026-07-22):* ✅ ĐÃ XONG — bằng chứng: CheckinService.submitCheckin, test_basic_checkin.sh
+  - *Audit (2026-08-17):* ✅ ĐÃ XONG + VÁ THÊM — ghi audit `checkin_submitted`. Test: `docs/manual-tests/sprint-3-feature-68-checkin-gps.md`.
   - *User Story:* Là một nhân viên, tôi muốn check-in tại công trình bằng vị trí GPS để ghi nhận giờ vào làm.
   - *Acceptance Criteria:* Lấy lat/lng/accuracy; tạo location point; kiểm tra assignment active; kiểm tra geofence; tạo checkins type=check_in.
   - *DB Entities:* `checkins, assignments, site_geofences, shift_templates`
 - [x] **#69 — Check-in có Face ID** `P0` · 8sp · Nền tảng: Backend, Mobile App, Queue/AI/Automation
-  - *Audit (2026-07-22):* ✅ ĐÃ XONG — bằng chứng: submitCheckin + FaceVerifyJobPublisher, test_checkin_face.sh
+  - *Audit (2026-08-17):* ✅ ĐÃ XONG + VÁ GAP QUAN TRỌNG (quyết định chủ dự án) — nhánh `gps_face` (chụp 1 ảnh, không qua challenge) trước đây KHÔNG kiểm tra liveness thụ động (`requiresLiveness` luôn `false`), nghĩa là 1 ảnh tĩnh/in ra có thể vượt qua xác thực khuôn mặt. Đã sửa App gửi `requiresLiveness=true` khi có ảnh (kể cả offline sync). Không có field `selfie_url` riêng (khác AC, không sửa). Test: `docs/manual-tests/sprint-3-feature-69-checkin-face-id.md`.
   - *User Story:* Là một nhân viên, tôi muốn check-in kèm xác minh khuôn mặt khi policy yêu cầu để đảm bảo đúng người chấm công.
   - *Acceptance Criteria:* Nếu tenant/site yêu cầu Face ID thì bắt selfie; so khớp face; lưu score, face_valid, selfie_url; fail thì pending/invalid.
   - *DB Entities:* `checkins, face_embeddings, face_id_consents, audit_logs`
 - [x] **#70 — Check-in có liveness** `P1` · 8sp · Nền tảng: Backend, Mobile App, Queue/AI/Automation
-  - *Audit (2026-07-22):* ✅ ĐÃ XONG — bằng chứng: async pipeline requiresLiveness, test_checkin_liveness.sh
+  - *Audit (2026-08-17):* ✅ ĐÃ XONG, xác nhận qua test live — 2 cơ chế song song (challenge chủ động cho `gps_face_liveness`, thụ động cho ảnh optional — nay áp dụng cả cho `gps_face`, xem #69). Không có field `invalid_reason` riêng (dùng `violations.violation_type`). Test: `docs/manual-tests/sprint-3-feature-70-checkin-liveness.md`.
   - *User Story:* Là một nhân viên, tôi muốn xác minh người thật khi chấm công để chống dùng ảnh/video giả mạo.
   - *Acceptance Criteria:* Nếu policy bật liveness; app thực hiện liveness; lưu liveness_passed; fail tạo invalid_reason.
   - *DB Entities:* `checkins, face_embeddings, violations`
 - [x] **#71 — Kiểm tra check-in sớm** `P0` · 5sp · Nền tảng: Backend, Mobile App
-  - *Audit (2026-07-22):* ✅ ĐÃ XONG — bằng chứng: validateNotTooEarly, test_early_checkin.sh
+  - *Audit (2026-08-17):* ✅ ĐÃ XONG, xác nhận qua test live — chặt hơn AC (luôn từ chối cứng + chặn cả check-in sau khi ca kết thúc). Không sửa (đúng thiết kế). Test: `docs/manual-tests/sprint-3-feature-71-early-checkin.md`.
   - *User Story:* Là một hệ thống, tôi muốn kiểm tra nhân viên check-in quá sớm so với ca để giữ dữ liệu công đúng rule.
   - *Acceptance Criteria:* So với shift start và early_checkin_minutes; nếu quá sớm thì cảnh báo/từ chối theo policy; lưu invalid_reasons nếu cần.
   - *DB Entities:* `checkins, shift_templates, attendance_summaries`
 - [x] **#72 — Check-out GPS** `P0` · 8sp · Nền tảng: Backend, Mobile App
-  - *Audit (2026-07-22):* ✅ ĐÃ XONG — bằng chứng: CheckinService.submitCheckout, test_checkout.sh
+  - *Audit (2026-08-17):* ✅ ĐÃ XONG + VÁ THÊM — ghi audit `checkout_submitted`. Check-out dùng đúng policy snapshot lúc check-in (đúng thiết kế). Không có `paired_checkin_id` riêng (cùng 1 dòng). Test: `docs/manual-tests/sprint-3-feature-72-checkout-gps.md`.
   - *User Story:* Là một nhân viên, tôi muốn check-out khi rời công trình để ghi nhận giờ kết thúc làm việc.
   - *Acceptance Criteria:* Tìm check_in chưa paired; tạo check_out; paired_checkin_id trỏ check_in; kiểm tra geofence/face nếu policy yêu cầu.
   - *DB Entities:* `checkins, assignments, site_geofences`
 - [x] **#73 — Kiểm tra check-out muộn** `P0` · 5sp · Nền tảng: Backend, Mobile App
-  - *Audit (2026-07-22):* ✅ ĐÃ XONG — bằng chứng: computeWorkMinutes late-checkout cap
+  - *Audit (2026-08-17):* ✅ ĐÃ XONG, xác nhận qua test live — dùng đúng snapshot lúc check-in (allowOvertime/lateCheckoutMinutes cũ), không áp dụng thay đổi Shift giữa ca. Test: `docs/manual-tests/sprint-3-feature-73-late-checkout.md`.
   - *User Story:* Là một hệ thống, tôi muốn xử lý nhân viên check-out quá muộn so với ca để giới hạn số giờ được tính.
   - *Acceptance Criteria:* So với shift end và late_checkout_minutes; nếu vượt quá thì cảnh báo/chỉ tính đến giới hạn theo policy; ghi metadata.
   - *DB Entities:* `checkins, shift_templates, attendance_summaries`
 - [x] **#74 — Tính work_minutes cho cặp check-in/out** `P0` · 5sp · Nền tảng: Backend, Queue/AI/Automation
-  - *Audit (2026-07-22):* ✅ ĐÃ XONG — bằng chứng: computeWorkMinutes + recomputeForCheckin
+  - *Audit (2026-08-17):* ✅ ĐÃ XONG — 2 gap thật xác nhận (không trừ break, tính work_minutes cả khi pending_review). **Quyết định chủ dự án: giữ nguyên cả 2, không cần trừ break, không cần loại trừ khi pending.** Test: `docs/manual-tests/sprint-3-feature-74-work-minutes.md`.
   - *User Story:* Là một hệ thống, tôi muốn tính số phút làm việc khi có check-out để làm cơ sở tổng hợp công.
   - *Acceptance Criteria:* Ghép đúng cặp; trừ break theo schedule; bỏ qua invalid nếu policy; cập nhật work_minutes; trigger summary refresh.
   - *DB Entities:* `checkins, shift_templates, attendance_summaries`
-- [ ] **#75 — Check-in offline và đồng bộ** `P1` · 8sp · Nền tảng: Backend, Mobile App, Queue/AI/Automation
-  - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: OfflineSyncService/OfflineCheckinRequest (client_nonce idempotency); thiếu: không có cờ source=offline_sync, không phát hiện lệch giờ thiết bị, không có test script riêng
+- [x] **#75 — Check-in offline và đồng bộ** `P1` · 8sp · Nền tảng: Backend, Mobile App, Queue/AI/Automation
+  - *Audit (2026-08-17):* ✅ ĐÃ XONG, audit gốc SAI 2/3 điểm — phát hiện lệch giờ thiết bị đã có sẵn (24h quá khứ/5 phút tương lai); cờ source có (`"offline"`, khác literal AC). **Đã vá thêm**: liveness thụ động cho ảnh offline (cùng gap #69) + ghi audit `checkin_submitted`. Test: `docs/manual-tests/sprint-3-feature-75-offline-checkin.md`.
   - *User Story:* Là một nhân viên ở nơi mạng yếu, tôi muốn lưu tạm check-in/offline và đồng bộ khi có mạng để không mất dữ liệu chấm công.
   - *Acceptance Criteria:* App lưu device_timestamp/GPS/selfie local; khi sync gửi source=offline_sync; server so lệch giờ; đánh pending nếu nghi ngờ.
   - *DB Entities:* `checkins, tokens, audit_logs`
 - [x] **#76 — Hiển thị kết quả check-in/out** `P0` · 3sp · Nền tảng: Backend, Mobile App
-  - *Audit (2026-07-22):* ✅ ĐÃ XONG — bằng chứng: getCheckinResult, test_checkin_result.sh
+  - *Audit (2026-08-17):* ✅ ĐÃ XONG, xác nhận qua test live — lý do hiện qua các trường có cấu trúc (không phải 1 message). Thiếu nút "thử lại" tường minh (nhỏ, không sửa). Test: `docs/manual-tests/sprint-3-feature-76-checkin-result.md`.
   - *User Story:* Là một nhân viên, tôi muốn xem kết quả hợp lệ/chờ duyệt/lỗi ngay sau khi chấm công để biết cần xử lý gì.
   - *Acceptance Criteria:* Hiển thị valid/invalid/pending_review; lý do GPS/face/liveness; hướng dẫn thử lại hoặc gửi giải trình.
   - *DB Entities:* `checkins, violations`

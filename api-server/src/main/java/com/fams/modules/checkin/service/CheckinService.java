@@ -3,6 +3,7 @@ package com.fams.modules.checkin.service;
 import com.fams.modules.assignment.entity.Assignment;
 import com.fams.modules.assignment.service.AssignmentService;
 import com.fams.modules.attendance.service.AttendanceSummaryService;
+import com.fams.modules.audit.service.AuditLogService;
 import com.fams.modules.checkin.dto.request.OverrideCheckinRequest;
 import com.fams.modules.checkin.dto.request.SubmitCheckinRequest;
 import com.fams.modules.checkin.dto.request.SubmitCheckoutRequest;
@@ -30,6 +31,7 @@ import com.fams.shared.exception.BusinessException;
 import com.fams.shared.exception.DuplicateResourceException;
 import com.fams.shared.exception.ResourceNotFoundException;
 import com.fams.shared.pagination.PageResponse;
+import com.fams.shared.security.HttpRequestUtils;
 import com.fams.shared.storage.ExplanationEvidenceStorageService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -77,6 +79,7 @@ public class CheckinService {
     private final FaceProfileRepository faceProfileRepository;
     private final LivenessChallengeRepository livenessChallengeRepository;
     private final ExplanationEvidenceStorageService evidenceStorageService;
+    private final AuditLogService auditLogService;
 
     public CheckinService(EmployeeRepository employeeRepository,
                           AssignmentService assignmentService,
@@ -90,7 +93,8 @@ public class CheckinService {
                           FaceVerifyJobPublisher faceVerifyJobPublisher,
                           FaceProfileRepository faceProfileRepository,
                           LivenessChallengeRepository livenessChallengeRepository,
-                          ExplanationEvidenceStorageService evidenceStorageService) {
+                          ExplanationEvidenceStorageService evidenceStorageService,
+                          AuditLogService auditLogService) {
         this.employeeRepository = employeeRepository;
         this.assignmentService = assignmentService;
         this.siteRepository = siteRepository;
@@ -104,6 +108,22 @@ public class CheckinService {
         this.faceProfileRepository = faceProfileRepository;
         this.livenessChallengeRepository = livenessChallengeRepository;
         this.evidenceStorageService = evidenceStorageService;
+        this.auditLogService = auditLogService;
+    }
+
+    private void recordAudit(UUID tenantId, UUID actorId, UUID checkinId, String action,
+                              java.util.Map<String, Object> newValue) {
+        try {
+            auditLogService.record(
+                    tenantId, actorId, null,
+                    "Checkin", checkinId.toString(), action,
+                    null, newValue,
+                    HttpRequestUtils.currentRequestId(),
+                    HttpRequestUtils.currentIpAddress(),
+                    HttpRequestUtils.currentUserAgent());
+        } catch (Exception e) {
+            log.warn("Failed to record audit log action={} checkinId={}: {}", action, checkinId, e.getMessage());
+        }
     }
 
     // ── Task 67: Available sites ──────────────────────────────────────────────
@@ -247,6 +267,13 @@ public class CheckinService {
         }
         log.info("Check-in recorded: id={} employeeId={} siteId={} status={} insideGeofence={} riskScore={}",
                 record.getId(), employee.getId(), request.getSiteId(), status, insideGeofence, riskScore);
+        recordAudit(tenantId, callerUserId, record.getId(), "checkin_submitted", java.util.Map.of(
+                "siteId", record.getSiteId(),
+                "employeeId", record.getEmployeeId(),
+                "shiftId", record.getShiftId() != null ? record.getShiftId() : "",
+                "status", status,
+                "insideGeofence", insideGeofence,
+                "gpsRiskScore", riskScore));
 
         // Task 69/70 + active liveness: async face verification. A Face-ID-required site uses
         // the already-verified challenge's stored frame (liveness already proven via the
@@ -379,6 +406,12 @@ public class CheckinService {
 
         log.info("Check-out recorded: id={} employeeId={} siteId={} workMinutes={} insideGeofence={}",
                 record.getId(), employee.getId(), record.getSiteId(), workMinutes, insideGeofence);
+        recordAudit(tenantId, callerUserId, record.getId(), "checkout_submitted", java.util.Map.of(
+                "siteId", record.getSiteId(),
+                "employeeId", record.getEmployeeId(),
+                "status", record.getStatus(),
+                "insideGeofence", insideGeofence,
+                "workMinutes", workMinutes));
 
         // Async face verification at checkout — mirrors check-in: challenge-sourced when the
         // policy demanded one, else the optional plain-photo path. FaceResultCallbackController

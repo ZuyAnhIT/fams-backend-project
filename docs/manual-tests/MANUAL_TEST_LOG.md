@@ -99,6 +99,16 @@ giữ nguyên ✅ ĐÃ KHÓA. Đồng thời xác nhận UI "tìm người thao 
 | 64 | Danh sách phân công | ✅ Pass | ✅ Pass | ✅ **PASS — ĐÃ KHÓA** | 2026-08-17 | **Gap đã vá**: filter khoảng ngày (overlap). **Theo quyết định chủ dự án**: thêm mới hẳn màn hình Mobile App "Phân công của tôi" (`/assignments/me`, self-service, cross-site) — trước đây App không có |
 | 65 | Cập nhật phân công | ✅ Pass | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-17 | **Gap quan trọng đã vá**: chặn sửa assignment đã hủy (400, cả API lẫn UI); re-validate overlap dùng logic mới gộp cross-site + cùng-site; **gap đã vá**: ghi audit `assignment_updated` |
 | 66 | Hủy phân công | ✅ Pass | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-17 | **Gap đã vá**: `cancelled_by`/`cancelled_at` (migration V100, cùng pattern employee_invitations V93) + ghi audit `assignment_cancelled`. Xác nhận hiển thị đúng tới tận Mobile App thật |
+| 67 | Hiển thị site được phép check-in | — | ✅ Pass | ✅ **PASS — ĐÃ KHÓA** | 2026-08-17 | Không có gap, tốt hơn AC gốc (timezone từng site, ca qua đêm). Script `test_available_sites.sh` 6/6 pass |
+| 68 | Check-in GPS cơ bản | — | ✅ Pass | ✅ **PASS — ĐÃ KHÓA** | 2026-08-17 | **Gap đã vá**: ghi audit `checkin_submitted`. Ngoài geofence không chặn cứng, chỉ pending_review (đúng thiết kế). Script `test_basic_checkin.sh` 11/11 pass |
+| 69 | Check-in có Face ID | — | ✅ Pass | ✅ **PASS — ĐÃ KHÓA** | 2026-08-17 | **Gap quan trọng đã vá (quyết định chủ dự án)**: nhánh `gps_face` (1 ảnh, không qua challenge) trước đây KHÔNG kiểm tra liveness thụ động — 1 ảnh tĩnh có thể vượt qua. Đã sửa App gửi `requiresLiveness=true` khi có ảnh (online + offline sync). Xác nhận qua log backend: cờ truyền đúng tới AI worker |
+| 70 | Check-in có liveness | — | ✅ Pass | ✅ **PASS — ĐÃ KHÓA** | 2026-08-17 | Không có gap thêm ngoài #69 (đã vá). Script `test_checkin_liveness.sh` pass (2/2, phần E2E enrollment cần thiết bị thật) |
+| 71 | Kiểm tra check-in sớm | — | ✅ Pass | ✅ **PASS — ĐÃ KHÓA** | 2026-08-17 | Chặt hơn AC (luôn từ chối cứng + chặn cả sau khi ca kết thúc), xác nhận đúng thiết kế, không sửa. Script `test_early_checkin.sh` 6/6 pass |
+| 72 | Check-out GPS | — | ✅ Pass | ✅ **PASS — ĐÃ KHÓA** | 2026-08-17 | **Gap đã vá**: ghi audit `checkout_submitted`. Policy dùng đúng snapshot lúc check-in (đúng thiết kế). Script `test_checkout.sh` 9/9 pass |
+| 73 | Kiểm tra check-out muộn | — | ✅ Pass | ✅ **PASS — ĐÃ KHÓA** | 2026-08-17 | Đúng AC, dùng snapshot lúc check-in không áp dụng thay đổi Shift giữa ca. Không có gap |
+| 74 | Tính work_minutes cho cặp check-in/out | — | ✅ Pass | ✅ **PASS — ĐÃ KHÓA** | 2026-08-17 | 2 gap thật xác nhận (không trừ break; tính cả khi pending_review) — **chủ dự án quyết định giữ nguyên cả 2**, không sửa |
+| 75 | Check-in offline và đồng bộ | — | ✅ Pass | ✅ **PASS — ĐÃ KHÓA** | 2026-08-17 | Audit gốc SAI 2/3 điểm (lệch giờ thiết bị đã có sẵn). **Đã vá thêm**: liveness thụ động cho ảnh offline (cùng #69) + ghi audit `checkin_submitted`. Thiếu test script tự động riêng (không chặn khóa) |
+| 76 | Hiển thị kết quả check-in/out | — | ✅ Pass | ✅ **PASS — ĐÃ KHÓA** | 2026-08-17 | Đúng bản chất AC, lý do hiện qua trường có cấu trúc. Thiếu nút "thử lại" tường minh (nhỏ, không sửa). Script `test_checkin_result.sh` 8/8 pass |
 
 ---
 
@@ -711,6 +721,41 @@ giữ nguyên ✅ ĐÃ KHÓA. Đồng thời xác nhận UI "tìm người thao 
   trả về đúng; xác nhận hiển thị tới tận Mobile App thật — card phân công đã hủy hiện dòng đỏ
   "Đã hủy lúc [thời gian]" (ảnh `app-05-my-assignments-with-cancelled.png`), round-trip đầy đủ từ
   DB → API → UI nhân viên. Script tự động `test_cancel_assignment.sh` 9/9 pass, không hồi quy.
+
+---
+
+### #67-76 — Chấm công cốt lõi (Check-in/out GPS/Face/Liveness) — ✅ PASS — ĐÃ KHÓA (2026-08-17)
+- Kịch bản: `docs/manual-tests/sprint-3-feature-67` đến `-76-*.md`. Nghiên cứu sâu 10 tính năng,
+  hầu hết đã "ĐÃ XONG" đúng theo audit gốc hoặc còn tốt hơn — chỉ có 2 nhóm gap thật:
+  1. **Gap bảo mật quan trọng nhất đợt này (#69, quyết định chủ dự án sau khi hỏi trực tiếp)**:
+     khi check-in/out bằng Face ID theo policy `gps_face` (không phải `gps_face_liveness`), App chỉ
+     chụp 1 ảnh và gửi `requiresLiveness=false` — nghĩa là AI hoàn toàn KHÔNG kiểm tra ảnh có phải
+     chụp trực tiếp người thật hay không, chỉ so khớp khuôn mặt trong ảnh. Về lý thuyết 1 ảnh
+     tĩnh/in ra có thể vượt qua. Đã sửa App (`use-checkin-submit.ts`, `use-checkout-submit.ts`) gửi
+     `requiresLiveness=true` bất cứ khi nào có ảnh nộp lên (kể cả qua hàng đợi offline), và sửa
+     `OfflineSyncService.java` (trước đó hardcode `false`). Xác nhận qua log backend thật: cờ
+     `requiresLiveness` truyền đúng từ request tới `FaceVerifyJobPublisher` tới AI worker.
+  2. **Gap audit log (module Chấm công hoàn toàn chưa có)**: đã vá — thêm
+     `checkin_submitted`/`checkout_submitted` (trong `CheckinService`, cả nhánh online lẫn offline
+     sync) và `checkin_violation_created` (trong `FaceResultCallbackController`, khi AI worker báo
+     fail và tạo violation). Xác nhận qua DB thật: 23 bản ghi audit sinh ra ngay trong đợt chạy lại
+     bộ test tự động.
+  3. **#74 (2 gap khác)**: không trừ giờ nghỉ break; work_minutes vẫn tính khi đang `pending_review`
+     — đã hỏi chủ dự án, **quyết định giữ nguyên cả 2, không sửa** (không cần trừ break; vẫn tính
+     sẵn work_minutes cho HR xem ngay).
+  4. Toàn bộ phần còn lại (#67, #70-73, #75-76) xác nhận qua đọc code + chạy lại script tự động là
+     đúng/đã xong, một số điểm "implemented differently" so với AC gốc (không phải gap, chỉ khác
+     tên/hình thức — ghi rõ trong từng kịch bản riêng để không nhầm lẫn ở đợt audit sau).
+  Script tự động: `test_available_sites.sh` 6/6, `test_basic_checkin.sh` 11/11,
+  `test_checkin_history.sh` 8/8, `test_checkin_result.sh` 8/8, `test_checkout.sh` 9/9,
+  `test_early_checkin.sh` 6/6, `test_employee_explanation.sh` 16/16, `test_hr_checkin_detail.sh`
+  10/10, `test_hr_list_checkins.sh` 11/11, `test_override_checkin.sh` 14/14,
+  `test_checkin_face.sh` 5/5, `test_checkin_liveness.sh` 2/2 — tất cả pass, không hồi quy sau khi
+  thêm audit log + sửa cờ liveness. Phần E2E cần enrollment Face ID thật qua liveness-challenge (đòi
+  hỏi camera thiết bị thật) đã SKIP có chủ đích trong script, không tính là fail.
+  **Cần bạn tự test lại trên thiết bị thật**: xác nhận 1 ảnh tĩnh/in ra/chụp màn hình KHÔNG còn qua
+  được xác thực khuôn mặt tại site cấu hình `gps_face` (đưa 1 ảnh in trước camera khi check-in) —
+  đây là hành vi bảo mật quan trọng, headless/giả lập camera không kiểm chứng được chính xác.
 
 ---
 
