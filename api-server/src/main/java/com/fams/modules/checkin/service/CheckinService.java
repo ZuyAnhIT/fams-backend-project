@@ -242,6 +242,7 @@ public class CheckinService {
                 .shiftAllowOvernight(resolvedShift != null ? resolvedShift.isAllowOvernight() : null)
                 .shiftAllowOvertime(resolvedShift != null ? resolvedShift.isAllowOvertime() : null)
                 .shiftLateCheckoutMinutes(resolvedShift != null ? resolvedShift.getLateCheckoutMinutes() : null)
+                .shiftGraceMinutes(resolvedShift != null ? resolvedShift.getGraceMinutes() : null)
                 .shiftMaxOtMinutesPerDay(resolvedShift != null ? resolvedShift.getMaxOtMinutesPerDay() : null)
                 .shiftMaxOtMinutesPerWeek(resolvedShift != null ? resolvedShift.getMaxOtMinutesPerWeek() : null)
                 .status(status)

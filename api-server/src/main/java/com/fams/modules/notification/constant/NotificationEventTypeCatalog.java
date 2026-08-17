@@ -68,7 +68,21 @@ public final class NotificationEventTypeCatalog {
                     "Bị thu hồi vai trò",
                     "Gửi khi một vai trò (role) bạn đang giữ bị thu hồi trong một công ty.",
                     true,
-                    true)
+                    true),
+            new NotificationEventTypeInfo(
+                    // Must match com.fams.modules.attendance.constant.AttendanceEventTypes.MISSING_CHECKOUT_EMPLOYEE
+                    "MISSING_CHECKOUT_EMPLOYEE",
+                    "Quên check-out",
+                    "Gửi cho bạn khi hệ thống phát hiện một ngày công trước đó bạn chưa check-out.",
+                    true,
+                    true),
+            new NotificationEventTypeInfo(
+                    // Must match com.fams.modules.attendance.constant.AttendanceEventTypes.MISSING_CHECKOUT_HR
+                    "MISSING_CHECKOUT_HR",
+                    "Nhân viên quên check-out",
+                    "Gửi cho HR/quản lý khi một nhân viên có ngày công trước đó chưa check-out.",
+                    true,
+                    false)
     );
 
     public record NotificationEventTypeInfo(

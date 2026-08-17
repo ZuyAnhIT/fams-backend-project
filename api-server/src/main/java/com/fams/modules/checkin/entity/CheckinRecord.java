@@ -53,6 +53,11 @@ public class CheckinRecord {
     @Column(name = "shift_late_checkout_minutes")
     private Integer shiftLateCheckoutMinutes;
 
+    /** #81 (2026-08-17): same snapshot-at-check-in invariant as the other shift_* fields —
+     *  minutes of tolerance before a late first check-in is flagged late. */
+    @Column(name = "shift_grace_minutes")
+    private Integer shiftGraceMinutes;
+
     /** #60 (docs/api/backend-feature-audit-2026-08-07.md): same snapshot-at-check-in
      *  invariant as the other shift_* fields above. */
     @Column(name = "shift_max_ot_minutes_per_day")

@@ -23,6 +23,13 @@ public class ConfigureShiftOtRequest {
     @Min(value = 0, message = "lateCheckoutMinutes must be 0 or greater")
     private Integer lateCheckoutMinutes;
 
+    @Schema(description = "#81 gap fix (2026-08-17): minutes of tolerance before a late first "
+            + "check-in is flagged late (AttendanceSummary.isLate/lateMinutes). Arriving within "
+            + "this window still records 0 late minutes; arriving beyond it records the full raw "
+            + "delay, not delay-minus-grace. Omit to keep the current setting.", example = "5")
+    @Min(value = 0, message = "graceMinutes must be 0 or greater")
+    private Integer graceMinutes;
+
     @Schema(description = "#60 (docs/api/backend-feature-audit-2026-08-07.md): max OT minutes allowed per day "
             + "before AttendanceSummary.otDailyLimitExceeded is flagged for HR — warn-only, never blocks a "
             + "checkout or caps otMinutes. Omit to keep the current setting; pass clearMaxOtMinutesPerDay=true "

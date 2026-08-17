@@ -47,6 +47,10 @@ public class ShiftResponse {
     @Schema(description = "Minutes after endTime that a checkout is accepted", example = "30")
     private int lateCheckoutMinutes;
 
+    @Schema(description = "Minutes of tolerance before a late first check-in is flagged late "
+            + "(#81, 2026-08-17)", example = "5")
+    private int graceMinutes;
+
     @Schema(description = "Max OT minutes allowed per day before AttendanceSummary.otDailyLimitExceeded is "
             + "flagged; null = unlimited (#60, docs/api/backend-feature-audit-2026-08-07.md)", nullable = true)
     private Integer maxOtMinutesPerDay;

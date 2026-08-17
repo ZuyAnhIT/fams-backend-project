@@ -47,6 +47,15 @@ public class Shift {
     @Column(name = "late_checkout_minutes", nullable = false)
     private int lateCheckoutMinutes;
 
+    /** #81 gap fix (2026-08-17, decision from project owner): minutes of tolerance before a
+     *  late first check-in is actually flagged late (AttendanceSummary.isLate/lateMinutes) —
+     *  previously there was no grace period at all, so being 1 minute late already counted.
+     *  Default 5 (migration V101). Arriving within grace still records lateMinutes=0; arriving
+     *  beyond it records the FULL raw delay (not delay-minus-grace) — grace decides whether
+     *  you're flagged late at all, it doesn't discount the minutes once you are. */
+    @Column(name = "grace_minutes", nullable = false)
+    private int graceMinutes;
+
     /** #60 (docs/api/backend-feature-audit-2026-08-07.md): null = unlimited. Warn-only — never
      *  caps otMinutes itself, only sets AttendanceSummary.otDailyLimitExceeded for HR review. */
     @Column(name = "max_ot_minutes_per_day")

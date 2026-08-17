@@ -3,6 +3,7 @@ package com.fams.modules.shift.dto.request;
 import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
@@ -38,6 +39,13 @@ public class CreateShiftRequest {
             + "site). Omit/null to inherit the site's policy.", nullable = true,
             allowableValues = {"gps_only", "gps_face", "gps_face_liveness"})
     private String checkinPolicyOverride;
+
+    @Schema(description = "Minutes of tolerance before a late first check-in is flagged late "
+            + "(AttendanceSummary.isLate/lateMinutes). Arriving within this window still records "
+            + "0 late minutes; arriving beyond it records the full raw delay, not delay-minus-grace.",
+            example = "5", defaultValue = "5")
+    @Min(value = 0, message = "graceMinutes must be 0 or greater")
+    private int graceMinutes = 5;
 
     // Field deliberately NOT named isDefault: Lombok's accessor generation for a boolean field
     // already prefixed with "is" produces getter isDefault()/setter setDefault() — two DIFFERENT
