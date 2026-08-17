@@ -17,7 +17,8 @@ public class FcmClient {
   private static final int MAX_ATTEMPTS = 3;
   private static final long BASE_DELAY_MS = 1_000L;
 
-  public record SendResult(boolean success, String messageId, int attempts, String lastError) {}
+  public record SendResult(boolean success, String messageId, int attempts, String lastError,
+                            String errorCode) {}
 
   /**
    * Sends a push notification with exponential backoff retry (max 3 attempts).
@@ -44,7 +45,7 @@ public class FcmClient {
     if (FirebaseApp.getApps().isEmpty()) {
       log.debug("FCM not initialized — skipping push to token ending in ...{}",
           deviceToken.length() > 8 ? deviceToken.substring(deviceToken.length() - 8) : deviceToken);
-      return new SendResult(false, null, 0, "FCM_NOT_INITIALIZED");
+      return new SendResult(false, null, 0, "FCM_NOT_INITIALIZED", "FCM_NOT_INITIALIZED");
     }
 
     Message.Builder messageBuilder = Message.builder()
@@ -59,21 +60,31 @@ public class FcmClient {
     Message message = messageBuilder.build();
 
     String lastError = null;
+    String lastErrorCode = null;
     for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       try {
         String messageId = FirebaseMessaging.getInstance().send(message);
         log.debug("FCM push sent messageId={} token=...{} attempt={}", messageId,
             deviceToken.length() > 8 ? deviceToken.substring(deviceToken.length() - 8) : deviceToken,
             attempt);
-        return new SendResult(true, messageId, attempt, null);
+        return new SendResult(true, messageId, attempt, null, null);
       } catch (FirebaseMessagingException e) {
-        lastError = e.getMessagingErrorCode() != null
-            ? e.getMessagingErrorCode().name() + ": " + e.getMessage()
-            : e.getMessage();
+        lastErrorCode = e.getMessagingErrorCode() != null ? e.getMessagingErrorCode().name() : null;
+        lastError = lastErrorCode != null ? lastErrorCode + ": " + e.getMessage() : e.getMessage();
         log.warn("FCM attempt {}/{} failed for token=...{}: {}",
             attempt, MAX_ATTEMPTS,
             deviceToken.length() > 8 ? deviceToken.substring(deviceToken.length() - 8) : deviceToken,
             lastError);
+
+        // UNREGISTERED means the token is permanently dead (app uninstalled/token revoked) —
+        // retrying it is pointless, so stop immediately instead of burning the full backoff
+        // schedule on a token that will never succeed. Caller (UserDeviceService) uses this
+        // errorCode to deactivate the UserDevice row so future sends skip it entirely (#88 —
+        // previously this token would be retried 3x with backoff on every single future push
+        // forever, since nothing ever deactivated it).
+        if ("UNREGISTERED".equals(lastErrorCode)) {
+          return new SendResult(false, null, attempt, lastError, lastErrorCode);
+        }
 
         if (attempt < MAX_ATTEMPTS) {
           long delay = BASE_DELAY_MS * (1L << (attempt - 1)); // 1s, 2s
@@ -81,7 +92,7 @@ public class FcmClient {
             Thread.sleep(delay);
           } catch (InterruptedException ie) {
             Thread.currentThread().interrupt();
-            return new SendResult(false, null, attempt, "INTERRUPTED");
+            return new SendResult(false, null, attempt, "INTERRUPTED", "INTERRUPTED");
           }
         }
       }
@@ -89,6 +100,6 @@ public class FcmClient {
 
     log.error("FCM push permanently failed after {} attempts for token=...{}", MAX_ATTEMPTS,
         deviceToken.length() > 8 ? deviceToken.substring(deviceToken.length() - 8) : deviceToken);
-    return new SendResult(false, null, MAX_ATTEMPTS, lastError);
+    return new SendResult(false, null, MAX_ATTEMPTS, lastError, lastErrorCode);
   }
 }

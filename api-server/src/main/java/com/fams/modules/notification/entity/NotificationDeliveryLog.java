@@ -38,6 +38,11 @@ public class NotificationDeliveryLog {
   @Column(name = "error_message", columnDefinition = "TEXT")
   private String errorMessage;
 
+  /** #88 (2026-08-17): FCM's messageId on a successful send — null for failed attempts and for
+   *  the email-fallback channel (no equivalent concept there). */
+  @Column(name = "provider_message_id")
+  private String providerMessageId;
+
   @Column(name = "created_at", nullable = false, updatable = false)
   private OffsetDateTime createdAt;
 

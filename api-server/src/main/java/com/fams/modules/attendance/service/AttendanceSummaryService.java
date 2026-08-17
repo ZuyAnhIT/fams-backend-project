@@ -619,6 +619,7 @@ public class AttendanceSummaryService {
 
     @Transactional(readOnly = true)
     public PageResponse<AttendanceSummaryResponse> getMyAttendance(UUID tenantId, UUID callerUserId,
+                                                                    UUID siteId,
                                                                     LocalDate from, LocalDate to,
                                                                     int page, int size) {
         Employee employee = employeeRepository
@@ -627,7 +628,7 @@ public class AttendanceSummaryService {
                         "No employee profile found for this user in tenant: " + tenantId));
 
         Specification<AttendanceSummary> spec =
-                AttendanceSummarySpecification.build(tenantId, employee.getId(), null, null, from, to);
+                AttendanceSummarySpecification.build(tenantId, employee.getId(), siteId, null, from, to);
         PageRequest pageable = PageRequest.of(page, size,
                 Sort.by(Sort.Direction.DESC, "attendanceDate"));
 
@@ -649,6 +650,7 @@ public class AttendanceSummaryService {
 
     @Transactional(readOnly = true)
     public AttendanceMonthlyResponse getMyMonthlyAttendance(UUID tenantId, UUID callerUserId,
+                                                             UUID siteId,
                                                              int year, int month) {
         Employee employee = employeeRepository
                 .findByUserIdAndTenantIdAndDeletedAtIsNull(callerUserId, tenantId)
@@ -659,7 +661,7 @@ public class AttendanceSummaryService {
         LocalDate to   = from.plusMonths(1);
 
         List<AttendanceSummary> rows = summaryRepository
-                .findByTenantIdAndEmployeeIdAndDateRange(tenantId, employee.getId(), from, to);
+                .findByTenantIdAndEmployeeIdAndSiteIdAndDateRange(tenantId, employee.getId(), siteId, from, to);
 
         int presentDays          = rows.size();
         int totalWorkMinutes     = rows.stream().mapToInt(AttendanceSummary::getTotalWorkMinutes).sum();
@@ -703,10 +705,21 @@ public class AttendanceSummaryService {
                 .build();
     }
 
+    /** #86 (2026-08-17): whitelist of columns HR can sort the monthly aggregate by — matches the
+     *  CASE branches in {@link AttendanceSummaryRepository#aggregateMonthly}. Anything else is
+     *  rejected rather than silently ignored, so a typo doesn't quietly fall back to default
+     *  order and confuse HR into thinking the sort just "isn't working". */
+    private static final Set<String> MONTHLY_SORTABLE_FIELDS = Set.of(
+            "totalWorkMinutes", "totalLateMinutes", "totalOtMinutes", "missingCheckoutDays", "presentDays");
+
+    /** #86: whitelist of daily statuses HR can filter the monthly aggregate by — matches
+     *  {@code AttendanceSummary.status} (see recompute()). */
+    private static final Set<String> MONTHLY_FILTERABLE_STATUSES = Set.of("present", "incomplete");
+
     @Transactional(readOnly = true)
     public PageResponse<AttendanceHrMonthlyResponse> listMonthlyAttendance(
-            UUID tenantId, UUID employeeId, UUID siteId, int year, int month,
-            int page, int size, UUID callerUserId, boolean callerIsPlatformAdmin) {
+            UUID tenantId, UUID employeeId, UUID siteId, String status, String sortBy, String sortDir,
+            int year, int month, int page, int size, UUID callerUserId, boolean callerIsPlatformAdmin) {
 
         if (!callerIsPlatformAdmin) {
             Set<String> perms = userRoleRepository
@@ -715,6 +728,14 @@ public class AttendanceSummaryService {
                 throw new AccessDeniedException("You do not have permission to list attendance summaries");
             }
         }
+
+        if (status != null && !MONTHLY_FILTERABLE_STATUSES.contains(status)) {
+            throw new IllegalArgumentException("status must be one of " + MONTHLY_FILTERABLE_STATUSES);
+        }
+        if (sortBy != null && !MONTHLY_SORTABLE_FIELDS.contains(sortBy)) {
+            throw new IllegalArgumentException("sortBy must be one of " + MONTHLY_SORTABLE_FIELDS);
+        }
+        String effectiveSortDir = "desc".equalsIgnoreCase(sortDir) ? "desc" : "asc";
 
         UUID effectiveSiteFilter;
         try {
@@ -731,7 +752,7 @@ public class AttendanceSummaryService {
         // scaling concern found in an audit (2026-07-31), see docs/api/attendance-management-api.md.
         PageRequest pageable = PageRequest.of(page, size);
         Page<AttendanceMonthlyAggregateProjection> rawPage = summaryRepository.aggregateMonthly(
-                tenantId, employeeId, effectiveSiteFilter, from, to, pageable);
+                tenantId, employeeId, effectiveSiteFilter, from, to, status, sortBy, effectiveSortDir, pageable);
 
         Set<UUID> empIds  = rawPage.stream().map(AttendanceMonthlyAggregateProjection::getEmployeeId).collect(Collectors.toSet());
         Set<UUID> siteIds = rawPage.stream().map(AttendanceMonthlyAggregateProjection::getSiteId).collect(Collectors.toSet());

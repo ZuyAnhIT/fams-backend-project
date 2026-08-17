@@ -1,0 +1,67 @@
+@startuml FAMS_Checkin_Attendance
+title FAMS — Check-in/out và bảng công (Mức 2)
+left to right direction
+skinparam packageStyle rectangle
+skinparam shadowing false
+
+actor "Employee" as EE
+actor "Tenant Admin / Owner" as TA
+actor "HR Manager" as HR
+actor "Site Supervisor" as SS
+
+rectangle "FAMS — Check-in & Attendance" {
+  usecase "Xem site có thể chấm công" as Sites
+  usecase "Check-in" as Checkin
+  usecase "Check-out" as Checkout
+  usecase "Đồng bộ check-in offline" as Offline
+  usecase "Kiểm tra phân công và thời gian" as ValidateAssignment
+  usecase "Kiểm tra GPS/geofence" as ValidateGPS
+  usecase "Xác minh Face ID" as VerifyFace
+  usecase "Kiểm tra liveness" as VerifyLiveness
+  usecase "Xem kết quả/lịch sử chấm công" as History
+  usecase "Gửi giải trình check-in lỗi" as Explain
+  usecase "Xem danh sách/chi tiết check-in" as ManageCheckin
+  usecase "Duyệt/từ chối check-in bất thường" as ReviewCheckin
+  usecase "Xem bảng công cá nhân" as MyTimesheet
+  usecase "Xem bảng công tổng hợp" as Attendance
+  usecase "Điều chỉnh bảng công" as Adjust
+  usecase "Tính phút công, đi muộn,\nvề sớm, OT, thiếu checkout" as Calculate
+}
+
+EE --> Sites
+EE --> Checkin
+EE --> Checkout
+EE --> Offline
+EE --> History
+EE --> Explain
+EE --> MyTimesheet
+
+TA --> ManageCheckin
+TA --> ReviewCheckin
+TA --> Attendance
+TA --> Adjust
+HR --> ManageCheckin
+HR --> ReviewCheckin
+HR --> Attendance
+HR --> Adjust
+SS --> ManageCheckin : theo site được giao
+SS --> Attendance : theo site được giao
+
+Checkin .> ValidateAssignment : <<include>>
+Checkin .> ValidateGPS : <<include>>
+Checkout .> ValidateAssignment : <<include>>
+Checkout .> ValidateGPS : <<include>>
+VerifyFace .> Checkin : <<extend>>\nkhi site yêu cầu Face ID
+VerifyLiveness .> VerifyFace : <<extend>>\nkhi site yêu cầu liveness
+Offline .> Checkin : <<extend>>\nkhi mất kết nối
+ReviewCheckin .> ManageCheckin : <<extend>>\nkhi trạng thái chờ duyệt
+Explain .> History : <<extend>>\nkhi check-in có lỗi
+Checkin .> Calculate : <<include>>
+Checkout .> Calculate : <<include>>
+Adjust .> Attendance : <<extend>>
+
+note bottom of ReviewCheckin
+  Check-in ngoài geofence có thể được lưu ở trạng thái chờ duyệt;
+  không mặc nhiên trở thành vi phạm hoặc được tính công.
+end note
+@enduml

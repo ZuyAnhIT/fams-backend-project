@@ -43,6 +43,14 @@ public class Notification {
   @Column(columnDefinition = "jsonb")
   private Map<String, Object> metadata;
 
+  /** low | normal | high | critical — #89 (2026-08-17), resolved from
+   *  {@link com.fams.modules.notification.constant.NotificationEventTypeCatalog} at creation
+   *  time by eventType, NOT re-derived later (same snapshot principle as other event-driven
+   *  fields in this codebase — a future catalog edit must never retroactively change an
+   *  already-sent notification's priority). */
+  @Column(nullable = false, length = 20)
+  private String priority;
+
   @Column(name = "is_read", nullable = false)
   private boolean isRead;
 

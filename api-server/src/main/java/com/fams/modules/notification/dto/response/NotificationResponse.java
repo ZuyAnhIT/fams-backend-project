@@ -37,6 +37,10 @@ public class NotificationResponse {
           + "Null for notification types that don't carry structured data.")
   private Map<String, Object> metadata;
 
+  @Schema(description = "low | normal | high | critical — resolved from the eventType's default "
+          + "at creation time (#89, 2026-08-17), not re-derived later", example = "high")
+  private String priority;
+
   @JsonProperty("isRead")
   @Schema(description = "Whether the notification has been read", example = "false")
   private boolean isRead;

@@ -1,0 +1,76 @@
+@startuml FAMS_Analytics_Reporting
+title FAMS — Dashboard, báo cáo, tìm kiếm và bộ lọc (Mức 2)
+left to right direction
+skinparam packageStyle rectangle
+skinparam shadowing false
+
+actor "Platform Admin" as PA
+actor "Platform Staff" as PS
+actor "Tenant Admin / Owner" as TA
+actor "HR Manager" as HR
+actor "Site Supervisor" as SS
+actor "Employee" as EE
+
+rectangle "FAMS — Analytics & Reporting" {
+  usecase "Xem dashboard cá nhân" as EmployeeDash
+  usecase "Xem dashboard HR" as HRDash
+  usecase "Xem dashboard giám sát site" as SupervisorDash
+  usecase "Xem báo cáo chấm công ngày" as Daily
+  usecase "Xem báo cáo chấm công tháng" as Monthly
+  usecase "Xem báo cáo vi phạm" as ViolationReport
+  usecase "Xem báo cáo hiện diện theo site" as Presence
+  usecase "Xem báo cáo trạng thái Face ID" as FaceReport
+  usecase "Xuất báo cáo/bảng công" as ExportAttendance
+  usecase "Xuất danh sách vi phạm" as ExportViolation
+  usecase "Tìm kiếm nhân viên/site/check-in" as Search
+  usecase "Lưu và áp dụng bộ lọc cá nhân" as Filter
+  usecase "Áp dụng tenant/site scope" as Scope
+}
+
+EE --> EmployeeDash
+TA --> HRDash
+TA --> SupervisorDash
+TA --> Daily
+TA --> Monthly
+TA --> ViolationReport
+TA --> Presence
+TA --> FaceReport
+TA --> ExportAttendance
+TA --> ExportViolation
+TA --> Search
+TA --> Filter
+HR --> HRDash
+HR --> Daily
+HR --> Monthly
+HR --> ViolationReport
+HR --> Presence
+HR --> FaceReport
+HR --> ExportAttendance
+HR --> ExportViolation
+HR --> Search
+HR --> Filter
+SS --> SupervisorDash
+SS --> Daily
+SS --> ViolationReport
+SS --> Presence
+SS --> Scope
+PA --> Search : dữ liệu được phép
+PS --> Search : theo permission
+
+ExportAttendance .> Daily : <<extend>>
+ExportAttendance .> Monthly : <<extend>>
+ExportViolation .> ViolationReport : <<extend>>
+Filter .> Daily : <<extend>>
+Filter .> Monthly : <<extend>>
+Filter .> ViolationReport : <<extend>>
+SupervisorDash .> Scope : <<include>>
+Daily .> Scope : <<include>>
+Monthly .> Scope : <<include>>
+ViolationReport .> Scope : <<include>>
+Presence .> Scope : <<include>>
+
+note bottom of Scope
+  Tenant actor chỉ thấy tenant đang active;
+  Site Supervisor chỉ thấy hợp các site được gán.
+end note
+@enduml

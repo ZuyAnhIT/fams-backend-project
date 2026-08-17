@@ -1,0 +1,70 @@
+@startuml FAMS_Auth_Account
+title FAMS — Tài khoản và xác thực (Mức 2)
+left to right direction
+skinparam packageStyle rectangle
+skinparam shadowing false
+
+actor "Người dùng" as Guest
+actor "Người dùng đã xác thực" as User
+actor "Google Identity" as Google <<external system>>
+actor "Firebase Phone Auth" as Firebase <<external system>>
+actor "Dịch vụ Email" as Mail <<external system>>
+actor "Object Storage" as Storage <<external system>>
+
+rectangle "FAMS — Identity & Account" {
+  usecase "Đăng ký tài khoản" as Register
+  usecase "Xác thực email" as VerifyEmail
+  usecase "Đăng nhập bằng\nemail/mật khẩu" as LoginPassword
+  usecase "Đăng nhập bằng Google" as LoginGoogle
+  usecase "Đăng nhập bằng\nsố điện thoại" as LoginPhone
+  usecase "Xác minh Google ID token" as VerifyGoogle
+  usecase "Xác minh Firebase ID token" as VerifyFirebase
+  usecase "Hoàn tất xác thực 2FA" as Login2FA
+  usecase "Khôi phục mật khẩu" as ResetPassword
+  usecase "Đăng xuất thiết bị hiện tại" as Logout
+  usecase "Đăng xuất mọi thiết bị" as LogoutAll
+  usecase "Xem/cập nhật hồ sơ" as Profile
+  usecase "Cập nhật ảnh đại diện" as Avatar
+  usecase "Đổi mật khẩu" as ChangePassword
+  usecase "Thiết lập/tắt TOTP 2FA" as Manage2FA
+  usecase "Liên kết/hủy liên kết Google" as LinkGoogle
+  usecase "Cập nhật email/số điện thoại" as ChangeIdentity
+  usecase "Chọn/chuyển tenant đang active" as SwitchTenant
+}
+
+Guest --> Register
+Guest --> VerifyEmail
+Guest --> LoginPassword
+Guest --> LoginGoogle
+Guest --> LoginPhone
+Guest --> ResetPassword
+User --> Logout
+User --> LogoutAll
+User --> Profile
+User --> Avatar
+User --> ChangePassword
+User --> Manage2FA
+User --> LinkGoogle
+User --> ChangeIdentity
+User --> SwitchTenant
+
+VerifyEmail .> Register : <<extend>>\nđăng ký bằng email
+LoginGoogle .> VerifyGoogle : <<include>>
+LoginPhone .> VerifyFirebase : <<include>>
+Login2FA .> LoginPassword : <<extend>>\nkhi tài khoản bật 2FA
+Avatar .> Profile : <<extend>>
+
+Google --> VerifyGoogle
+Google --> LinkGoogle
+Firebase --> VerifyFirebase
+Firebase --> ChangeIdentity
+Mail --> VerifyEmail
+Mail --> ResetPassword
+Mail --> ChangeIdentity
+Storage --> Avatar
+
+note bottom of LoginPhone
+  Client thực hiện gửi/nhập OTP trực tiếp với Firebase;
+  FAMS chỉ xác minh Firebase ID token cuối cùng.
+end note
+@enduml
