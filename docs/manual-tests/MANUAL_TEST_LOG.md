@@ -95,6 +95,10 @@ giữ nguyên ✅ ĐÃ KHÓA. Đồng thời xác nhận UI "tìm người thao 
 | 60 | Cấu hình OT và giới hạn giờ | ✅ Pass | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-17 | Audit gốc "đã xong" xác nhận đúng, đã mở rộng OT ngày/tuần từ trước (cảnh báo không chặn, snapshot không hồi tố); **gap đã vá**: ghi audit `shift_ot_configured` |
 | 61 | Danh sách ca theo site | ✅ Pass | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-17 | **Gap đã vá**: tìm theo tên (`search`) + lọc `isDefault` — chuyển sang `JpaSpecificationExecutor`/Criteria API sau khi JPQL `@Query` với `CAST(:param)` gây lỗi "cannot cast bytea" trên tham số null (bài học kỹ thuật quan trọng, ghi trong kịch bản) |
 | 62 | Cập nhật hoặc ngừng dùng ca | ✅ Pass | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-17 | Audit gốc LỖI THỜI đã sửa lại: endpoint xóa cứng THẬT SỰ có, chặn đúng điều kiện (không phải thiếu); **gap đã vá**: ghi audit `shift_updated`/`shift_deleted`; hỗ trợ đặt/bỏ `isDefault` qua PUT dùng chung logic với #59 |
+| 63 | Tạo phân công nhân viên vào site | ✅ Pass | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-17 | **Nâng cấp theo quyết định chủ dự án**: chống trùng cùng site giờ theo khoảng giờ thực tế (như cross-site) thay vì chặn tuyệt đối — bỏ unique index DB cũ (migration V100); **gap đã vá**: ghi audit `assignment_created` |
+| 64 | Danh sách phân công | ✅ Pass | ✅ Pass | ✅ **PASS — ĐÃ KHÓA** | 2026-08-17 | **Gap đã vá**: filter khoảng ngày (overlap). **Theo quyết định chủ dự án**: thêm mới hẳn màn hình Mobile App "Phân công của tôi" (`/assignments/me`, self-service, cross-site) — trước đây App không có |
+| 65 | Cập nhật phân công | ✅ Pass | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-17 | **Gap quan trọng đã vá**: chặn sửa assignment đã hủy (400, cả API lẫn UI); re-validate overlap dùng logic mới gộp cross-site + cùng-site; **gap đã vá**: ghi audit `assignment_updated` |
+| 66 | Hủy phân công | ✅ Pass | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-17 | **Gap đã vá**: `cancelled_by`/`cancelled_at` (migration V100, cùng pattern employee_invitations V93) + ghi audit `assignment_cancelled`. Xác nhận hiển thị đúng tới tận Mobile App thật |
 
 ---
 
@@ -663,6 +667,50 @@ giữ nguyên ✅ ĐÃ KHÓA. Đồng thời xác nhận UI "tìm người thao 
   `isDefault` qua PUT, dùng chung logic 1-mặc-định/site với #59 — test live: PUT `isDefault:true`
   lên ca khác → xác nhận ca cũ tự mất mặc định. Script tự động `test_update_shift.sh` 14/14 pass,
   không hồi quy.
+
+---
+
+### #63 — Tạo phân công nhân viên vào site — ✅ PASS — ĐÃ KHÓA (2026-08-17)
+- Kịch bản: `docs/manual-tests/sprint-2-feature-63-create-assignment.md`. **Quyết định nghiệp vụ
+  của chủ dự án (hỏi trực tiếp)**: nâng cấp chống trùng cùng site theo khoảng giờ thực tế (giống
+  logic cross-site đã có sẵn) thay vì chặn tuyệt đối 1 assignment active/site — bỏ hẳn unique index
+  DB cũ `uq_assignments_employee_site_active` (migration V100), enforce hoàn toàn ở tầng service
+  qua `assertNoConflicts` (gộp chung cross-site + same-site, cùng 1 helper). **Gap audit đã vá**:
+  action `assignment_created`. Test live qua API/DB: tạo 2 assignment cùng nhân viên cùng site
+  không chồng ngày (tháng 8 + tháng 9) → cả 2 đều 201; tạo assignment thứ 3 chồng giờ thật với cả 2
+  → 409 đúng thông báo. Script tự động `test_create_assignment.sh` 14/14 +
+  `test_assignment_recurring_schedule.sh` 10/10 pass, không hồi quy.
+
+### #64 — Danh sách phân công — ✅ PASS — ĐÃ KHÓA (2026-08-17)
+- Kịch bản: `docs/manual-tests/sprint-2-feature-64-list-assignments.md`. **Gap filter khoảng ngày
+  đã vá**: `dateRangeFrom`/`dateRangeTo` kiểu overlap trong `AssignmentSpecification` + RangePicker
+  trên UI. **Quyết định nghiệp vụ của chủ dự án (hỏi trực tiếp)**: làm mới hẳn 1 màn hình Mobile App
+  "Phân công của tôi" (trước đây App hoàn toàn không có màn liệt kê phân công) — thêm endpoint mới
+  `GET /tenants/{tenantId}/assignments/me` (self-service, không cần quyền `assignments:*`, cùng mô
+  hình tin cậy với `/attendance/me/monthly`), trả về toàn bộ phân công nhân viên gộp mọi site kèm
+  `siteSummary`. Test live: Web Admin filter khoảng ngày qua UI thật (Playwright) — lọc đúng loại
+  trừ/bao gồm theo overlap; Mobile App (Playwright qua `expo start --web`) — đăng nhập nhân viên có
+  2 phân công ở 2 site khác nhau, vào Hồ sơ → "Phân công của tôi" → hiện đúng cả 2, đúng tên site,
+  vai trò, ngày, trạng thái. Script tự động `test_list_assignments.sh` 13/13 pass, không hồi quy.
+
+### #65 — Cập nhật phân công — ✅ PASS — ĐÃ KHÓA (2026-08-17)
+- Kịch bản: `docs/manual-tests/sprint-2-feature-65-update-assignment.md`. **Gap quan trọng nhất
+  epic này đã vá**: chặn sửa assignment đã hủy (400 "Cannot modify a cancelled assignment — it is a
+  closed record kept for history") — trước đây có thể sửa ngày/ca/vai trò của 1 bản ghi đã đóng qua
+  cả API lẫn UI (nút Sửa không disable). Re-validate overlap khi sửa giờ dùng chung logic mới với
+  #63 (cross-site + cùng-site). **Gap audit đã vá**: action `assignment_updated`. Test live: hủy 1
+  assignment rồi thử sửa `notes` của chính nó qua API → 400 đúng thông báo; nút Sửa trên UI xác
+  nhận tự disable với dòng đã hủy (ảnh `webassign-01-list.png`). Script tự động
+  `test_update_assignment.sh` 12/12 pass, không hồi quy.
+
+### #66 — Hủy phân công — ✅ PASS — ĐÃ KHÓA (2026-08-17)
+- Kịch bản: `docs/manual-tests/sprint-2-feature-66-cancel-assignment.md`. **Gap đã vá**:
+  `cancelled_by`/`cancelled_at` (migration V100, cùng pattern đã áp dụng cho `employee_invitations`
+  ở V93) + ghi audit `assignment_cancelled`. Tự hủy `scheduled_checks` pending liên quan xác nhận
+  vẫn hoạt động đúng, không đổi. Test live: hủy 1 assignment qua API → `cancelledBy`/`cancelledAt`
+  trả về đúng; xác nhận hiển thị tới tận Mobile App thật — card phân công đã hủy hiện dòng đỏ
+  "Đã hủy lúc [thời gian]" (ảnh `app-05-my-assignments-with-cancelled.png`), round-trip đầy đủ từ
+  DB → API → UI nhân viên. Script tự động `test_cancel_assignment.sh` 9/9 pass, không hồi quy.
 
 ---
 

@@ -47,6 +47,12 @@ public class Assignment {
     @Column(nullable = false, length = 20)
     private String status;
 
+    @Column(name = "cancelled_by")
+    private UUID cancelledBy;
+
+    @Column(name = "cancelled_at")
+    private OffsetDateTime cancelledAt;
+
     @Column(columnDefinition = "TEXT")
     private String notes;
 
