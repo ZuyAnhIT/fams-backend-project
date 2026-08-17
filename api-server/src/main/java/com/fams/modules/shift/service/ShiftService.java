@@ -76,6 +76,7 @@ public class ShiftService {
         map.put("allowOvertime", s.isAllowOvertime());
         map.put("earlyCheckinMinutes", s.getEarlyCheckinMinutes());
         map.put("lateCheckoutMinutes", s.getLateCheckoutMinutes());
+        map.put("graceMinutes", s.getGraceMinutes());
         map.put("maxOtMinutesPerDay", s.getMaxOtMinutesPerDay());
         map.put("maxOtMinutesPerWeek", s.getMaxOtMinutesPerWeek());
         map.put("status", s.getStatus());
@@ -142,6 +143,7 @@ public class ShiftService {
                 .status("active")
                 .checkinPolicyOverride(request.getCheckinPolicyOverride())
                 .isDefault(request.isDefaultShift())
+                .graceMinutes(request.getGraceMinutes())
                 .createdBy(callerUserId)
                 .build();
 
@@ -176,10 +178,11 @@ public class ShiftService {
         if (request.getAllowOvertime() == null
                 && request.getEarlyCheckinMinutes() == null
                 && request.getLateCheckoutMinutes() == null
+                && request.getGraceMinutes() == null
                 && request.getMaxOtMinutesPerDay() == null && !request.isClearMaxOtMinutesPerDay()
                 && request.getMaxOtMinutesPerWeek() == null && !request.isClearMaxOtMinutesPerWeek()) {
             throw new IllegalArgumentException(
-                    "At least one of allowOvertime, earlyCheckinMinutes, lateCheckoutMinutes, "
+                    "At least one of allowOvertime, earlyCheckinMinutes, lateCheckoutMinutes, graceMinutes, "
                     + "maxOtMinutesPerDay/clearMaxOtMinutesPerDay, or maxOtMinutesPerWeek/clearMaxOtMinutesPerWeek "
                     + "must be provided");
         }
@@ -189,6 +192,7 @@ public class ShiftService {
         if (request.getAllowOvertime() != null)       shift.setAllowOvertime(request.getAllowOvertime());
         if (request.getEarlyCheckinMinutes() != null) shift.setEarlyCheckinMinutes(request.getEarlyCheckinMinutes());
         if (request.getLateCheckoutMinutes() != null) shift.setLateCheckoutMinutes(request.getLateCheckoutMinutes());
+        if (request.getGraceMinutes() != null)        shift.setGraceMinutes(request.getGraceMinutes());
 
         // #60 (docs/api/backend-feature-audit-2026-08-07.md): clear-flag takes a back seat to an
         // explicit value in the same request — same "clearX wins only when no value given"
@@ -395,6 +399,7 @@ public class ShiftService {
                 .allowOvertime(s.isAllowOvertime())
                 .earlyCheckinMinutes(s.getEarlyCheckinMinutes())
                 .lateCheckoutMinutes(s.getLateCheckoutMinutes())
+                .graceMinutes(s.getGraceMinutes())
                 .maxOtMinutesPerDay(s.getMaxOtMinutesPerDay())
                 .maxOtMinutesPerWeek(s.getMaxOtMinutesPerWeek())
                 .status(s.getStatus())

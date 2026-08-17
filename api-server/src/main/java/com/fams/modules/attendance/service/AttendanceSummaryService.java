@@ -7,11 +7,13 @@ import com.fams.modules.attendance.entity.AttendanceSummary;
 import com.fams.modules.attendance.repository.AttendanceMonthlyAggregateProjection;
 import com.fams.modules.attendance.repository.AttendanceSummaryRepository;
 import com.fams.modules.attendance.specification.AttendanceSummarySpecification;
+import com.fams.modules.attendance.constant.AttendanceEventTypes;
 import com.fams.modules.audit.service.AuditLogService;
 import com.fams.modules.checkin.entity.CheckinRecord;
 import com.fams.modules.checkin.repository.CheckinRepository;
 import com.fams.modules.employee.entity.Employee;
 import com.fams.modules.employee.repository.EmployeeRepository;
+import com.fams.modules.notification.service.NotificationService;
 import com.fams.modules.randomcheck.repository.RandomCheckConfigRepository;
 import com.fams.modules.randomcheck.repository.ScheduledCheckRepository;
 import com.fams.modules.rbac.repository.UserRoleRepository;
@@ -58,6 +60,7 @@ public class AttendanceSummaryService {
     private final AuditLogService auditLogService;
     private final ScheduledCheckRepository scheduledCheckRepository;
     private final RandomCheckConfigRepository randomCheckConfigRepository;
+    private final NotificationService notificationService;
 
     public AttendanceSummaryService(AttendanceSummaryRepository summaryRepository,
                                     CheckinRepository checkinRepository,
@@ -67,7 +70,8 @@ public class AttendanceSummaryService {
                                     SiteScopeService siteScopeService,
                                     AuditLogService auditLogService,
                                     ScheduledCheckRepository scheduledCheckRepository,
-                                    RandomCheckConfigRepository randomCheckConfigRepository) {
+                                    RandomCheckConfigRepository randomCheckConfigRepository,
+                                    NotificationService notificationService) {
         this.summaryRepository = summaryRepository;
         this.checkinRepository = checkinRepository;
         this.siteRepository = siteRepository;
@@ -77,6 +81,7 @@ public class AttendanceSummaryService {
         this.auditLogService = auditLogService;
         this.scheduledCheckRepository = scheduledCheckRepository;
         this.randomCheckConfigRepository = randomCheckConfigRepository;
+        this.notificationService = notificationService;
     }
 
     /** Tenant-default's failureEscalationThreshold, used to compute exceedsRandomCheckFailureThreshold
@@ -366,18 +371,25 @@ public class AttendanceSummaryService {
             boolean allowOvertime = Boolean.TRUE.equals(shiftSnapshotSource.getShiftAllowOvertime());
             int lateCheckoutMinutes = shiftSnapshotSource.getShiftLateCheckoutMinutes() != null
                     ? shiftSnapshotSource.getShiftLateCheckoutMinutes() : 0;
+            int graceMinutes = shiftSnapshotSource.getShiftGraceMinutes() != null
+                    ? shiftSnapshotSource.getShiftGraceMinutes() : 0;
 
             // For overnight shifts the shift end is on the next calendar day.
             LocalDate endDate = allowOvernight ? date.plusDays(1) : date;
             ZonedDateTime shiftStart = ZonedDateTime.of(date, startTime, zone);
             ZonedDateTime shiftEnd   = ZonedDateTime.of(endDate, endTime, zone);
 
-            // Task 81: late detection — first check-in vs shift start
+            // Task 81: late detection — first check-in vs shift start, tolerant of graceMinutes.
+            // Arriving within grace still records lateMinutes=0; arriving beyond it records the
+            // FULL raw delay (not delay-minus-grace) — grace only decides whether isLate trips.
             if (firstCheckinAt != null) {
                 ZonedDateTime actualStart = firstCheckinAt.atZoneSameInstant(zone);
                 if (actualStart.isAfter(shiftStart)) {
-                    lateMinutes = (int) Duration.between(shiftStart, actualStart).toMinutes();
-                    isLate = lateMinutes > 0;
+                    int rawDelayMinutes = (int) Duration.between(shiftStart, actualStart).toMinutes();
+                    if (rawDelayMinutes > graceMinutes) {
+                        lateMinutes = rawDelayMinutes;
+                        isLate = true;
+                    }
                 }
             }
 
@@ -489,6 +501,50 @@ public class AttendanceSummaryService {
                 "otMinutes={} missingCheckout={}",
                 tenantId, employeeId, siteId, date, status, totalWorkMinutes,
                 isLate, lateMinutes, isEarlyLeave, earlyLeaveMinutes, otMinutes, missingCheckout);
+
+        // #84 (2026-08-17): notify on the false→true transition only — `existing` was fetched
+        // BEFORE this save, so it still reflects the pre-recompute state. Guarding on the
+        // transition (not just "missingCheckout == true") avoids re-notifying on every later
+        // recompute of the same already-flagged day (e.g. an unrelated field changing).
+        boolean wasMissingCheckout = existing != null && existing.isMissingCheckout();
+        if (missingCheckout && !wasMissingCheckout) {
+            notifyMissingCheckout(tenantId, employeeId, siteId, date);
+        }
+    }
+
+    private void notifyMissingCheckout(UUID tenantId, UUID employeeId, UUID siteId, LocalDate date) {
+        try {
+            Employee employee = employeeRepository.findById(employeeId).orElse(null);
+            String empName = resolveEmployeeName(tenantId, employeeId);
+            String siteName = resolveSiteName(tenantId, siteId);
+            String body = String.format("%s chưa check-out cho ngày %s tại %s.", empName, date, siteName);
+            Map<String, Object> metadata = Map.of(
+                    "employeeId", employeeId.toString(),
+                    "siteId", siteId.toString(),
+                    "attendanceDate", date.toString());
+
+            if (employee != null && employee.getUserId() != null) {
+                notificationService.createNotification(
+                        tenantId, employee.getUserId(),
+                        AttendanceEventTypes.MISSING_CHECKOUT_EMPLOYEE,
+                        "Quên check-out",
+                        body, metadata);
+            }
+
+            Set<UUID> hrUserIds = userRoleRepository
+                    .findDistinctActiveHolderIdsOfPermissionInTenant(tenantId, "attendance:list");
+            for (UUID hrUserId : hrUserIds) {
+                if (employee != null && hrUserId.equals(employee.getUserId())) continue;
+                notificationService.createNotification(
+                        tenantId, hrUserId,
+                        AttendanceEventTypes.MISSING_CHECKOUT_HR,
+                        "Nhân viên quên check-out",
+                        body, metadata);
+            }
+        } catch (Exception e) {
+            log.warn("Failed to send missing-checkout notification tenantId={} employeeId={} date={}: {}",
+                    tenantId, employeeId, date, e.getMessage());
+        }
     }
 
     // ── Read APIs ──────────────────────────────────────────────────────────────
@@ -736,6 +792,16 @@ public class AttendanceSummaryService {
             throw new AccessDeniedException("You do not have permission to adjust attendance for this site");
         }
 
+        Map<String, Object> oldValue = new LinkedHashMap<>();
+        oldValue.put("totalWorkMinutes", summary.getTotalWorkMinutes());
+        oldValue.put("status", summary.getStatus());
+        oldValue.put("late", summary.isLate());
+        oldValue.put("lateMinutes", summary.getLateMinutes());
+        oldValue.put("earlyLeave", summary.isEarlyLeave());
+        oldValue.put("earlyLeaveMinutes", summary.getEarlyLeaveMinutes());
+        oldValue.put("otMinutes", summary.getOtMinutes());
+        oldValue.put("missingCheckout", summary.isMissingCheckout());
+
         if (request.getTotalWorkMinutes() != null) summary.setTotalWorkMinutes(request.getTotalWorkMinutes());
         if (request.getStatus() != null)           summary.setStatus(request.getStatus());
         if (request.getLate() != null)             summary.setLate(request.getLate());
@@ -747,6 +813,28 @@ public class AttendanceSummaryService {
         summary.setAdjustmentReason(request.getReason());
 
         summaryRepository.save(summary);
+
+        Map<String, Object> newValue = new LinkedHashMap<>();
+        newValue.put("totalWorkMinutes", summary.getTotalWorkMinutes());
+        newValue.put("status", summary.getStatus());
+        newValue.put("late", summary.isLate());
+        newValue.put("lateMinutes", summary.getLateMinutes());
+        newValue.put("earlyLeave", summary.isEarlyLeave());
+        newValue.put("earlyLeaveMinutes", summary.getEarlyLeaveMinutes());
+        newValue.put("otMinutes", summary.getOtMinutes());
+        newValue.put("missingCheckout", summary.isMissingCheckout());
+        newValue.put("reason", request.getReason());
+
+        try {
+            auditLogService.record(
+                    tenantId, callerUserId, null,
+                    "AttendanceSummary", summaryId.toString(), "attendance_summary_adjusted",
+                    oldValue, newValue,
+                    com.fams.shared.security.HttpRequestUtils.currentRequestId(), null, null);
+        } catch (Exception e) {
+            log.warn("Failed to record audit log for attendance_summary_adjusted summaryId={}: {}",
+                    summaryId, e.getMessage());
+        }
 
         log.info("HR adjusted attendance summary: summaryId={} by={} reason={}",
                 summaryId, callerUserId, request.getReason());

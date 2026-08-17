@@ -131,6 +131,20 @@ public interface UserRoleRepository extends JpaRepository<UserRole, UUID> {
     long countDistinctActiveHoldersOfPermissionInTenant(
             @Param("tenantId") UUID tenantId, @Param("permissionName") String permissionName);
 
+    /** #84 (2026-08-17): the actual userIds behind {@link #countDistinctActiveHoldersOfPermissionInTenant}
+     *  — used to target missing-checkout notifications at every HR/admin holder of a given
+     *  permission in a tenant, not just report a count. */
+    @Query("""
+            SELECT DISTINCT ur.userId FROM UserRole ur
+            JOIN ur.role r
+            JOIN r.permissions p
+            WHERE ur.tenantId = :tenantId
+              AND p.name = :permissionName
+              AND ur.deletedAt IS NULL
+            """)
+    Set<UUID> findDistinctActiveHolderIdsOfPermissionInTenant(
+            @Param("tenantId") UUID tenantId, @Param("permissionName") String permissionName);
+
     @Query("SELECT ur FROM UserRole ur JOIN FETCH ur.role WHERE ur.id = :id AND ur.deletedAt IS NULL")
     java.util.Optional<UserRole> findActiveById(@Param("id") UUID id);
 

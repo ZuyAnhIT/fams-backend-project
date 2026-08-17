@@ -704,6 +704,7 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
   - *DB Entities:* `attendance_summaries, checkins, shift_templates, assignments`
 - [x] **#81 — Tính đi muộn** `P0` · 5sp · Nền tảng: Backend, Queue/AI/Automation
   - *Audit (2026-07-22):* ✅ ĐÃ XONG — bằng chứng: late detection, test_late_detection.sh
+  - *Audit (2026-08-17):* 🟡→✅ ĐÃ FIX — gap thật: KHÔNG có grace period (trễ 1 phút đã tính muộn), AC ghi "shift start + grace" nhưng code không có field grace nào. Quyết định (project owner): thêm `Shift.graceMinutes` (mặc định 5, migration V101 áp hồi tố cho ca cũ), `CheckinRecord.shiftGraceMinutes` (snapshot), sửa `AttendanceSummaryService.recompute()`: trong ân hạn → không tính muộn; vượt ân hạn → tính ĐỦ số phút trễ thực (không trừ ân hạn). Web Admin: bổ sung input "Ân hạn trước khi tính muộn" trong form cấu hình OT + hiển thị trong bảng danh sách ca. Test live: PASS (xem `sprint-3-feature-81-late-detection.md`).
   - *User Story:* Là một hệ thống, tôi muốn xác định is_late và late_minutes để báo cáo kỷ luật giờ vào.
   - *Acceptance Criteria:* So first_checkin_at với shift start + grace; tính late_minutes theo rule; cập nhật summary.
   - *DB Entities:* `attendance_summaries, shift_templates, checkins`
@@ -717,8 +718,9 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
   - *User Story:* Là một hệ thống, tôi muốn tính ot_minutes theo shift và tổng giờ làm để phục vụ tính công/tăng ca.
   - *Acceptance Criteria:* Chỉ tính OT nếu allow_overtime=true; so total_work_minutes với standard_hours_per_day; cập nhật ot_minutes.
   - *DB Entities:* `attendance_summaries, shift_templates`
-- [ ] **#84 — Phát hiện thiếu checkout** `P0` · 3sp · Nền tảng: Backend, Web Admin, Mobile App, Queue/AI/Automation
+- [x] **#84 — Phát hiện thiếu checkout** `P0` · 3sp · Nền tảng: Backend, Web Admin, Mobile App, Queue/AI/Automation
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: missingCheckout flag, test_missing_checkout.sh; thiếu: không tạo notification cho HR/nhân viên
+  - *Audit (2026-08-17):* 🟡→✅ ĐÃ FIX — 2 gap thật: (1) không tạo notification cho HR/nhân viên — đã thêm `AttendanceEventTypes.MISSING_CHECKOUT_EMPLOYEE`/`MISSING_CHECKOUT_HR` vào `NotificationEventTypeCatalog`, gửi đúng 1 lần tại thời điểm `missingCheckout` chuyển false→true (không spam ở các lần tính lại sau); (2) gap mới phát hiện: endpoint `PATCH .../adjust` không ghi audit log (trong khi `unlock-and-recompute` có) — đã thêm `AuditLogService.record(...)` action `attendance_summary_adjusted`. `status=partial` trong AC gốc xác nhận SAI, hệ thống chỉ có `present`/`incomplete`. Test live: PASS cả 2 fix (xem `sprint-3-feature-84-missing-checkout.md`).
   - *User Story:* Là một hệ thống, tôi muốn đánh dấu ngày có check-in nhưng không có check-out để HR xử lý công thiếu dữ liệu.
   - *Acceptance Criteria:* Cron cuối ngày kiểm tra pair còn thiếu; set missing_checkout=true; status partial; tạo notification cho HR/employee.
   - *DB Entities:* `attendance_summaries, checkins, notifications`
