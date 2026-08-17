@@ -66,7 +66,7 @@ public class MyExceptionsController {
         UUID userId = userDetails.getUserId();
 
         List<CheckinResponse> pendingCheckins = checkinService
-                .getCheckinHistory(tenantId, userId, "pending_review", null, null, 0, cappedSize)
+                .getCheckinHistory(tenantId, userId, null, "pending_review", null, null, 0, cappedSize)
                 .getContent();
         List<ViolationListResponse> unresolvedViolations = violationService
                 .listMyViolations(tenantId, userId, false, 0, cappedSize)
