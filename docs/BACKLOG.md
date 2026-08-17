@@ -592,23 +592,23 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 
 #### Phân công
 
-- [ ] **#63 — Tạo phân công nhân viên vào site** `P0` · 8sp · Nền tảng: Backend, Web Admin
-  - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: AssignmentService.createAssignment, test_create_assignment.sh; thiếu: không có assignment_type/trạng thái planned; check trùng chỉ theo site không theo khoảng ngày thật
+- [x] **#63 — Tạo phân công nhân viên vào site** `P0` · 8sp · Nền tảng: Backend, Web Admin
+  - *Audit (2026-08-17):* ✅ ĐÃ VÁ — chống trùng cùng site nâng cấp theo khoảng giờ thực tế (quyết định chủ dự án, bỏ unique index DB cũ, migration V100) + ghi audit `assignment_created`. Test live: `docs/manual-tests/sprint-2-feature-63-create-assignment.md`.
   - *User Story:* Là một HR/Admin, tôi muốn phân công nhân viên vào công trình theo ca và thời gian để cho phép nhân viên chấm công đúng site.
   - *Acceptance Criteria:* Chọn nhân viên/site/shift/start/end; role_at_site; assignment_type; kiểm tra trùng thời gian; status planned/active.
   - *DB Entities:* `assignments, tenant_users, sites, shift_templates, audit_logs`
-- [ ] **#64 — Danh sách phân công** `P0` · 3sp · Nền tảng: Backend, Web Admin, Mobile App
-  - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: AssignmentService.listAssignments, test_list_assignments.sh; thiếu: thiếu filter khoảng ngày
+- [x] **#64 — Danh sách phân công** `P0` · 3sp · Nền tảng: Backend, Web Admin, Mobile App
+  - *Audit (2026-08-17):* ✅ ĐÃ VÁ — filter khoảng ngày (overlap) + màn hình Mobile App "Phân công của tôi" mới hoàn toàn (quyết định chủ dự án), endpoint `GET /tenants/{tenantId}/assignments/me`. Test live: `docs/manual-tests/sprint-2-feature-64-list-assignments.md`.
   - *User Story:* Là một HR/Admin/Supervisor, tôi muốn xem phân công có tìm kiếm, lọc, sort, phân trang để điều phối nhân sự công trình.
   - *Acceptance Criteria:* Lọc site, nhân viên, status, role_at_site, date range; hiển thị ca và site chính; phân trang.
   - *DB Entities:* `assignments, tenant_users, sites, shift_templates`
-- [ ] **#65 — Cập nhật phân công** `P0` · 5sp · Nền tảng: Backend, Web Admin
-  - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: AssignmentService.updateAssignment, test_update_assignment.sh; thiếu: không chặn sửa assignment đã completed, không re-validate overlap
+- [x] **#65 — Cập nhật phân công** `P0` · 5sp · Nền tảng: Backend, Web Admin
+  - *Audit (2026-08-17):* ✅ ĐÃ VÁ — chặn sửa assignment đã hủy (gap quan trọng nhất epic) + re-validate overlap dùng logic mới + ghi audit `assignment_updated`. Test live: `docs/manual-tests/sprint-2-feature-65-update-assignment.md`.
   - *User Story:* Là một HR/Admin, tôi muốn điều chỉnh ca, thời gian hoặc vai trò tại site để phù hợp thay đổi thực tế.
   - *Acceptance Criteria:* Không cho sửa assignment đã completed nếu thiếu quyền; validate overlap; ghi audit.
   - *DB Entities:* `assignments, audit_logs`
-- [ ] **#66 — Hủy phân công** `P0` · 3sp · Nền tảng: Backend, Web Admin, Queue/AI/Automation
-  - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: AssignmentService.cancelAssignment, test_cancel_assignment.sh; thiếu: tự hủy scheduled_checks liên quan tốt; thiếu cancelled_by/at
+- [x] **#66 — Hủy phân công** `P0` · 3sp · Nền tảng: Backend, Web Admin, Queue/AI/Automation
+  - *Audit (2026-08-17):* ✅ ĐÃ VÁ — thêm `cancelled_by`/`cancelled_at` (migration V100, cùng pattern employee_invitations V93) + ghi audit `assignment_cancelled`. Test live: `docs/manual-tests/sprint-2-feature-66-cancel-assignment.md`.
   - *User Story:* Là một HR/Admin, tôi muốn hủy phân công chưa hoặc đang hiệu lực để ngăn chấm công sai site.
   - *Acceptance Criteria:* Set assignment_status=cancelled; lưu cancelled_by/cancelled_at; cancel scheduled_checks pending liên quan.
   - *DB Entities:* `assignments, scheduled_checks, audit_logs`

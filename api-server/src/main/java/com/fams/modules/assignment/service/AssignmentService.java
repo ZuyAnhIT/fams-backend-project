@@ -7,6 +7,7 @@ import com.fams.modules.assignment.entity.Assignment;
 import com.fams.modules.assignment.repository.AssignmentRepository;
 import com.fams.modules.assignment.specification.AssignmentSpecification;
 import com.fams.modules.assignment.util.DayOfWeekBitmask;
+import com.fams.modules.audit.service.AuditLogService;
 import com.fams.modules.employee.repository.EmployeeRepository;
 import com.fams.modules.randomcheck.service.ScheduledCheckCancelService;
 import com.fams.modules.rbac.repository.UserRoleRepository;
@@ -17,6 +18,7 @@ import com.fams.modules.tenant.repository.TenantRepository;
 import com.fams.shared.exception.DuplicateResourceException;
 import com.fams.shared.exception.ResourceNotFoundException;
 import com.fams.shared.pagination.PageResponse;
+import com.fams.shared.security.HttpRequestUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -31,6 +33,7 @@ import org.springframework.util.StringUtils;
 import java.time.DayOfWeek;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
@@ -56,6 +59,7 @@ public class AssignmentService {
     private final UserRoleRepository userRoleRepository;
     private final SiteScopeService siteScopeService;
     private final ScheduledCheckCancelService scheduledCheckCancelService;
+    private final AuditLogService auditLogService;
 
     public AssignmentService(AssignmentRepository assignmentRepository,
                              SiteRepository siteRepository,
@@ -64,7 +68,8 @@ public class AssignmentService {
                              TenantRepository tenantRepository,
                              UserRoleRepository userRoleRepository,
                              SiteScopeService siteScopeService,
-                             ScheduledCheckCancelService scheduledCheckCancelService) {
+                             ScheduledCheckCancelService scheduledCheckCancelService,
+                             AuditLogService auditLogService) {
         this.assignmentRepository = assignmentRepository;
         this.siteRepository = siteRepository;
         this.employeeRepository = employeeRepository;
@@ -73,6 +78,35 @@ public class AssignmentService {
         this.userRoleRepository = userRoleRepository;
         this.siteScopeService = siteScopeService;
         this.scheduledCheckCancelService = scheduledCheckCancelService;
+        this.auditLogService = auditLogService;
+    }
+
+    private Map<String, Object> assignmentAuditSnapshot(Assignment a) {
+        Map<String, Object> map = new LinkedHashMap<>();
+        map.put("siteId", a.getSiteId());
+        map.put("employeeId", a.getEmployeeId());
+        map.put("shiftId", a.getShiftId());
+        map.put("startDate", String.valueOf(a.getStartDate()));
+        map.put("endDate", a.getEndDate() != null ? String.valueOf(a.getEndDate()) : null);
+        map.put("daysOfWeek", a.getDaysOfWeek());
+        map.put("role", a.getRole());
+        map.put("status", a.getStatus());
+        return map;
+    }
+
+    private void recordAudit(UUID tenantId, UUID actorId, UUID assignmentId, String action,
+                              Map<String, Object> before, Map<String, Object> after) {
+        try {
+            auditLogService.record(
+                    tenantId, actorId, null,
+                    "Assignment", assignmentId.toString(), action,
+                    before, after,
+                    HttpRequestUtils.currentRequestId(),
+                    HttpRequestUtils.currentIpAddress(),
+                    HttpRequestUtils.currentUserAgent());
+        } catch (Exception e) {
+            log.warn("Failed to record audit log action={} assignmentId={}: {}", action, assignmentId, e.getMessage());
+        }
     }
 
     private void assertSiteInScope(UUID callerUserId, UUID tenantId, UUID siteId, boolean callerIsPlatformAdmin) {
@@ -81,23 +115,36 @@ public class AssignmentService {
         }
     }
 
-    /** An employee cannot physically be at two sites during overlapping hours. Blocks
-     *  creating/updating an assignment only when its actual SHIFT TIME WINDOW (in each site's
-     *  own timezone, overnight shifts spanning into the next day) overlaps another active
-     *  assignment for the same employee at a DIFFERENT site, on a calendar day both assignments'
-     *  date range + daysOfWeek can actually reach. Same day, non-overlapping hours (e.g. Site A
-     *  morning, Site B evening) is explicitly ALLOWED — this is real, common multi-site staffing.
-     *  A shift-less assignment (no shiftId) is treated as occupying the whole day locally, since
-     *  no narrower time window was specified. Same-site overlap is a separate, pre-existing check
-     *  (the active-assignment-per-site uniqueness constraint).
+    /** An employee cannot physically be at two sites (or two shifts at the SAME site) during
+     *  overlapping hours. Blocks creating/updating an assignment only when its actual SHIFT TIME
+     *  WINDOW (in each site's own timezone, overnight shifts spanning into the next day)
+     *  overlaps another active assignment for the same employee — at a DIFFERENT site, or the
+     *  SAME site — on a calendar day both assignments' date range + daysOfWeek can actually
+     *  reach. Same day, non-overlapping hours (e.g. Site A morning, Site B evening; or a current
+     *  assignment ending before a future one starts at the same site) is explicitly ALLOWED —
+     *  this is real, common multi-site staffing and forward scheduling (#63: replaced the old
+     *  "at most one active assignment per employee+site, period" constraint, which blocked
+     *  pre-creating a non-overlapping future assignment).
+     *
+     *  excludeAssignmentId lets updateAssignment re-check without conflicting with itself.
      *
      *  Note: does not account for daylight-saving transitions (immaterial for this system's
      *  current tenant timezones, all DST-free) — a representative calendar date is used to
      *  resolve each side's local time window into a comparable UTC instant. */
-    private void assertNoCrossSiteConflict(UUID tenantId, UUID employeeId, UUID siteId, UUID shiftId,
-                                           LocalDate startDate, LocalDate endDate, Short daysOfWeekBitmask) {
-        List<Assignment> coarseConflicts = assignmentRepository.findActiveConflictsAtOtherSites(
+    private void assertNoConflicts(UUID tenantId, UUID employeeId, UUID siteId, UUID excludeAssignmentId,
+                                   UUID shiftId, LocalDate startDate, LocalDate endDate, Short daysOfWeekBitmask) {
+        List<Assignment> crossSiteConflicts = assignmentRepository.findActiveConflictsAtOtherSites(
                 tenantId, employeeId, siteId, startDate, endDate, daysOfWeekBitmask);
+        assertNoTimeOverlap(tenantId, siteId, shiftId, startDate, endDate, daysOfWeekBitmask, crossSiteConflicts, true);
+
+        List<Assignment> sameSiteConflicts = assignmentRepository.findActiveConflictsAtSameSite(
+                tenantId, employeeId, siteId, excludeAssignmentId, startDate, endDate, daysOfWeekBitmask);
+        assertNoTimeOverlap(tenantId, siteId, shiftId, startDate, endDate, daysOfWeekBitmask, sameSiteConflicts, false);
+    }
+
+    private void assertNoTimeOverlap(UUID tenantId, UUID siteId, UUID shiftId,
+                                     LocalDate startDate, LocalDate endDate, Short daysOfWeekBitmask,
+                                     List<Assignment> coarseConflicts, boolean crossSite) {
         if (coarseConflicts.isEmpty()) {
             return;
         }
@@ -125,13 +172,19 @@ public class AssignmentService {
                 }
 
                 if (timeWindowsOverlap(siteId, shiftId, other.getSiteId(), other.getShiftId(), onDate)) {
-                    String otherSiteName = siteRepository
-                            .findByIdAndTenantIdAndDeletedAtIsNull(other.getSiteId(), tenantId)
-                            .map(com.fams.modules.site.entity.Site::getName)
-                            .orElse(other.getSiteId().toString());
-                    throw new DuplicateResourceException(
-                            "Employee already has an overlapping active assignment at site '" + otherSiteName
-                                    + "' during this period — the shift hours overlap");
+                    if (crossSite) {
+                        String otherSiteName = siteRepository
+                                .findByIdAndTenantIdAndDeletedAtIsNull(other.getSiteId(), tenantId)
+                                .map(com.fams.modules.site.entity.Site::getName)
+                                .orElse(other.getSiteId().toString());
+                        throw new DuplicateResourceException(
+                                "Employee already has an overlapping active assignment at site '" + otherSiteName
+                                        + "' during this period — the shift hours overlap");
+                    } else {
+                        throw new DuplicateResourceException(
+                                "Employee already has an overlapping active assignment at this site during this "
+                                        + "period — the shift hours overlap with an existing assignment");
+                    }
                 }
             }
         }
@@ -337,14 +390,8 @@ public class AssignmentService {
             throw new IllegalArgumentException("daysOfWeek must not be empty; omit it to allow every day");
         }
 
-        if (assignmentRepository.existsByEmployeeIdAndSiteIdAndStatusAndDeletedAtIsNull(
-                request.getEmployeeId(), siteId, "active")) {
-            throw new DuplicateResourceException(
-                    "Employee already has an active assignment at this site");
-        }
-
         Short daysOfWeekBitmask = DayOfWeekBitmask.toBitmask(request.getDaysOfWeek());
-        assertNoCrossSiteConflict(tenantId, request.getEmployeeId(), siteId, request.getShiftId(),
+        assertNoConflicts(tenantId, request.getEmployeeId(), siteId, null, request.getShiftId(),
                 request.getStartDate(), request.getEndDate(), daysOfWeekBitmask);
 
         Assignment assignment = Assignment.builder()
@@ -364,6 +411,7 @@ public class AssignmentService {
         assignmentRepository.save(assignment);
         log.info("Assignment created: id={} employeeId={} siteId={} tenantId={} by={}",
                 assignment.getId(), request.getEmployeeId(), siteId, tenantId, callerUserId);
+        recordAudit(tenantId, callerUserId, assignment.getId(), "assignment_created", null, assignmentAuditSnapshot(assignment));
         return toResponse(assignment);
     }
 
@@ -371,6 +419,7 @@ public class AssignmentService {
     public PageResponse<AssignmentResponse> listAssignments(UUID tenantId, UUID siteId,
                                                              String status, String role,
                                                              UUID employeeId, UUID shiftId,
+                                                             LocalDate dateRangeFrom, LocalDate dateRangeTo,
                                                              String sortBy, String sortDir,
                                                              int page, int size,
                                                              UUID callerUserId, boolean callerIsPlatformAdmin) {
@@ -396,7 +445,8 @@ public class AssignmentService {
 
         Specification<Assignment> spec = AssignmentSpecification.build(
                 siteId, tenantId, StringUtils.hasText(status) ? status : null,
-                StringUtils.hasText(role) ? role : null, employeeId, shiftId);
+                StringUtils.hasText(role) ? role : null, employeeId, shiftId,
+                dateRangeFrom, dateRangeTo);
         Page<Assignment> resultPage = assignmentRepository.findAll(spec, pageable);
 
         List<UUID> employeeIds = resultPage.getContent().stream()
@@ -447,6 +497,13 @@ public class AssignmentService {
                 .findByIdAndSiteIdAndTenantIdAndDeletedAtIsNull(assignmentId, siteId, tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Assignment not found: " + assignmentId));
 
+        if ("cancelled".equals(assignment.getStatus())) {
+            throw new IllegalArgumentException(
+                    "Cannot modify a cancelled assignment — it is a closed record kept for history");
+        }
+
+        Map<String, Object> before = assignmentAuditSnapshot(assignment);
+
         if (request.isClearShift()) {
             assignment.setShiftId(null);
         } else if (request.getShiftId() != null) {
@@ -487,14 +544,13 @@ public class AssignmentService {
         if (StringUtils.hasText(request.getRole())) assignment.setRole(request.getRole());
         if (request.getNotes() != null) assignment.setNotes(request.getNotes().isBlank() ? null : request.getNotes());
 
-        if ("active".equals(assignment.getStatus())) {
-            assertNoCrossSiteConflict(tenantId, assignment.getEmployeeId(), siteId, assignment.getShiftId(),
-                    assignment.getStartDate(), assignment.getEndDate(), assignment.getDaysOfWeek());
-        }
+        assertNoConflicts(tenantId, assignment.getEmployeeId(), siteId, assignmentId, assignment.getShiftId(),
+                assignment.getStartDate(), assignment.getEndDate(), assignment.getDaysOfWeek());
 
         assignmentRepository.save(assignment);
         log.info("Assignment updated: id={} siteId={} tenantId={} by={}",
                 assignmentId, siteId, tenantId, callerUserId);
+        recordAudit(tenantId, callerUserId, assignmentId, "assignment_updated", before, assignmentAuditSnapshot(assignment));
         return toResponse(assignment);
     }
 
@@ -525,10 +581,15 @@ public class AssignmentService {
             throw new IllegalArgumentException("Assignment is already cancelled");
         }
 
+        Map<String, Object> before = assignmentAuditSnapshot(assignment);
+
         assignment.setStatus("cancelled");
+        assignment.setCancelledBy(callerUserId);
+        assignment.setCancelledAt(OffsetDateTime.now());
         assignmentRepository.save(assignment);
         log.info("Assignment cancelled: id={} siteId={} tenantId={} by={}",
                 assignmentId, siteId, tenantId, callerUserId);
+        recordAudit(tenantId, callerUserId, assignmentId, "assignment_cancelled", before, assignmentAuditSnapshot(assignment));
 
         int cancelled = scheduledCheckCancelService.cancelPendingByAssignment(assignmentId);
         if (cancelled > 0) {
@@ -556,6 +617,49 @@ public class AssignmentService {
         return employeeRepository.findAllById(employeeIds);
     }
 
+    /** An employee's own assignments across EVERY site they've ever been assigned to — unlike
+     *  {@link #listAssignments}, which is always scoped to one site by its URL path, this is the
+     *  cross-site "my assignments" view (App-facing self-service, no assignments:* permission
+     *  required, same trust model as AttendanceSummaryService.getMyMonthlyAttendance: any
+     *  authenticated user may see their own data). Most-recent-first, not paginated — an
+     *  individual employee's assignment history is small enough that pagination isn't worth the
+     *  added complexity (same judgment call already made for EmployeeService's assignment
+     *  history list). */
+    @Transactional(readOnly = true)
+    public List<AssignmentResponse> getMyAssignments(UUID tenantId, UUID callerUserId) {
+        tenantRepository.findByIdAndDeletedAtIsNull(tenantId)
+                .orElseThrow(() -> new ResourceNotFoundException("Tenant not found: " + tenantId));
+
+        com.fams.modules.employee.entity.Employee employee = employeeRepository
+                .findByUserIdAndTenantIdAndDeletedAtIsNull(callerUserId, tenantId)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "No employee profile found for this user in tenant: " + tenantId));
+
+        List<Assignment> assignments = assignmentRepository
+                .findByTenantIdAndEmployeeIdAndDeletedAtIsNullOrderByStartDateDesc(tenantId, employee.getId());
+
+        List<UUID> shiftIds = assignments.stream()
+                .map(Assignment::getShiftId).filter(java.util.Objects::nonNull).distinct().toList();
+        List<UUID> siteIds = assignments.stream().map(Assignment::getSiteId).distinct().toList();
+
+        Map<UUID, com.fams.modules.shift.entity.Shift> shiftsById = shiftIds.isEmpty()
+                ? Map.of()
+                : shiftRepository.findAllById(shiftIds).stream()
+                        .collect(java.util.stream.Collectors.toMap(
+                                com.fams.modules.shift.entity.Shift::getId, s -> s));
+        Map<UUID, com.fams.modules.site.entity.Site> sitesById = siteIds.isEmpty()
+                ? Map.of()
+                : siteRepository.findAllById(siteIds).stream()
+                        .collect(java.util.stream.Collectors.toMap(
+                                com.fams.modules.site.entity.Site::getId, s -> s));
+
+        return assignments.stream()
+                .map(a -> toResponse(a, employee,
+                        a.getShiftId() != null ? shiftsById.get(a.getShiftId()) : null,
+                        sitesById.get(a.getSiteId())))
+                .toList();
+    }
+
     /** Single-item variant — looks up employee/shift individually. For lists, use the
      *  batch-loaded overload below to avoid N+1 queries. */
     public AssignmentResponse toResponse(Assignment a) {
@@ -576,6 +680,19 @@ public class AssignmentService {
     private AssignmentResponse toResponse(Assignment a,
                                           com.fams.modules.employee.entity.Employee employee,
                                           com.fams.modules.shift.entity.Shift shift) {
+        return toResponse(a, employee, shift, null);
+    }
+
+    private AssignmentResponse toResponse(Assignment a,
+                                          com.fams.modules.employee.entity.Employee employee,
+                                          com.fams.modules.shift.entity.Shift shift,
+                                          com.fams.modules.site.entity.Site site) {
+        AssignmentResponse.SiteSummary siteSummary = site == null ? null :
+                AssignmentResponse.SiteSummary.builder()
+                        .id(site.getId())
+                        .name(site.getName())
+                        .build();
+
         AssignmentResponse.EmployeeSummary employeeSummary = employee == null ? null :
                 AssignmentResponse.EmployeeSummary.builder()
                         .id(employee.getId())
@@ -599,6 +716,7 @@ public class AssignmentService {
                 .siteId(a.getSiteId())
                 .employeeId(a.getEmployeeId())
                 .shiftId(a.getShiftId())
+                .siteSummary(siteSummary)
                 .employeeSummary(employeeSummary)
                 .shiftSummary(shiftSummary)
                 .startDate(a.getStartDate())
@@ -606,6 +724,8 @@ public class AssignmentService {
                 .daysOfWeek(DayOfWeekBitmask.fromBitmask(a.getDaysOfWeek()))
                 .role(a.getRole())
                 .status(a.getStatus())
+                .cancelledBy(a.getCancelledBy())
+                .cancelledAt(a.getCancelledAt())
                 .notes(a.getNotes())
                 .createdBy(a.getCreatedBy())
                 .createdAt(a.getCreatedAt())

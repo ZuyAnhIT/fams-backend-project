@@ -18,9 +18,6 @@ import java.util.UUID;
 public interface AssignmentRepository extends JpaRepository<Assignment, UUID>,
         JpaSpecificationExecutor<Assignment> {
 
-    boolean existsByEmployeeIdAndSiteIdAndStatusAndDeletedAtIsNull(
-            UUID employeeId, UUID siteId, String status);
-
     Optional<Assignment> findByIdAndSiteIdAndTenantIdAndDeletedAtIsNull(
             UUID id, UUID siteId, UUID tenantId);
 
@@ -147,6 +144,27 @@ public interface AssignmentRepository extends JpaRepository<Assignment, UUID>,
             @Param("tenantId") UUID tenantId,
             @Param("employeeId") UUID employeeId,
             @Param("excludeSiteId") UUID excludeSiteId,
+            @Param("startDate") LocalDate startDate,
+            @Param("endDate") LocalDate endDate,
+            @Param("dayBits") Short dayBits);
+
+    /** #63: same-site counterpart of {@link #findActiveConflictsAtOtherSites} — an employee CAN
+     *  have more than one active assignment at the SAME site now (e.g. a future assignment
+     *  pre-created while the current one is still active), as long as their date ranges don't
+     *  actually overlap. excludeAssignmentId lets updateAssignment re-check without conflicting
+     *  with itself. */
+    @Query(value = "SELECT * FROM assignments a WHERE a.tenant_id = :tenantId AND a.employee_id = :employeeId " +
+           "AND a.site_id = :siteId AND (:excludeAssignmentId IS NULL OR a.id <> :excludeAssignmentId) " +
+           "AND a.status = 'active' AND a.deleted_at IS NULL " +
+           "AND a.start_date <= COALESCE(CAST(:endDate AS date), 'infinity'::date) " +
+           "AND (a.end_date IS NULL OR a.end_date >= CAST(:startDate AS date)) " +
+           "AND (a.days_of_week IS NULL OR :dayBits IS NULL OR (a.days_of_week & CAST(:dayBits AS smallint)) <> 0)",
+           nativeQuery = true)
+    List<Assignment> findActiveConflictsAtSameSite(
+            @Param("tenantId") UUID tenantId,
+            @Param("employeeId") UUID employeeId,
+            @Param("siteId") UUID siteId,
+            @Param("excludeAssignmentId") UUID excludeAssignmentId,
             @Param("startDate") LocalDate startDate,
             @Param("endDate") LocalDate endDate,
             @Param("dayBits") Short dayBits);

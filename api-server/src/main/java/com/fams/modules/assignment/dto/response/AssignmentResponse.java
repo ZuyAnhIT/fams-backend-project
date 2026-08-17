@@ -31,6 +31,11 @@ public class AssignmentResponse {
     @Schema(description = "Shift template UUID, or null if not linked to a specific shift")
     private UUID shiftId;
 
+    @Schema(description = "Brief site details — only populated on cross-site listings (e.g. GET .../assignments/me) " +
+            "where the site isn't already implied by the request path; null on the site-scoped list endpoint",
+            nullable = true)
+    private SiteSummary siteSummary;
+
     @Schema(description = "Brief employee details, avoids a follow-up lookup when rendering a list of assignments")
     private EmployeeSummary employeeSummary;
 
@@ -55,6 +60,12 @@ public class AssignmentResponse {
     @Schema(description = "Status: active or cancelled", example = "active")
     private String status;
 
+    @Schema(description = "UUID of the user who cancelled this assignment, null if never cancelled")
+    private UUID cancelledBy;
+
+    @Schema(description = "Cancellation timestamp, null if never cancelled")
+    private OffsetDateTime cancelledAt;
+
     @Schema(description = "Optional notes")
     private String notes;
 
@@ -66,6 +77,17 @@ public class AssignmentResponse {
 
     @Schema(description = "Last update timestamp")
     private OffsetDateTime updatedAt;
+
+    @Data
+    @Builder
+    @Schema(description = "Brief site details embedded in the assignment response")
+    public static class SiteSummary {
+        @Schema(description = "Site UUID")
+        private UUID id;
+
+        @Schema(description = "Site name", example = "Công trình Quận 1")
+        private String name;
+    }
 
     @Data
     @Builder
