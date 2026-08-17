@@ -31,6 +31,13 @@ public interface AssignmentRepository extends JpaRepository<Assignment, UUID>,
 
     long countBySiteIdAndStatusAndDeletedAtIsNull(UUID siteId, String status);
 
+    /** Used by SiteService.getSiteDetail to surface "who's the supervisor" on the site detail
+     *  screen (#54 gap fix) — a site can have more than one active supervisor assignment, so this
+     *  returns a list rather than assuming exactly one. Not date/day-of-week scoped like the
+     *  attendance-facing queries above: this is informational display, not a check-in gate. */
+    List<Assignment> findByTenantIdAndSiteIdAndRoleAndStatusAndDeletedAtIsNull(
+            UUID tenantId, UUID siteId, String role, String status);
+
     /** Used by EmployeeService.getEmployee to show the employee's full assignment history on
      *  the detail screen — every assignment regardless of status/date range, most recent
      *  first (unlike the date-scoped "is this active right now" queries above). */

@@ -61,9 +61,29 @@ public class SiteDetailResponse {
     @Schema(description = "Number of currently active employee assignments at this site")
     private int activeAssignmentCount;
 
+    @Schema(description = "Employees currently assigned to this site with role=supervisor "
+            + "(via the Assignment module — sites have no dedicated supervisor column). "
+            + "Empty if none assigned; more than one is possible.")
+    private List<SupervisorSummary> supervisors;
+
     @Schema(description = "Creation timestamp")
     private OffsetDateTime createdAt;
 
     @Schema(description = "Last update timestamp")
     private OffsetDateTime updatedAt;
+
+    @Data
+    @Builder
+    @Schema(description = "Brief employee details for a site's supervisor")
+    public static class SupervisorSummary {
+
+        @Schema(description = "Employee UUID")
+        private UUID id;
+
+        @Schema(description = "Internal employee code", example = "EMP-001")
+        private String employeeCode;
+
+        @Schema(description = "Full name", example = "Nguyen Van A")
+        private String fullName;
+    }
 }

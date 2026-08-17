@@ -542,6 +542,20 @@ public class AssignmentService {
         return assignmentRepository.countBySiteIdAndStatusAndDeletedAtIsNull(siteId, "active");
     }
 
+    /** #54 gap fix: SiteService.getSiteDetail previously had no way to show "who's the
+     *  supervisor" at all — this looks it up the same way the rest of the system already
+     *  determines supervisor status (Assignment.role='supervisor'), not a separate sites column. */
+    @Transactional(readOnly = true)
+    public List<com.fams.modules.employee.entity.Employee> getActiveSupervisorEmployeesForSite(
+            UUID tenantId, UUID siteId) {
+        List<Assignment> supervisorAssignments = assignmentRepository
+                .findByTenantIdAndSiteIdAndRoleAndStatusAndDeletedAtIsNull(
+                        tenantId, siteId, "supervisor", "active");
+        if (supervisorAssignments.isEmpty()) return List.of();
+        List<UUID> employeeIds = supervisorAssignments.stream().map(Assignment::getEmployeeId).toList();
+        return employeeRepository.findAllById(employeeIds);
+    }
+
     /** Single-item variant — looks up employee/shift individually. For lists, use the
      *  batch-loaded overload below to avoid N+1 queries. */
     public AssignmentResponse toResponse(Assignment a) {

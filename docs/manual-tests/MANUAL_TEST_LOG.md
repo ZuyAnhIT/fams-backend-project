@@ -84,6 +84,10 @@ giữ nguyên ✅ ĐÃ KHÓA. Đồng thời xác nhận UI "tìm người thao 
 | 49 | Đăng ký Face ID | ✅ Pass | ✅ Pass | ✅ **PASS — ĐÃ KHÓA** | 2026-08-16 | AC gốc lỗi thời (quality_score không tồn tại, dùng InsightFace local — không sửa). **Gap audit đã vá**. Web Admin + App (Claude qua camera giả lập, User xác nhận nốt trên thiết bị thật: chụp ảnh thật, liveness fail, khác người, rate limit) đều pass |
 | 50 | HR xem trạng thái Face ID | ✅ Pass | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-16 | Luồng duyệt với ảnh tham chiếu thật test live qua UI pass; quality_score không tồn tại (gap kiến trúc, không sửa) |
 | 51 | Xóa/vô hiệu hóa Face ID | ✅ Pass | ✅ Pass | ✅ **PASS — ĐÃ KHÓA** | 2026-08-16 | **Gap đã vá**: deleted_reason/deleted_by + audit log, modal Web Admin có ô nhập lý do. Test live end-to-end qua cả App thật (tự thu hồi) và Web Admin |
+| 52 | Tạo công trình | ✅ Pass | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-16 | province/workspace là gap kiến trúc (không sửa); supervisor làm qua Assignment riêng, không thiếu hẳn; plan limit đúng; **gap đã vá**: ghi audit `site_created` |
+| 53 | Danh sách công trình | ✅ Pass | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-16 | Filter province/workspace, sort start_date là gap kiến trúc (không sửa); site-scope filter cho SITE_SUPERVISOR hoạt động đúng (xác nhận qua code) |
+| 54 | Xem chi tiết công trình | ✅ Pass | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-16 | **Gap đã vá**: supervisor giờ hiện ngay ở card chính (field `supervisors` mới, lấy từ Assignment); site-scope 403 hoạt động đúng |
+| 55 | Cập nhật công trình | ✅ Pass | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-16 | Supervisor không sửa qua form này (đúng kiến trúc); gap "validate status yếu" xác nhận là NGHIÊN CỨU SAI (đã có @Pattern từ trước); **gap thật đã vá**: ghi audit `site_updated` |
 
 ---
 
@@ -535,6 +539,49 @@ giữ nguyên ✅ ĐÃ KHÓA. Đồng thời xác nhận UI "tìm người thao 
   App thật, tự thu hồi Face ID qua đúng nút trên màn hình Hồ sơ → modal xác nhận trong App hiện
   đúng nội dung cảnh báo (không có ô lý do, đúng thiết kế có chủ đích khác Web Admin) → xác nhận →
   toast "Đã thu hồi Face ID" → trạng thái đổi ngay lập tức, nút chuyển lại thành "Đăng ký Face ID".
+
+### #52 — Tạo công trình — ✅ PASS — ĐÃ KHÓA (2026-08-16)
+- Kịch bản: `docs/manual-tests/sprint-2-feature-52-create-site.md`. AC gốc lỗi thời ở 2/3 điểm:
+  `province` không tồn tại (gap kiến trúc, `sites` chỉ có `address` tự do, không có tỉnh/thành
+  riêng — không sửa); "liên kết workspace" không tồn tại (Site không có cột `workspace_id` —
+  không sửa). "Supervisor" thực ra KHÔNG thiếu hẳn — làm qua luồng Phân công riêng
+  (`Assignment.role='supervisor'`), tách biệt khỏi bước tạo site; test live: gán supervisor cho
+  site mới tạo qua API assignment, thành công. Plan limit `max_sites` hoạt động đúng, trùng tên/mã
+  chặn đúng. **Gap "không ghi audit" đã vá**: thêm `auditLogService.record(...)`, action
+  `site_created`. Test live: tạo site → `audit_logs` có đúng bản ghi.
+
+### #53 — Danh sách công trình — ✅ PASS — ĐÃ KHÓA (2026-08-16)
+- Kịch bản: `docs/manual-tests/sprint-2-feature-53-list-sites.md`. Filter province/workspace, sort
+  theo `start_date` đều là gap kiến trúc (trường không tồn tại trên `Site`, không sửa). **Phát hiện
+  tốt ngoài AC gốc**: có cơ chế site-scope filter cho role site-scoped (VD. SITE_SUPERVISOR) — chỉ
+  thấy đúng site được gán, kể cả có quyền `sites:list` chung; trường hợp chưa gán site nào trả về
+  danh sách rỗng thay vì lỗi hay lộ hết dữ liệu (xác nhận qua code, cơ chế dùng chung với
+  Employee/Workspace). Test live qua API: danh sách trả đúng toàn bộ site của tenant với tài khoản
+  không giới hạn site-scope.
+
+### #54 — Xem chi tiết công trình — ✅ PASS — ĐÃ KHÓA (2026-08-16)
+- Kịch bản: `docs/manual-tests/sprint-2-feature-54-site-detail.md`. Bản đồ tâm, geofence active
+  đều đúng như AC. "Shift default" thực ra là DANH SÁCH shift active (số nhiều), không phải 1 shift
+  mặc định duy nhất — không sửa, chỉ ghi chú lại AC lỗi thời. "Assignment active" trên response chi
+  tiết chỉ là SỐ ĐẾM, danh sách đầy đủ nằm ở tab riêng — giữ nguyên. **Gap "supervisor không hiện ở
+  card chính" đã vá**: thêm field `supervisors` vào `SiteDetailResponse` (lấy từ
+  `Assignment.role='supervisor' AND status='active'`, không thêm cột mới trên `sites` — tận dụng
+  đúng mô hình dữ liệu có sẵn), Web Admin card "Thông tin công trình" hiện thêm dòng "Người phụ
+  trách". **Test live qua UI thật (Playwright)**: tạo site → gán supervisor qua Assignment → vào
+  trang chi tiết → dòng "Người phụ trách" hiện đúng tag tên nhân viên ngay lập tức. Site-scope 403
+  khi xem site ngoài phạm vi giữ nguyên hoạt động đúng.
+
+### #55 — Cập nhật công trình — ✅ PASS — ĐÃ KHÓA (2026-08-16)
+- Kịch bản: `docs/manual-tests/sprint-2-feature-55-update-site.md`. Supervisor không sửa được qua
+  API này (đúng kiến trúc, giống #52/#54 — phải qua module Phân công, không sửa). **Phát hiện quan
+  trọng: gap "validate status yếu" từ nghiên cứu ban đầu là SAI (false positive)** — test live trực
+  tiếp bằng API với `status: "archived"` trả về 400 sạch ngay từ tầng bean validation
+  (`UpdateSiteRequest.status` đã có `@Pattern` từ trước, agent nghiên cứu bỏ sót annotation này khi
+  đọc code). Đã thêm thêm 1 lớp validate ở tầng service cho chắc (`validateStatus()`, phòng vệ
+  kép) nhưng đây không phải sửa 1 gap thật. **Gap thật "không ghi audit" đã vá**: thêm
+  `auditLogService.record(...)`, action `site_updated` với before/after. Test live: sửa mô tả site
+  → `audit_logs` có đúng bản ghi `site_updated`. Bài học ghi lại trong kịch bản: luôn test live để
+  xác nhận trước khi kết luận gap, không chỉ dựa vào đọc code tĩnh.
 
 ## Quy ước cập nhật file này (cho các phiên làm việc sau)
 
