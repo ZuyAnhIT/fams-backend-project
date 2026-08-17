@@ -1,6 +1,7 @@
 package com.fams.modules.shift.dto.response;
 
 import com.fasterxml.jackson.annotation.JsonFormat;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Builder;
 import lombok.Data;
@@ -56,6 +57,12 @@ public class ShiftResponse {
 
     @Schema(description = "Status: active or inactive", example = "active")
     private String status;
+
+    // See CreateShiftRequest for why this isn't named isDefault directly.
+    @JsonProperty("isDefault")
+    @Schema(description = "Whether this is the default shift for the site — at most one per site",
+            example = "false")
+    private boolean defaultShift;
 
     @Schema(description = "Check-in/check-out verification tier override for this shift; null means "
             + "it inherits the site's policy", nullable = true,

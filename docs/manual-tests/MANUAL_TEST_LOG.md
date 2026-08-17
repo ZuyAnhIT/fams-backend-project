@@ -91,6 +91,10 @@ giữ nguyên ✅ ĐÃ KHÓA. Đồng thời xác nhận UI "tìm người thao 
 | 56 | Tạo geofence cho công trình | ✅ Pass | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-17 | **Gap đã vá**: tính `area_sqm` (shoelace + equirectangular tại vĩ độ trung bình, migration V98) + ghi audit `geofence_created`; versioning trong bảng `geofences` (không có bảng history riêng) xác nhận là thiết kế có chủ đích |
 | 57 | Sửa geofence | ✅ Pass | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-17 | **Gap đã vá**: `change_reason` (tùy chọn, không bắt buộc — theo tiền lệ #51) + tính lại area mỗi lần sửa + ghi audit `geofence_updated` với old/new snapshot đầy đủ kèm changeReason |
 | 58 | Xem lịch sử geofence | ✅ Pass | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-17 | **Gap quan trọng nhất đã vá**: `changed_by` giờ hiện tên thật (`createdByName`, resolve qua UserRepository, batch-load tránh N+1) thay vì UUID thô; `change_type` tường minh cố ý KHÔNG làm (đã ghi rõ lý do trong kịch bản) |
+| 59 | Tạo ca làm việc | ✅ Pass | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-17 | **Gap đã vá**: `is_default` (migration V99, unique index 1 mặc định/site) + ghi audit `shift_created`. code/standard_hours/JSON-schedule xác nhận là khác biệt kiến trúc có chủ đích, không sửa |
+| 60 | Cấu hình OT và giới hạn giờ | ✅ Pass | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-17 | Audit gốc "đã xong" xác nhận đúng, đã mở rộng OT ngày/tuần từ trước (cảnh báo không chặn, snapshot không hồi tố); **gap đã vá**: ghi audit `shift_ot_configured` |
+| 61 | Danh sách ca theo site | ✅ Pass | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-17 | **Gap đã vá**: tìm theo tên (`search`) + lọc `isDefault` — chuyển sang `JpaSpecificationExecutor`/Criteria API sau khi JPQL `@Query` với `CAST(:param)` gây lỗi "cannot cast bytea" trên tham số null (bài học kỹ thuật quan trọng, ghi trong kịch bản) |
+| 62 | Cập nhật hoặc ngừng dùng ca | ✅ Pass | — | ✅ **PASS — ĐÃ KHÓA** | 2026-08-17 | Audit gốc LỖI THỜI đã sửa lại: endpoint xóa cứng THẬT SỰ có, chặn đúng điều kiện (không phải thiếu); **gap đã vá**: ghi audit `shift_updated`/`shift_deleted`; hỗ trợ đặt/bỏ `isDefault` qua PUT dùng chung logic với #59 |
 
 ---
 
@@ -617,6 +621,48 @@ giữ nguyên ✅ ĐÃ KHÓA. Đồng thời xác nhận UI "tìm người thao 
   thật (Playwright, viewport rộng để thấy đủ bảng): cột "Người thay đổi" hiện đúng "Platform Admin"
   ở cả 3 dòng lịch sử, cột "Diện tích"/"Lý do thay đổi" mới cũng hiện đúng. Script tự động
   `test_geofence_history.sh` 10/10 pass, không hồi quy.
+
+---
+
+### #59 — Tạo ca làm việc — ✅ PASS — ĐÃ KHÓA (2026-08-17)
+- Kịch bản: `docs/manual-tests/sprint-2-feature-59-create-shift.md`. **Gap `is_default` đã vá**:
+  migration `V99__shift_is_default.sql` thêm cột `is_default` + unique index từng phần
+  `(site_id) WHERE is_default=true AND deleted_at IS NULL`; đặt mặc định lúc tạo/sửa tự động bỏ mặc
+  định ở ca khác cùng site (dùng chung pattern với `SavedFilter.isDefault` đã có sẵn trong
+  codebase). **Gap audit đã vá**: action `shift_created`. Test live qua UI thật (Playwright): tạo
+  "Ca Chieu Test UI" kèm bật "Đặt làm ca mặc định" → tag "Mặc định" hiện đúng trên ca mới, tự động
+  biến mất khỏi "Morning Shift" trước đó — xác nhận cơ chế 1-mặc-định/site hoạt động đúng từ UI.
+  `code`/`standard_hours`/JSON-schedule xác nhận là khác biệt kiến trúc có chủ đích so với AC gốc,
+  không sửa. Script tự động `test_create_shift.sh` 12/12 pass, không hồi quy.
+
+### #60 — Cấu hình OT và giới hạn giờ — ✅ PASS — ĐÃ KHÓA (2026-08-17)
+- Kịch bản: `docs/manual-tests/sprint-2-feature-60-shift-ot-config.md`. Audit gốc "đã xong" xác
+  nhận đúng, tính năng đã mở rộng thêm giới hạn OT ngày/tuần (V88, cảnh báo không chặn) + snapshot
+  vào `checkins` (không hồi tố) từ trước, không đổi trong đợt này. **Gap audit đã vá**: action
+  `shift_ot_configured` với before/after đầy đủ. Test live qua API/DB: bật OT + đặt
+  `maxOtMinutesPerDay` trên ca thật → `audit_logs` có đúng bản ghi, before/after khớp chính xác.
+  Script tự động `test_shift_ot_config.sh` 12/12 pass, không hồi quy.
+
+### #61 — Danh sách ca theo site — ✅ PASS — ĐÃ KHÓA (2026-08-17)
+- Kịch bản: `docs/manual-tests/sprint-2-feature-61-list-shifts.md`. **Cả 2 gap đã vá**: tìm theo
+  tên (`search`, case-insensitive) và lọc theo `isDefault`. **Bài học kỹ thuật quan trọng**: bản
+  đầu dùng JPQL `@Query` với `CAST(:param AS ...)` cho tham số optional gây lỗi PostgreSQL "cannot
+  cast type bytea to boolean/varchar" khi tham số truyền null (Hibernate 6 không suy luận đúng kiểu
+  bind parameter trong `CAST()`) — phát hiện qua chính vòng test hồi quy khi `test_list_shifts.sh`
+  đột ngột báo lỗi 500. Đã chuyển hẳn sang `JpaSpecificationExecutor`/`ShiftSpecification` (Criteria
+  API, cùng pattern đã có sẵn ở `AssignmentSpecification`/`EmployeeSpecification`) — tránh hoàn
+  toàn lớp lỗi suy luận kiểu này. Test live qua UI thật (Playwright): gõ "morn" vào ô tìm kiếm mới
+  → lọc đúng còn 1 kết quả; badge "Mặc định" hiện đúng trên ca đang là default. Script tự động
+  `test_list_shifts.sh` 11/11 pass sau khi sửa.
+
+### #62 — Cập nhật hoặc ngừng dùng ca — ✅ PASS — ĐÃ KHÓA (2026-08-17)
+- Kịch bản: `docs/manual-tests/sprint-2-feature-62-update-deactivate-shift.md`. **Audit gốc (07-22)
+  xác nhận LỖI THỜI**: ghi chú "không có endpoint xóa cứng" sai — endpoint `DELETE` thật sự tồn tại
+  từ trước, chỉ bị chặn 400 đúng điều kiện khi ca đã từng dùng trong assignment (khớp AC, không
+  phải thiếu). **Gap audit đã vá**: action `shift_updated`/`shift_deleted`. Hỗ trợ đặt/bỏ
+  `isDefault` qua PUT, dùng chung logic 1-mặc-định/site với #59 — test live: PUT `isDefault:true`
+  lên ca khác → xác nhận ca cũ tự mất mặc định. Script tự động `test_update_shift.sh` 14/14 pass,
+  không hồi quy.
 
 ---
 

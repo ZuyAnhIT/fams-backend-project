@@ -64,6 +64,12 @@ public class Shift {
     @Column(nullable = false, length = 20)
     private String status;
 
+    /** At most one default shift per site (enforced by a partial unique index — see V99). Used
+     *  to pre-select the shift when creating an assignment; purely advisory, does not affect
+     *  check-in/check-out behavior. */
+    @Column(name = "is_default", nullable = false)
+    private boolean isDefault;
+
     @Column(name = "created_by")
     private UUID createdBy;
 
