@@ -61,6 +61,7 @@ public class OfflineSyncService {
     private final FaceProfileRepository faceProfileRepository;
     private final AttendanceSummaryService attendanceSummaryService;
     private final FaceVerifyJobPublisher faceVerifyJobPublisher;
+    private final com.fams.modules.audit.service.AuditLogService auditLogService;
     private final int maxOfflineAgeHours;
     private final int maxFutureSkewMinutes;
 
@@ -73,6 +74,7 @@ public class OfflineSyncService {
                                FaceProfileRepository faceProfileRepository,
                                AttendanceSummaryService attendanceSummaryService,
                                FaceVerifyJobPublisher faceVerifyJobPublisher,
+                               com.fams.modules.audit.service.AuditLogService auditLogService,
                                @Value("${app.checkin.offline-max-age-hours:24}") int maxOfflineAgeHours,
                                @Value("${app.checkin.offline-max-future-skew-minutes:5}") int maxFutureSkewMinutes) {
         this.employeeRepository = employeeRepository;
@@ -84,6 +86,7 @@ public class OfflineSyncService {
         this.faceProfileRepository = faceProfileRepository;
         this.attendanceSummaryService = attendanceSummaryService;
         this.faceVerifyJobPublisher = faceVerifyJobPublisher;
+        this.auditLogService = auditLogService;
         this.maxOfflineAgeHours = maxOfflineAgeHours;
         this.maxFutureSkewMinutes = maxFutureSkewMinutes;
     }
@@ -101,12 +104,13 @@ public class OfflineSyncService {
 
         List<SyncResultItem> results = new ArrayList<>();
         for (OfflineCheckinRequest req : sorted) {
-            results.add(processSingle(tenantId, employee, req));
+            results.add(processSingle(tenantId, employee, req, callerUserId));
         }
         return results;
     }
 
-    private SyncResultItem processSingle(UUID tenantId, Employee employee, OfflineCheckinRequest req) {
+    private SyncResultItem processSingle(UUID tenantId, Employee employee, OfflineCheckinRequest req,
+                                          UUID callerUserId) {
         // Idempotency: reject duplicate nonce with the existing record
         Optional<CheckinRecord> existing = checkinRepository
                 .findByEmployeeIdAndClientNonceAndDeletedAtIsNull(employee.getId(), req.getClientNonce());
@@ -298,11 +302,31 @@ public class OfflineSyncService {
         }
         log.info("Offline sync accepted: nonce={} employeeId={} assignmentId={} status={}",
                 req.getClientNonce(), employee.getId(), req.getAssignmentId(), status);
+        try {
+            auditLogService.record(
+                    tenantId, callerUserId, null,
+                    "Checkin", record.getId().toString(), "checkin_submitted",
+                    null, java.util.Map.of(
+                            "siteId", record.getSiteId(),
+                            "employeeId", record.getEmployeeId(),
+                            "status", status,
+                            "insideGeofence", insideGeofence,
+                            "source", "offline"),
+                    com.fams.shared.security.HttpRequestUtils.currentRequestId(),
+                    com.fams.shared.security.HttpRequestUtils.currentIpAddress(),
+                    com.fams.shared.security.HttpRequestUtils.currentUserAgent());
+        } catch (Exception e) {
+            log.warn("Failed to record audit log for offline checkin {}: {}", record.getId(), e.getMessage());
+        }
 
         if (hasPhoto) {
             try {
+                // Same passive-liveness fix as the online path (CheckinService.submitCheckin):
+                // a submitted photo always gets the AI worker's single-frame liveness check, not
+                // just active-challenge submissions — a static/printed photo should not silently
+                // pass face match just because it went through the offline queue.
                 faceVerifyJobPublisher.publish(tenantId, employee.getId(), record.getId(),
-                        "checkin", req.getFacePhotoBase64(), false);
+                        "checkin", req.getFacePhotoBase64(), true);
             } catch (Exception e) {
                 log.warn("Failed to publish face verify job for offline checkin {}: {}", record.getId(), e.getMessage());
             }

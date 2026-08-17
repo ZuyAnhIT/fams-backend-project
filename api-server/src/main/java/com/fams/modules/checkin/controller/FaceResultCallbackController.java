@@ -1,5 +1,6 @@
 package com.fams.modules.checkin.controller;
 
+import com.fams.modules.audit.service.AuditLogService;
 import com.fams.modules.checkin.dto.request.FaceResultCallbackRequest;
 import com.fams.modules.checkin.repository.CheckinRepository;
 import com.fams.modules.employee.repository.FaceProfileRepository;
@@ -34,6 +35,7 @@ public class FaceResultCallbackController {
     private final ShiftRepository shiftRepository;
     private final ViolationRepository violationRepository;
     private final FaceProfileRepository faceProfileRepository;
+    private final AuditLogService auditLogService;
 
     public FaceResultCallbackController(
             @Value("${app.ai.internal-secret}") String internalSecret,
@@ -43,7 +45,8 @@ public class FaceResultCallbackController {
             SiteRepository siteRepository,
             ShiftRepository shiftRepository,
             ViolationRepository violationRepository,
-            FaceProfileRepository faceProfileRepository) {
+            FaceProfileRepository faceProfileRepository,
+            AuditLogService auditLogService) {
         this.internalSecret = internalSecret;
         this.checkinRepository = checkinRepository;
         this.checkResponseService = checkResponseService;
@@ -52,6 +55,7 @@ public class FaceResultCallbackController {
         this.shiftRepository = shiftRepository;
         this.violationRepository = violationRepository;
         this.faceProfileRepository = faceProfileRepository;
+        this.auditLogService = auditLogService;
     }
 
     @PostMapping("/face-result")
@@ -167,6 +171,8 @@ public class FaceResultCallbackController {
                             log.info("{} violation created from {}: checkinId={} employeeId={}",
                                     violationType, isCheckout ? "checkout" : "checkin",
                                     record.getId(), record.getEmployeeId());
+                            recordViolationAudit(record.getTenantId(), record.getId(), violationType,
+                                    isCheckout ? "checkout" : "checkin", request.getErrorCode());
                         }
                     }
 
@@ -174,5 +180,25 @@ public class FaceResultCallbackController {
                             isCheckout ? "checkout" : "checkin", record.getId(), request.getFaceVerified(),
                             request.getFaceVerifyScore(), request.getErrorCode());
                 });
+    }
+
+    /** No callerUserId here — this is an AI worker webhook, not a user action, so actorId is
+     *  null (system-triggered event). */
+    private void recordViolationAudit(java.util.UUID tenantId, java.util.UUID checkinId,
+                                       String violationType, String source, String errorCode) {
+        try {
+            auditLogService.record(
+                    tenantId, null, null,
+                    "Checkin", checkinId.toString(), "checkin_violation_created",
+                    null, java.util.Map.of(
+                            "violationType", violationType,
+                            "source", source,
+                            "errorCode", errorCode != null ? errorCode : ""),
+                    com.fams.shared.security.HttpRequestUtils.currentRequestId(),
+                    com.fams.shared.security.HttpRequestUtils.currentIpAddress(),
+                    com.fams.shared.security.HttpRequestUtils.currentUserAgent());
+        } catch (Exception e) {
+            log.warn("Failed to record audit log for violation checkinId={}: {}", checkinId, e.getMessage());
+        }
     }
 }
