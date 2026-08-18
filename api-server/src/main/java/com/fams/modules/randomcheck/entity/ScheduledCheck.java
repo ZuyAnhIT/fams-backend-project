@@ -68,6 +68,27 @@ public class ScheduledCheck {
     @Column(name = "triggered_by")
     private UUID triggeredBy;
 
+    /** #99 (2026-08-18): who/when/why a check was cancelled — null for checks never cancelled.
+     *  cancelledBy is null for system-triggered cancellation (e.g. assignment cancelled), set
+     *  for HR-initiated cancellation via the cancel endpoint. */
+    @Column(name = "cancelled_by")
+    private UUID cancelledBy;
+
+    @Column(name = "cancelled_at")
+    private OffsetDateTime cancelledAt;
+
+    @Column(name = "cancelled_reason", columnDefinition = "TEXT")
+    private String cancelledReason;
+
+    /** #100 (2026-08-18): when the check was actually dispatched (status flipped to 'sent') and
+     *  which Notification row carries the push/in-app message for it — previously only inferable
+     *  indirectly via notification_delivery_logs.created_at / metadata.checkId. */
+    @Column(name = "sent_at")
+    private OffsetDateTime sentAt;
+
+    @Column(name = "notification_id")
+    private UUID notificationId;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
 

@@ -53,9 +53,7 @@ với mô hình dữ liệu, khớp đúng phát hiện đã có ở #91 (Random
 
 ---
 
-## Ghi chú
-Kịch bản này chưa được test live qua UI thật — mới hoàn tất bước nghiên cứu code + viết kịch bản.
-**Không có gap thật cần vá cho #96** — chỉ cần làm rõ với chủ dự án rằng phần "random số lần trong
-min/max" của AC gốc không khớp với mô hình dữ liệu thật (dùng chung quyết định với #91 về việc có
-đổi `checksPerShift` sang khoảng min/max hay không). Case 1-6 rủi ro fail thấp, đã có
-`test_scheduled_check_generation.sh` phủ khá đầy đủ các case cốt lõi.
+## ✅ PASS — ĐÃ KHÓA (2026-08-18)
+Không có gap cần vá — xác nhận qua `tests/randomcheck/test_scheduled_check_generation.sh` (12/12
+pass) và toàn bộ regression suite (18/18 suite pass) sau các fix của #99/#100 (cùng module, không
+ảnh hưởng logic sinh lịch). Quyết định "giữ nguyên checksPerShift số cố định" đã chốt chung với #91.

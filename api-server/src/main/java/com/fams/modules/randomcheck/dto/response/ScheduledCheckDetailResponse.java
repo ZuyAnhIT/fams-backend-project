@@ -65,6 +65,25 @@ public class ScheduledCheckDetailResponse {
     @Schema(description = "Only set for manually (HR-)triggered checks — the user who triggered it")
     private UUID triggeredBy;
 
+    @Schema(description = "#100 (2026-08-18): when the check was actually dispatched (status "
+            + "flipped to 'sent') — null if never sent")
+    private OffsetDateTime sentAt;
+
+    @Schema(description = "#100 (2026-08-18): the Notification row created for this check's "
+            + "dispatch, if any — null if never sent or notification creation failed")
+    private UUID notificationId;
+
+    @Schema(description = "#99 (2026-08-18): who cancelled this check — null for system-triggered "
+            + "cancellation (e.g. assignment cancelled) or if never cancelled")
+    private UUID cancelledBy;
+
+    @Schema(description = "#99 (2026-08-18): when this check was cancelled — null if never cancelled")
+    private OffsetDateTime cancelledAt;
+
+    @Schema(description = "#99 (2026-08-18): why this check was cancelled — null if never "
+            + "cancelled or no reason was given")
+    private String cancelledReason;
+
     @Schema(description = "Violation(s) raised from this check, if any (no_response, or "
             + "location_fail/face_fail/liveness_fail off the response) — embedded so HR can see "
             + "the full story of one check (dispute resolution) without a separate GET /violations "

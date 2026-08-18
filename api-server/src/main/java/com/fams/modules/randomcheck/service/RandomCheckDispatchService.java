@@ -2,6 +2,7 @@ package com.fams.modules.randomcheck.service;
 
 import com.fams.modules.employee.entity.Employee;
 import com.fams.modules.employee.repository.EmployeeRepository;
+import com.fams.modules.notification.dto.response.NotificationResponse;
 import com.fams.modules.notification.service.NotificationService;
 import com.fams.modules.randomcheck.constant.RandomCheckEventTypes;
 import com.fams.modules.randomcheck.entity.ScheduledCheck;
@@ -11,6 +12,7 @@ import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.OffsetDateTime;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
@@ -58,6 +60,7 @@ public class RandomCheckDispatchService {
         }
 
         check.setStatus("sent");
+        check.setSentAt(OffsetDateTime.now());
         scheduledCheckRepository.save(check);
 
         log.info("Dispatched random check id={} employeeId={} siteId={}",
@@ -89,13 +92,19 @@ public class RandomCheckDispatchService {
         metadata.put("expiresAt", check.getExpiresAt().toString());
 
         try {
-            notificationService.createNotification(
+            NotificationResponse notification = notificationService.createNotification(
                     check.getTenantId(),
                     employee.getUserId(),
                     RandomCheckEventTypes.RANDOM_CHECK_SENT,
                     "Kiểm tra ngẫu nhiên",
                     body,
                     metadata);
+            // notification is null when in-app is disabled for this user/eventType (push-only
+            // path) — see NotificationService#createNotification. Nothing to link back to then.
+            if (notification != null) {
+                check.setNotificationId(notification.getId());
+                scheduledCheckRepository.save(check);
+            }
             log.info("Random check notification sent to userId={} for checkId={}",
                     employee.getUserId(), check.getId());
         } catch (Exception e) {

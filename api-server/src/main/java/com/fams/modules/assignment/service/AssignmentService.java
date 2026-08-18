@@ -591,7 +591,8 @@ public class AssignmentService {
                 assignmentId, siteId, tenantId, callerUserId);
         recordAudit(tenantId, callerUserId, assignmentId, "assignment_cancelled", before, assignmentAuditSnapshot(assignment));
 
-        int cancelled = scheduledCheckCancelService.cancelPendingByAssignment(assignmentId);
+        int cancelled = scheduledCheckCancelService.cancelPendingByAssignment(
+                tenantId, assignmentId, callerUserId, "Assignment cancelled");
         if (cancelled > 0) {
             log.info("Auto-cancelled {} scheduled check(s) due to assignment cancellation id={}",
                     cancelled, assignmentId);

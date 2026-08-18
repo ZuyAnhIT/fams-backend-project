@@ -813,31 +813,36 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 
 #### Sinh lịch
 
-- [ ] **#96 — Tự động sinh scheduled checks đầu ca** `P0` · 8sp · Nền tảng: Backend, Queue/AI/Automation
+- [x] **#96 — Tự động sinh scheduled checks đầu ca** `P0` · 8sp · Nền tảng: Backend, Queue/AI/Automation
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: ScheduledCheckGeneratorService, test_scheduled_check_generation.sh; thiếu: chỉ random thời điểm, số lần check là cố định không random trong min/max
+  - *Audit (2026-08-18):* ✅ XÁC NHẬN LẠI, không có gap — AC "random trong min/max" lỗi thời, khớp #91 (checksPerShift không có khái niệm min/max trong schema). Test live: PASS (xem `sprint-4-feature-96-auto-generate-scheduled-checks.md`).
   - *User Story:* Là một hệ thống, tôi muốn sinh các lần random check cho nhân viên trong ca để kiểm tra ngẫu nhiên đúng policy.
   - *Acceptance Criteria:* Lấy assignment active; chọn config site/tenant; random số lần trong min/max; đảm bảo min_gap; tạo scheduled_checks.
   - *DB Entities:* `scheduled_checks, random_check_configs, assignments, shift_templates`
 - [x] **#97 — Snapshot config khi sinh check** `P0` · 5sp · Nền tảng: Backend, Queue/AI/Automation
   - *Audit (2026-07-22):* ✅ ĐÃ XONG — bằng chứng: buildSnapshot config_snapshot, test_config_snapshot.sh
+  - *Audit (2026-08-18):* ✅ XÁC NHẬN LẠI, không có gap. Test live: PASS (xem `sprint-4-feature-97-config-snapshot.md`).
   - *User Story:* Là một hệ thống, tôi muốn lưu config_snapshot vào scheduled_check để đảm bảo check dùng đúng rule đã sinh.
   - *Acceptance Criteria:* Snapshot verification_mode, threshold, response window, allowed requirements; response validate theo snapshot, không theo config hiện tại.
   - *DB Entities:* `scheduled_checks, random_check_configs`
 - [x] **#98 — Tạo Bull/BullMQ job gửi check** `P0` · 5sp · Nền tảng: Backend, Queue/AI/Automation
   - *Audit (2026-07-22):* ✅ ĐÃ XONG — bằng chứng: RandomCheckDispatchQueue (Redis) + Job, test_dispatch_job.sh
+  - *Audit (2026-08-18):* ✅ XÁC NHẬN LẠI, không có gap — kiến trúc thật là Redis ZSET + poll, "bull_job_id" trong AC là tàn dư đặc tả cũ. Test live: PASS (xem `sprint-4-feature-98-dispatch-job.md`).
   - *User Story:* Là một hệ thống, tôi muốn tạo delayed job cho scheduled_check để gửi thông báo đúng giờ.
   - *Acceptance Criteria:* Tạo job theo scheduled_at; lưu bull_job_id; worker kiểm tra status pending trước khi gửi.
   - *DB Entities:* `scheduled_checks, notifications`
-- [ ] **#99 — Hủy scheduled check** `P0` · 3sp · Nền tảng: Backend, Web Admin, Queue/AI/Automation
+- [x] **#99 — Hủy scheduled check** `P0` · 3sp · Nền tảng: Backend, Web Admin, Queue/AI/Automation
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: ScheduledCheckCancelService, test_cancel_scheduled_check.sh; thiếu: không lưu cancelled_by/at/reason, không ghi audit
+  - *Audit (2026-08-18):* 🟡→✅ ĐÃ VÁ — migration V104 thêm cancelledBy/At/Reason, ghi audit `scheduled_check_cancelled`. Web Admin: modal hủy có ô nhập lý do (không bắt buộc), trang chi tiết hiển thị đủ thông tin hủy. Test live qua UI Web Admin thật: PASS (xem `sprint-4-feature-99-cancel-scheduled-check.md`).
   - *User Story:* Là một HR/Admin hoặc hệ thống, tôi muốn hủy check khi assignment/site không còn hợp lệ để tránh gửi kiểm tra sai.
   - *Acceptance Criteria:* Nếu status pending thì set cancelled; lưu cancelled_by/at/reason; remove Bull job nếu có.
   - *DB Entities:* `scheduled_checks, assignments, audit_logs`
 
 #### Gửi check
 
-- [ ] **#100 — Gửi random check notification** `P0` · 5sp · Nền tảng: Backend, Mobile App, Queue/AI/Automation
+- [x] **#100 — Gửi random check notification** `P0` · 5sp · Nền tảng: Backend, Mobile App, Queue/AI/Automation
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: RandomCheckDispatchService.dispatch, test_dispatch_notification.sh; thiếu: entity không có sent_at/notification_id
+  - *Audit (2026-08-18):* 🟡→✅ ĐÃ VÁ — migration V104 (chung #99) thêm sentAt + notificationId. Phát hiện thêm 1 bug khi test live (luồng HR-trigger-ngay quên set sentAt, đã vá cùng đợt). Test live qua UI Web Admin thật: PASS (xem `sprint-4-feature-100-dispatch-notification.md`).
   - *User Story:* Là một hệ thống, tôi muốn gửi yêu cầu random check đến nhân viên để nhân viên phản hồi đúng hạn.
   - *Acceptance Criteria:* Đến scheduled_at; tạo notification random_check_request; gửi push; set status=sent, sent_at, notification_id.
   - *DB Entities:* `scheduled_checks, notifications, tokens`

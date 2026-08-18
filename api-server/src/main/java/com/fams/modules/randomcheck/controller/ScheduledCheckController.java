@@ -595,6 +595,8 @@ public class ScheduledCheckController {
     public ResponseEntity<ApiResponse<Map<String, Object>>> cancelCheck(
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
             @Parameter(description = "Scheduled check UUID") @PathVariable UUID checkId,
+            @org.springframework.web.bind.annotation.RequestBody(required = false)
+                com.fams.modules.randomcheck.dto.request.CancelScheduledCheckRequest request,
             @AuthenticationPrincipal FamsUserDetails userDetails) {
 
         checkPermission(userDetails.getUserId(), tenantId, userDetails.isPlatformAdmin());
@@ -602,7 +604,8 @@ public class ScheduledCheckController {
                 .orElseThrow(() -> new com.fams.shared.exception.ResourceNotFoundException(
                         "Scheduled check not found: " + checkId));
         assertCheckInScope(userDetails, tenantId, checkToCancel);
-        cancelService.cancelCheck(tenantId, checkId);
+        String reason = request != null ? request.getReason() : null;
+        cancelService.cancelCheck(tenantId, checkId, userDetails.getUserId(), reason);
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("checkId", checkId);
@@ -860,6 +863,11 @@ public class ScheduledCheckController {
                 .response(responseDto)
                 .manualReason(s.getManualReason())
                 .triggeredBy(s.getTriggeredBy())
+                .sentAt(s.getSentAt())
+                .notificationId(s.getNotificationId())
+                .cancelledBy(s.getCancelledBy())
+                .cancelledAt(s.getCancelledAt())
+                .cancelledReason(s.getCancelledReason())
                 .violations(violations)
                 .build();
     }

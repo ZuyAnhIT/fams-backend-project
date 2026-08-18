@@ -461,7 +461,8 @@ public class EmployeeService {
                 for (Assignment a : activeAssignments) {
                     a.setStatus("cancelled");
                     assignmentRepository.save(a);
-                    int cancelled = scheduledCheckCancelService.cancelPendingByAssignment(a.getId());
+                    int cancelled = scheduledCheckCancelService.cancelPendingByAssignment(
+                            tenantId, a.getId(), callerUserId, "Employee terminated");
                     log.info("Auto-cancelled assignment (and {} pending scheduled check(s)) due to employee "
                             + "termination: employeeId={} assignmentId={}", cancelled, employeeId, a.getId());
                 }

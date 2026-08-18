@@ -151,6 +151,9 @@ public class ManualCheckService {
                 .scheduledAt(now)
                 .expiresAt(expiresAt)
                 .status("sent")  // immediately dispatched — no Redis queue needed
+                .sentAt(now)  // #100 (2026-08-18): this path bypasses RandomCheckDispatchService
+                              // .dispatch() (which is the only other place sentAt gets set), so
+                              // set it here too — same instant as scheduledAt for a manual check.
                 .manualReason(request.getReason())
                 .triggeredBy(triggeredBy)
                 .build();

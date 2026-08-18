@@ -39,9 +39,7 @@ tại — **ĐÚNG, không lỗi thời, đây là 1 trong số ít tính năng 
 
 ---
 
-## Ghi chú
-Kịch bản này chưa được test live qua UI thật — mới hoàn tất bước nghiên cứu code + viết kịch bản.
-**Không có gap cần vá.** Trọng tâm khi test tay: case 2 (nguyên tắc snapshot bất biến) — đây là tính
-năng dễ bị phá vỡ âm thầm nếu có sửa đổi code sau này (VD ai đó vô tình đổi 1 chỗ đọc snapshot sang
-đọc live config), nên nên test lại case này mỗi khi có thay đổi liên quan tới module Random Check
-trong tương lai, dù hiện tại đã đúng.
+## ✅ PASS — ĐÃ KHÓA (2026-08-18)
+Không có gap cần vá — xác nhận qua `tests/randomcheck/test_config_snapshot.sh` (16/16 pass) và toàn
+bộ regression suite sau các fix của #99/#100. Nguyên tắc snapshot bất biến không bị ảnh hưởng bởi
+các thay đổi đó (chỉ thêm field mới cho cancel/dispatch traceability, không đụng tới configSnapshot).
