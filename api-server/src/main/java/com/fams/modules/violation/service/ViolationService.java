@@ -54,6 +54,7 @@ public class ViolationService {
     private final ExplanationEvidenceStorageService evidenceStorageService;
     private final com.fams.modules.checkin.repository.CheckinRepository checkinRepository;
     private final ViolationNotificationService violationNotificationService;
+    private final com.fams.modules.audit.service.AuditLogService auditLogService;
 
     public ViolationService(ViolationRepository violationRepository,
                             EmployeeRepository employeeRepository,
@@ -63,7 +64,8 @@ public class ViolationService {
                             AttendanceSummaryService attendanceSummaryService,
                             ExplanationEvidenceStorageService evidenceStorageService,
                             com.fams.modules.checkin.repository.CheckinRepository checkinRepository,
-                            ViolationNotificationService violationNotificationService) {
+                            ViolationNotificationService violationNotificationService,
+                            com.fams.modules.audit.service.AuditLogService auditLogService) {
         this.violationRepository = violationRepository;
         this.employeeRepository = employeeRepository;
         this.userRoleRepository = userRoleRepository;
@@ -73,6 +75,7 @@ public class ViolationService {
         this.evidenceStorageService = evidenceStorageService;
         this.checkinRepository = checkinRepository;
         this.violationNotificationService = violationNotificationService;
+        this.auditLogService = auditLogService;
     }
 
     @Transactional
@@ -378,6 +381,8 @@ public class ViolationService {
                 tenantId, violation.getEmployeeId(), violation.getSiteId(), violation.getCheckDate());
 
         log.info("Violation confirmed: tenantId={} violationId={} by userId={}", tenantId, violationId, callerUserId);
+        recordViolationAudit(tenantId, violationId, callerUserId, "violation_confirmed",
+                java.util.Map.of("resolutionReason", violation.getResolutionReason() == null ? "" : violation.getResolutionReason()));
 
         return ViolationActionResponse.builder()
                 .id(violation.getId())
@@ -386,6 +391,7 @@ public class ViolationService {
                 .resolved(true)
                 .resolvedAt(now)
                 .resolvedBy(callerUserId)
+                .affectsAttendance(violation.isAffectsAttendance())
                 .build();
     }
 
@@ -416,11 +422,23 @@ public class ViolationService {
         violation.setResolutionReason(request.getReason());
         violation.setResolvedAt(now);
         violation.setResolvedBy(callerUserId);
+        // #117 (2026-08-18): dismissing means HR decided this violation isn't a real/counted
+        // event — it must stop affecting attendance too, not just be marked resolved while the
+        // attendance summary keeps treating it as active. Also marks attendanceImpactReviewed so
+        // this explicit decision isn't silently overwritten by a later automatic recompute.
+        violation.setAffectsAttendance(false);
+        violation.setAttendanceImpactReviewed(true);
         violationRepository.save(violation);
         attendanceSummaryService.recomputeIfSummaryExists(
                 tenantId, violation.getEmployeeId(), violation.getSiteId(), violation.getCheckDate());
 
         log.info("Violation dismissed: tenantId={} violationId={} by userId={}", tenantId, violationId, callerUserId);
+        recordViolationAudit(tenantId, violationId, callerUserId, "violation_dismissed",
+                java.util.Map.of("resolutionReason", violation.getResolutionReason(),
+                        "affectsAttendance", "false"));
+        violationNotificationService.notifyViolationDismissed(
+                tenantId, violation.getEmployeeId(), violation.getSiteId(), violationId,
+                violation.getViolationType(), violation.getResolutionReason());
 
         return ViolationActionResponse.builder()
                 .id(violation.getId())
@@ -429,6 +447,7 @@ public class ViolationService {
                 .resolved(true)
                 .resolvedAt(now)
                 .resolvedBy(callerUserId)
+                .affectsAttendance(false)
                 .build();
     }
 
@@ -448,6 +467,7 @@ public class ViolationService {
                 .findByIdAndTenantIdAndDeletedAtIsNull(violationId, tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Violation not found: " + violationId));
 
+        boolean oldAffectsAttendance = violation.isAffectsAttendance();
         violation.setAffectsAttendance(request.getAffectsAttendance());
         // 2026-08-12 backend readiness assessment: marks this violation as explicitly reviewed
         // for attendance impact, so ScheduledCheckRepository#existsFailedOrNoResponseCheck treats
@@ -464,6 +484,9 @@ public class ViolationService {
 
         log.info("Attendance impact updated: tenantId={} violationId={} affectsAttendance={} by userId={}",
                 tenantId, violationId, request.getAffectsAttendance(), callerUserId);
+        recordViolationAudit(tenantId, violationId, callerUserId, "violation_attendance_impact_updated",
+                java.util.Map.of("oldAffectsAttendance", String.valueOf(oldAffectsAttendance),
+                        "newAffectsAttendance", String.valueOf(request.getAffectsAttendance())));
 
         return AttendanceImpactResponse.builder()
                 .id(violation.getId())
@@ -487,6 +510,25 @@ public class ViolationService {
                 .affectsAttendance(v.isAffectsAttendance())
                 .createdAt(v.getCreatedAt())
                 .build();
+    }
+
+    /** #116/#117/#118 (2026-08-18): the violation-resolution module never recorded any audit
+     *  trail at all — confirm/dismiss/updateAttendanceImpact are exactly the kind of HR decisions
+     *  that need before/after traceability. Best-effort, mirrors the pattern used elsewhere
+     *  (ScheduledCheckCancelService etc.) — an audit failure must not roll back the real action. */
+    private void recordViolationAudit(UUID tenantId, UUID violationId, UUID callerUserId,
+                                      String action, java.util.Map<String, Object> newValue) {
+        try {
+            auditLogService.record(
+                    tenantId, callerUserId, null,
+                    "Violation", violationId.toString(), action,
+                    null, newValue,
+                    com.fams.shared.security.HttpRequestUtils.currentRequestId(),
+                    com.fams.shared.security.HttpRequestUtils.currentIpAddress(),
+                    com.fams.shared.security.HttpRequestUtils.currentUserAgent());
+        } catch (Exception e) {
+            log.warn("Failed to record audit log for {} violationId={}: {}", action, violationId, e.getMessage());
+        }
     }
 
     private String toEvidenceUrl(Violation violation) {

@@ -17,4 +17,9 @@ public final class ViolationEventTypes {
      *  an explanation directly on a violation (POST .../violations/{id}/explain) — same gap class
      *  as the checkin-scoped explanation flow (see CheckinEventTypes.EXPLANATION_SUBMITTED_HR). */
     public static final String VIOLATION_EXPLANATION_SUBMITTED_HR = "VIOLATION_EXPLANATION_SUBMITTED_HR";
+
+    /** #117 (2026-08-18): sent to the employee themselves when HR dismisses a violation against
+     *  them — previously they had no way to know a violation raised against them was later
+     *  waved off as a false positive/non-issue. */
+    public static final String VIOLATION_DISMISSED_EMPLOYEE = "VIOLATION_DISMISSED_EMPLOYEE";
 }

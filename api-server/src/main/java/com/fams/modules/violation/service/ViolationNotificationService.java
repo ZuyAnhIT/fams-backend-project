@@ -126,4 +126,34 @@ public class ViolationNotificationService {
                     tenantId, violationId, e.getMessage());
         }
     }
+
+    /** #117 (2026-08-18): notify the employee that a violation raised against them was dismissed
+     *  — they had no way to know a false-positive/non-issue call was later waved off. */
+    public void notifyViolationDismissed(UUID tenantId, UUID employeeId, UUID siteId, UUID violationId,
+                                         String violationType, String reason) {
+        try {
+            Employee employee = employeeRepository.findByIdAndTenantIdAndDeletedAtIsNull(employeeId, tenantId)
+                    .orElse(null);
+            if (employee == null || employee.getUserId() == null) return;
+
+            String label = VIOLATION_LABELS.getOrDefault(violationType, violationType);
+            String siteName = siteRepository.findByIdAndTenantIdAndDeletedAtIsNull(siteId, tenantId)
+                    .map(Site::getName).orElse(null);
+            String body = "Vi phạm \"" + label + "\"" + (siteName != null ? " tại " + siteName : "")
+                    + " đã được bỏ qua." + (reason != null && !reason.isBlank() ? " Lý do: " + reason : "");
+            Map<String, Object> metadata = new LinkedHashMap<>();
+            metadata.put("violationId", violationId.toString());
+            metadata.put("violationType", violationType);
+            metadata.put("siteId", siteId.toString());
+
+            notificationService.createNotification(
+                    tenantId, employee.getUserId(),
+                    ViolationEventTypes.VIOLATION_DISMISSED_EMPLOYEE,
+                    "Vi phạm đã được bỏ qua",
+                    body, metadata);
+        } catch (Exception e) {
+            log.warn("Failed to send violation-dismissed notification tenantId={} violationId={}: {}",
+                    tenantId, violationId, e.getMessage());
+        }
+    }
 }

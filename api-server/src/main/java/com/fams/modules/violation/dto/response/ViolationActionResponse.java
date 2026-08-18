@@ -29,4 +29,10 @@ public class ViolationActionResponse {
 
     @Schema(description = "UUID of the HR user who resolved the violation")
     private UUID resolvedBy;
+
+    @Schema(description = "Whether the violation still affects the employee's attendance summary. "
+            + "#117 (2026-08-18): dismissing a violation now auto-clears this to false — a "
+            + "dismissed violation is no longer a real event, so it must stop counting against "
+            + "attendance too, not just be marked resolved while still 'affecting' the summary.")
+    private boolean affectsAttendance;
 }
