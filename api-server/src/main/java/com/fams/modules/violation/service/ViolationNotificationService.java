@@ -93,4 +93,37 @@ public class ViolationNotificationService {
                     tenantId, employeeId, violationType, e.getMessage());
         }
     }
+
+    /** #113 (2026-08-18): notify HR when an employee submits an explanation directly on a
+     *  violation (POST .../violations/{id}/explain) — mirrors CheckinService's equivalent
+     *  notification for the checkin-scoped explanation flow. */
+    public void notifyExplanationSubmitted(UUID tenantId, UUID employeeId, UUID siteId, UUID violationId) {
+        try {
+            Employee employee = employeeRepository.findByIdAndTenantIdAndDeletedAtIsNull(employeeId, tenantId)
+                    .orElse(null);
+            String empName = employee != null ? (employee.getFirstName() + " " + employee.getLastName()).trim() : null;
+            String siteName = siteRepository.findByIdAndTenantIdAndDeletedAtIsNull(siteId, tenantId)
+                    .map(Site::getName).orElse(null);
+            String body = (empName != null ? empName : "Một nhân viên") + " vừa gửi giải trình cho vi phạm"
+                    + (siteName != null ? " tại " + siteName : "") + ".";
+            Map<String, Object> metadata = new LinkedHashMap<>();
+            metadata.put("violationId", violationId.toString());
+            metadata.put("employeeId", employeeId.toString());
+            metadata.put("siteId", siteId.toString());
+
+            Set<UUID> hrUserIds = userRoleRepository
+                    .findDistinctActiveHolderIdsOfPermissionInTenant(tenantId, "violations:list");
+            for (UUID hrUserId : hrUserIds) {
+                if (employee != null && hrUserId.equals(employee.getUserId())) continue;
+                notificationService.createNotification(
+                        tenantId, hrUserId,
+                        ViolationEventTypes.VIOLATION_EXPLANATION_SUBMITTED_HR,
+                        "Nhân viên gửi giải trình vi phạm",
+                        body, metadata);
+            }
+        } catch (Exception e) {
+            log.warn("Failed to send explanation-submitted notification tenantId={} violationId={}: {}",
+                    tenantId, violationId, e.getMessage());
+        }
+    }
 }

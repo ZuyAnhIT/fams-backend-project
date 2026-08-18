@@ -111,7 +111,23 @@ public final class NotificationEventTypeCatalog {
                     "Gửi cho HR/quản lý khi một nhân viên bị ghi nhận vi phạm kiểm tra ngẫu nhiên.",
                     true,
                     false,
-                    "high")
+                    "high"),
+            new NotificationEventTypeInfo(
+                    // Must match com.fams.modules.checkin.constant.CheckinEventTypes.EXPLANATION_SUBMITTED_HR
+                    "CHECKIN_EXPLANATION_SUBMITTED_HR",
+                    "Nhân viên gửi giải trình check-in",
+                    "Gửi cho HR/quản lý khi một nhân viên gửi giải trình cho check-in bị đánh dấu lỗi.",
+                    true,
+                    false,
+                    "normal"),
+            new NotificationEventTypeInfo(
+                    // Must match com.fams.modules.violation.constant.ViolationEventTypes.VIOLATION_EXPLANATION_SUBMITTED_HR
+                    "VIOLATION_EXPLANATION_SUBMITTED_HR",
+                    "Nhân viên gửi giải trình vi phạm",
+                    "Gửi cho HR/quản lý khi một nhân viên gửi giải trình trực tiếp cho một vi phạm.",
+                    true,
+                    false,
+                    "normal")
     );
 
     private static final Map<String, String> PRIORITY_BY_EVENT_TYPE = ALL.stream()
