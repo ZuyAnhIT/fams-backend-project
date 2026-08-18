@@ -1,0 +1,34 @@
+# Kịch bản test thủ công — #102 Phản hồi mode chỉ vị trí
+
+**Nền tảng: Backend, Mobile App.**
+
+ℹ️ Audit gốc (07-22): ✅ ĐÃ XONG — "CheckResponseService.submit location_only". Đã xác nhận lại qua
+code hiện tại — **ĐÚNG, không lỗi thời:**
+
+- **`CheckResponseService.submit()`** — với `checkMode=location_only`: lấy `checkMode` từ snapshot
+  (không phải config sống), verify vị trí đồng bộ qua PostGIS (`isPointWithinBufferedPolygon`),
+  `faceVerified`/`livenessVerified` giữ nguyên `null` (đúng AC "face fields NULL"), `outcome`
+  pass/fail CHỈ dựa trên kết quả vị trí.
+
+---
+
+## A. Test trên Backend
+### 1. ✅ Phản hồi trong vùng geofence — `pass`
+- **Kỳ vọng:** `outcome=pass`, `faceVerified=null`, `livenessVerified=null`.
+
+### 2. ✅ Phản hồi ngoài vùng geofence — `fail`
+- **Kỳ vọng:** `outcome=fail`, `failureReason` liên quan vị trí.
+
+### 3. Không gửi kèm ảnh selfie (đúng vì mode không yêu cầu)
+- **Kỳ vọng:** request không cần field ảnh, không lỗi validation.
+
+## B. Test trên Mobile App
+### 4. UI chỉ yêu cầu bật GPS, không yêu cầu chụp ảnh
+- **Kỳ vọng:** màn phản hồi cho mode `location_only` không hiển thị bước chụp ảnh.
+
+---
+
+## Ghi chú
+Kịch bản này chưa được test live qua UI thật — mới hoàn tất bước nghiên cứu code + viết kịch bản.
+Không có gap cần vá. `test_respond_check.sh` đã phủ phần backend cốt lõi. Case 4 cần test tay trên
+App thật.
