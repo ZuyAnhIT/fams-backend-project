@@ -64,12 +64,14 @@ public class ReportController {
                 @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
             @Parameter(description = "Restrict report to one site (optional — omit for all sites in the tenant)")
                 @RequestParam(required = false) UUID siteId,
+            @Parameter(description = "Restrict report to one workspace/department (optional, #122 2026-08-18)")
+                @RequestParam(required = false) UUID workspaceId,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
             @AuthenticationPrincipal FamsUserDetails caller) {
 
         DailyAttendanceReportResponse result = reportService.getDailyAttendanceReport(
-                tenantId, date, siteId, page, size,
+                tenantId, date, siteId, workspaceId, page, size,
                 caller.getUserId(), caller.isPlatformAdmin());
 
         return ResponseEntity.ok(ApiResponse.success(result));
@@ -103,6 +105,8 @@ public class ReportController {
             @Parameter(description = "Month (1–12)", required = true) @RequestParam int month,
             @Parameter(description = "Restrict report to one site (optional — omit for all sites)")
                 @RequestParam(required = false) UUID siteId,
+            @Parameter(description = "Restrict report to one workspace/department (optional, #123 2026-08-18)")
+                @RequestParam(required = false) UUID workspaceId,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
             @AuthenticationPrincipal FamsUserDetails caller) {
@@ -112,7 +116,7 @@ public class ReportController {
         }
 
         MonthlyAttendanceReportResponse result = reportService.getMonthlyAttendanceReport(
-                tenantId, year, month, siteId, page, size,
+                tenantId, year, month, siteId, workspaceId, page, size,
                 caller.getUserId(), caller.isPlatformAdmin());
 
         return ResponseEntity.ok(ApiResponse.success(result));
@@ -151,6 +155,8 @@ public class ReportController {
             @Parameter(description = "Month (1–12)", required = true) @RequestParam int month,
             @Parameter(description = "Restrict export to one site (optional)")
                 @RequestParam(required = false) UUID siteId,
+            @Parameter(description = "Restrict export to one workspace/department (optional, #124 2026-08-18)")
+                @RequestParam(required = false) UUID workspaceId,
             @Parameter(description = "Export anyway despite unresolved pending-review/rejected sessions in scope")
                 @RequestParam(defaultValue = "false") boolean confirmDespiteWarnings,
             @AuthenticationPrincipal FamsUserDetails caller) {
@@ -160,7 +166,7 @@ public class ReportController {
         }
 
         byte[] content = reportService.exportMonthlyAttendance(
-                tenantId, year, month, siteId, confirmDespiteWarnings,
+                tenantId, year, month, siteId, workspaceId, confirmDespiteWarnings,
                 caller.getUserId(), caller.isPlatformAdmin());
 
         String filename = String.format("attendance-%d-%02d.xlsx", year, month);
@@ -206,12 +212,14 @@ public class ReportController {
                 @RequestParam(required = false) UUID employeeId,
             @Parameter(description = "Filter by violation type: no_response | location_fail | face_fail | liveness_fail (optional)")
                 @RequestParam(required = false) String violationType,
+            @Parameter(description = "Restrict report to one workspace/department (optional, #125 2026-08-18)")
+                @RequestParam(required = false) UUID workspaceId,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
             @AuthenticationPrincipal FamsUserDetails caller) {
 
         ViolationReportResponse result = reportService.getViolationReport(
-                tenantId, from, to, siteId, employeeId, violationType, page, size,
+                tenantId, from, to, siteId, employeeId, violationType, workspaceId, page, size,
                 caller.getUserId(), caller.isPlatformAdmin());
 
         return ResponseEntity.ok(ApiResponse.success(result));
@@ -252,10 +260,12 @@ public class ReportController {
                 @RequestParam(required = false) String violationType,
             @Parameter(description = "Filter by resolved status (optional) — omit to export both resolved and unresolved")
                 @RequestParam(required = false) Boolean resolved,
+            @Parameter(description = "Restrict export to one workspace/department (optional, #125 2026-08-18)")
+                @RequestParam(required = false) UUID workspaceId,
             @AuthenticationPrincipal FamsUserDetails caller) {
 
         byte[] content = reportService.exportViolations(
-                tenantId, from, to, siteId, employeeId, violationType, resolved,
+                tenantId, from, to, siteId, employeeId, violationType, resolved, workspaceId,
                 caller.getUserId(), caller.isPlatformAdmin());
 
         String filename = "violations-export.xlsx";

@@ -131,8 +131,9 @@ public class GoogleLoginService {
 
         // ── Resolve tenant & kiểm tra suspended — đồng bộ với AuthService.login() ─
         List<UserRole> roles = userRoleRepository.findAllActiveByUserId(user.getId());
-        UUID primaryTenantId = roles.isEmpty() ? null : roles.get(0).getTenantId();
-        String primaryRole = roles.isEmpty() ? null : roles.get(0).getRole().getName();
+        UserRole primary = com.fams.modules.rbac.util.PrimaryRoleResolver.pickPrimary(roles);
+        UUID primaryTenantId = primary == null ? null : primary.getTenantId();
+        String primaryRole = primary == null ? null : primary.getRole().getName();
 
         if (!user.isPlatformAdmin() && primaryTenantId != null) {
             tenantRepository.findByIdAndDeletedAtIsNull(primaryTenantId).ifPresent(tenant -> {

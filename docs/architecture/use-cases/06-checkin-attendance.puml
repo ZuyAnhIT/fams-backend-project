@@ -26,6 +26,7 @@ rectangle "FAMS — Check-in & Attendance" {
   usecase "Xem bảng công tổng hợp" as Attendance
   usecase "Điều chỉnh bảng công" as Adjust
   usecase "Tính phút công, đi muộn,\nvề sớm, OT, thiếu checkout" as Calculate
+  usecase "Xem việc cần xử lý của tôi" as MyExceptions
 }
 
 EE --> Sites
@@ -35,6 +36,7 @@ EE --> Offline
 EE --> History
 EE --> Explain
 EE --> MyTimesheet
+EE --> MyExceptions
 
 TA --> ManageCheckin
 TA --> ReviewCheckin
@@ -63,5 +65,12 @@ Adjust .> Attendance : <<extend>>
 note bottom of ReviewCheckin
   Check-in ngoài geofence có thể được lưu ở trạng thái chờ duyệt;
   không mặc nhiên trở thành vi phạm hoặc được tính công.
+end note
+
+note bottom of MyExceptions
+  Hộp thư "việc cần xử lý" gộp check-in đang chờ duyệt của nhân viên
+  và vi phạm chưa giải quyết của họ (nguồn dữ liệu thuộc cả module
+  Check-in và module Violation); đặt tại đây vì endpoint gốc
+  (/me/exceptions) thuộc self-service, không có controller riêng.
 end note
 @enduml

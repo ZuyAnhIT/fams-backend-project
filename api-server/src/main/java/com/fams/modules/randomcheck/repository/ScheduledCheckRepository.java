@@ -165,6 +165,12 @@ public interface ScheduledCheckRepository extends JpaRepository<ScheduledCheck, 
     List<ScheduledCheck> findExpiredSentChecksForTenant(@Param("tenantId") UUID tenantId,
                                                         @Param("now") java.time.OffsetDateTime now);
 
+    /** #121 (2026-08-18): supervisor dashboard per-site "random checks still awaiting response" —
+     *  previously that dashboard only ever surfaced check-in presence. */
+    @Query("SELECT COUNT(s) FROM ScheduledCheck s WHERE s.tenantId = :tenantId AND s.siteId = :siteId " +
+           "AND s.status IN ('pending', 'sent') AND s.deletedAt IS NULL")
+    long countActiveBySite(@Param("tenantId") UUID tenantId, @Param("siteId") UUID siteId);
+
     @Query("SELECT COUNT(s) FROM ScheduledCheck s WHERE s.tenantId = :tenantId " +
            "AND s.checkDate >= :monthStart AND s.checkDate <= :monthEnd " +
            "AND s.deletedAt IS NULL")

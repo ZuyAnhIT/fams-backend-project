@@ -81,13 +81,11 @@ public class RefreshTokenService {
         // or if the role that was active got revoked since the last refresh.
         UserRole activeRole = null;
         if (stored.getActiveTenantId() != null) {
-            activeRole = roles.stream()
-                    .filter(r -> stored.getActiveTenantId().equals(r.getTenantId()))
-                    .findFirst()
-                    .orElse(null);
+            activeRole = com.fams.modules.rbac.util.PrimaryRoleResolver.pickPrimaryForTenant(
+                    roles, stored.getActiveTenantId());
         }
         if (activeRole == null) {
-            activeRole = roles.isEmpty() ? null : roles.get(0);
+            activeRole = com.fams.modules.rbac.util.PrimaryRoleResolver.pickPrimary(roles);
         }
         UUID primaryTenantId = activeRole != null ? activeRole.getTenantId() : null;
         String primaryRole = activeRole != null ? activeRole.getRole().getName() : null;

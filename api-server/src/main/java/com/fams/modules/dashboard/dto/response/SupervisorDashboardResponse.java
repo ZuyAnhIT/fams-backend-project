@@ -41,6 +41,14 @@ public class SupervisorDashboardResponse {
 
         @Schema(description = "Site center longitude")
         private Double siteLongitude;
+
+        @Schema(description = "Random checks at this site still awaiting an employee response "
+                + "(status pending or sent) — #121 (2026-08-18), previously the supervisor "
+                + "dashboard only ever surfaced check-in presence")
+        private long randomCheckPending;
+
+        @Schema(description = "Unresolved violations at this site (#121, 2026-08-18)")
+        private long unresolvedViolations;
     }
 
     @Data

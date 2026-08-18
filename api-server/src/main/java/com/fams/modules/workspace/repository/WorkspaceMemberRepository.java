@@ -34,6 +34,15 @@ public interface WorkspaceMemberRepository extends JpaRepository<WorkspaceMember
 
     long countByWorkspaceIdAndDeletedAtIsNull(UUID workspaceId);
 
+    /** #122-#125 (2026-08-18): reports workspace filter — attendance/violation entities have no
+     *  workspaceId of their own (relationship is via WorkspaceMember), so the caller resolves
+     *  this employee-ID set first, same pattern as
+     *  AssignmentRepository#findDistinctEmployeeIdsByTenantIdAndSiteIdIn for the site filter. */
+    @Query("SELECT DISTINCT m.employeeId FROM WorkspaceMember m "
+            + "WHERE m.tenantId = :tenantId AND m.workspaceId = :workspaceId AND m.deletedAt IS NULL")
+    java.util.Set<UUID> findDistinctEmployeeIdsByTenantIdAndWorkspaceId(
+            @Param("tenantId") UUID tenantId, @Param("workspaceId") UUID workspaceId);
+
     /** Batch-counts active members per workspace for a page of workspaces
      *  (WorkspaceService.listWorkspaces) — avoids one query per row. */
     @Query("SELECT m.workspaceId AS workspaceId, COUNT(m) AS cnt FROM WorkspaceMember m "

@@ -74,4 +74,11 @@ public class AttendanceHrMonthlyResponse {
             + "failureEscalationThreshold (RandomCheckConfig) — a suggested signal for HR to review this "
             + "employee+site before finalizing payroll, not an automatic action.", example = "false")
     private boolean exceedsRandomCheckFailureThreshold;
+
+    @Schema(description = "Total violations of ANY type for this employee+site this month "
+            + "(#123, 2026-08-18) — broader than daysWithRandomCheckFailure, which only counts "
+            + "days with a random-check-derived failure; this counts every violation row "
+            + "(no_response/location_fail/face_fail/liveness_fail/face_verify_timeout).",
+            example = "0")
+    private int violationCount;
 }

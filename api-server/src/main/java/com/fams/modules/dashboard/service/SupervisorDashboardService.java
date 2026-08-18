@@ -8,10 +8,12 @@ import com.fams.modules.checkin.repository.CheckinRepository;
 import com.fams.modules.dashboard.dto.response.SupervisorDashboardResponse;
 import com.fams.modules.employee.entity.Employee;
 import com.fams.modules.employee.repository.EmployeeRepository;
+import com.fams.modules.randomcheck.repository.ScheduledCheckRepository;
 import com.fams.modules.site.entity.Site;
 import com.fams.modules.site.repository.SiteRepository;
 import com.fams.modules.tenant.entity.Tenant;
 import com.fams.modules.tenant.repository.TenantRepository;
+import com.fams.modules.violation.repository.ViolationRepository;
 import com.fams.shared.exception.ResourceNotFoundException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -34,17 +36,23 @@ public class SupervisorDashboardService {
     private final SiteRepository siteRepository;
     private final CheckinRepository checkinRepository;
     private final TenantRepository tenantRepository;
+    private final ScheduledCheckRepository scheduledCheckRepository;
+    private final ViolationRepository violationRepository;
 
     public SupervisorDashboardService(EmployeeRepository employeeRepository,
                                        AssignmentRepository assignmentRepository,
                                        SiteRepository siteRepository,
                                        CheckinRepository checkinRepository,
-                                       TenantRepository tenantRepository) {
+                                       TenantRepository tenantRepository,
+                                       ScheduledCheckRepository scheduledCheckRepository,
+                                       ViolationRepository violationRepository) {
         this.employeeRepository = employeeRepository;
         this.assignmentRepository = assignmentRepository;
         this.siteRepository = siteRepository;
         this.checkinRepository = checkinRepository;
         this.tenantRepository = tenantRepository;
+        this.scheduledCheckRepository = scheduledCheckRepository;
+        this.violationRepository = violationRepository;
     }
 
     @Transactional(readOnly = true)
@@ -112,6 +120,9 @@ public class SupervisorDashboardService {
         // from two separate calls (GET /sites and GET /checkin) — no single response could
         // drive a "site map with who's on it" screen. This is the natural home for that: the
         // supervisor dashboard already aggregates open sessions per supervised site.
+        long randomCheckPending = scheduledCheckRepository.countActiveBySite(tenantId, siteId);
+        long unresolvedViolations = violationRepository.countUnresolved(tenantId, siteId);
+
         return SupervisorDashboardResponse.SiteStatus.builder()
                 .siteId(siteId)
                 .siteName(siteName)
@@ -120,6 +131,8 @@ public class SupervisorDashboardService {
                 .onSiteEmployees(onSiteEmployees)
                 .siteLatitude(site != null ? site.getLatitude() : null)
                 .siteLongitude(site != null ? site.getLongitude() : null)
+                .randomCheckPending(randomCheckPending)
+                .unresolvedViolations(unresolvedViolations)
                 .build();
     }
 }
