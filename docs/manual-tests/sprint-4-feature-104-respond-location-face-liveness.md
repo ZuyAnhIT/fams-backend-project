@@ -64,13 +64,66 @@ qua comment code ghi rõ ngày sửa) — audit gốc chỉ đơn giản là ch�
 
 ---
 
+## ✅ PASS — ĐÃ KHÓA phần code, ⚠️ CÒN 1 QUYẾT ĐỊNH NGHIỆP VỤ (2026-08-18)
+
+Test live xác nhận lại (sau khi fix container `fams-ai` bị treo — xem chi tiết ở
+`sprint-4-feature-103-respond-location-face.md`, cùng nguyên nhân hạ tầng ảnh hưởng cả 2 tính
+năng): **bản vá "liveness dead code" từ trước vẫn hoạt động đúng** —
+`test_check_response_face.sh` Test 4 giờ chạy hết vòng đời thật qua AI worker (`fams-ai` container
+đã healthy trở lại): `livenessVerified=null` lúc gửi (đang xử lý bất đồng bộ) → poll DB →
+`liveness_verified=true` sau khi model MiniFASNet chấm xong ảnh thật — xác nhận liveness KHÔNG
+phải dead code, có ảnh hưởng thật đến outcome.
+
+### Test trên Mobile App — ✅ PASS, test live qua Expo Web thật kết nối backend thật (2026-08-18)
+- Case 5 xác nhận lại đúng nuance đã phát hiện: panel phản hồi mode `location_face_liveness` và
+  panel mode `location_face` **hiển thị giống hệt nhau** (cùng cảnh báo "Face ID chưa sẵn sàng" +
+  nút "Mở đăng ký Face ID" khi chưa enroll) — không có bất kỳ bước "quay đầu/chớp mắt theo hướng
+  dẫn" nào khác biệt cho mode liveness. Xác nhận bằng ảnh chụp màn hình so sánh trực tiếp 2 panel.
+
+## ✅ ĐÃ NÂNG CẤP (2026-08-18, cùng ngày) — quyết định: chủ động, giống check-in
+
+Người dùng chọn **"Nâng lên chủ động (Recommended)"**. Đã triển khai đầy đủ backend + Mobile App:
+
+### Backend
+- **Migration V105**: mở rộng CHECK constraint `liveness_challenges.purpose` thêm `'random_check'`.
+- `FaceIdService.startLivenessChallenge` / `FaceIdController` / ai-service
+  `routers/liveness_challenge.py`: chấp nhận `purpose=random_check` (yêu cầu `siteId`, ràng buộc
+  challenge vào đúng site của scheduled_check, cùng cơ chế với `checkin`/`checkout`).
+- `SubmitCheckResponseRequest`: thêm field `livenessChallengeId` (UUID).
+- `CheckResponseService`: mode `location_face_liveness` giờ **BẮT BUỘC** một challenge đã `passed`
+  (không còn nhận `employeePhotoBase64` cho mode này) — thiếu challengeId trả về `422
+  FACE_ID_REQUIRED`. Challenge được validate + tiêu thụ nguyên tử (atomic `consumeIfPassed`, chặn
+  double-spend) qua `consumeRandomCheckChallenge()` (nhân bản có chủ đích logic tương ứng của
+  `CheckinService#enforceCheckinPolicy` thay vì refactor dùng chung — giảm rủi ro cho module
+  check-in đã test kỹ). Khi có challenge, publish job async qua
+  `faceVerifyJobPublisher.publishFromChallenge(...)` (dùng khung hình đã lưu của challenge, bỏ qua
+  kiểm tra liveness thụ động dư thừa) — **giống hệt hành vi check-in đã có sẵn**: cột
+  `liveness_verified` trên response CỐ Ý giữ NULL sau khi xử lý xong (liveness đã được chứng minh
+  qua challenge riêng, không lặp lại ở cột này) — không phải bug, đã đối chiếu với callback
+  controller dùng chung code path cho cả check-in.
+
+### Mobile App
+- `FaceLivenessCamera` (component tái sử dụng y hệt từ check-in) mount cho mode
+  `location_face_liveness` thay vì `FacePhotoCapture` — `purpose="random_check"`,
+  `siteId={selected.siteId}`, `onPassed` gọi `send({ livenessChallengeId })`.
+- `FaceLivenessPurpose` type, `SubmitRandomCheckPayload` mở rộng thêm `livenessChallengeId`.
+
+### Test live — ✅ PASS
+- Backend: `tests/face-id/test_check_response_face.sh` viết lại Test 4 thành 4a (thiếu challengeId
+  → 422 đúng) + 4b (challenge `passed` hợp lệ → 200, face_verified=true qua khung hình challenge,
+  challenge chuyển `consumed`, outcome=pass) — **15/15 PASS toàn bộ file**, chạy qua AI worker thật.
+- Frontend: test live qua Expo Web thật (Playwright, camera giả lập) — nhân viên đã enroll Face ID
+  mở check `location_face_liveness`: panel hiển thị đúng UI "Xác minh người thật" với hướng dẫn đầy
+  đủ (quay trái/phải, ngẩng/cúi mặt, nháy mắt) + nút "Bắt đầu xác minh"; bấm vào mở camera thật,
+  hiển thị đúng "Bước 1/3 · Còn 87s · Nhìn thẳng vào camera" với khung dẫn hướng oval — xác nhận
+  UI thật sự chạy chung 1 component với check-in, không còn dùng `FacePhotoCapture` thụ động nữa.
+
+### Regression
+Toàn bộ `tests/randomcheck/*.sh` (18 suite) vẫn PASS sau thay đổi — không ảnh hưởng các mode khác
+(`location_only`, `location_face` không đổi hành vi).
+
 ## Ghi chú
-Kịch bản này chưa được test live qua UI thật — mới hoàn tất bước nghiên cứu code + viết kịch bản.
-**Tin quan trọng: bug "dead code" nghiêm trọng trong audit gốc ĐÃ ĐƯỢC VÁ từ trước, không cần sửa
-lại — chỉ cần test live để XÁC NHẬN bản vá vẫn hoạt động đúng (case 1 là trọng tâm).** Điểm cần
-quyết định nghiệp vụ duy nhất: case 5 (liveness thụ động vs chủ động) — tương tự quyết định đã đưa
-ra trước đây cho check-in (`gps_face_liveness`), cần xác nhận mức độ chống giả mạo hiện tại có đủ
-cho random check hay cần nâng cấp lên thử thách chủ động giống check-in.
 `test_check_response_face.sh` Test 4 hiện chỉ xác nhận `liveness_verified` được lưu đúng, CHƯA assert
-outcome/violation khi liveness fail — cần bổ sung test tự động cho phần này để tránh regression
-trong tương lai (bug này đã từng tồn tại 1 lần, dễ tái phát nếu không có test khóa lại).
+outcome/violation khi liveness fail bằng 1 ảnh giả mạo thật sự (test hiện dùng ảnh hợp lệ nên luôn
+pass) — nên bổ sung 1 case dùng ảnh/đầu vào giả mạo rõ ràng để khóa lại hành vi fail, tránh
+regression trong tương lai (bug dead-code này đã từng tồn tại 1 lần).

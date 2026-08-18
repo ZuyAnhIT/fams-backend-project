@@ -35,7 +35,17 @@
 
 ---
 
+## ✅ PASS — ĐÃ KHÓA (2026-08-18)
+
+Backend: `test_late_response_rejection.sh` 14/14 PASS. Frontend: test live qua Expo Web thật —
+seed 1 check đã hết hạn (`expires_at` ở quá khứ), deep-link thẳng tới `?checkId=<id>` của check
+đó: panel phản hồi KHÔNG mở ra (tự động bỏ chọn vì `selectedExpired`), card hiển thị đúng pill
+"Hết hạn" — xác nhận UI không cho người dùng cố gắng gửi phản hồi trễ, khớp đúng thiết kế backend.
+`randomCheckErrorMessage()` cũng có sẵn message tiếng Việt rõ ràng cho mã lỗi `CHECK_EXPIRED`
+("Yêu cầu đã hết thời gian phản hồi.") cho trường hợp race-condition (gửi đúng lúc hết hạn).
+
+Không có gap cần vá.
+
 ## Ghi chú
-Kịch bản này chưa được test live qua UI thật — mới hoàn tất bước nghiên cứu code + viết kịch bản.
-Không có gap cần vá. Trọng tâm khi test: case 3 (làm rõ ranh giới với #106, tránh test nhầm phạm vi).
+Trọng tâm khi test: case 3 (làm rõ ranh giới với #106, tránh test nhầm phạm vi).
 `test_late_response_rejection.sh` đã phủ phần backend cốt lõi.

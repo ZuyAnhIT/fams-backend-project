@@ -157,8 +157,12 @@ check_val "No photo → faceVerified=false" "$r1_fv" "false"
 check_val "No photo → outcome=fail" "$r1_out" "fail"
 echo ""
 
-# ── Test 2: Respond with photo in location_face mode → fail-open (200, async) ─
-echo "--- Test 2: location_face mode, photo provided → 200 fail-open ---"
+# ── Test 2: Respond with photo, but employee NOT enrolled yet → fail synchronously ─
+# Per FaceIdController/CheckResponseService (confirmed via code, #103 audit 2026-08-18): a photo
+# alone does not trigger the async match — the employee must already be enrolled
+# (FaceProfile.status="enrolled"). Not-enrolled fails immediately regardless of whether a photo
+# was sent, same as Test 1. The async path is only reachable once actually enrolled (see Test 3).
+echo "--- Test 2: location_face mode, photo provided but NOT enrolled → fails sync (same as Test 1) ---"
 if [ "$FIXTURE_AVAILABLE" = "true" ]; then
     CHECK2=$(insert_check "location_face")
     PHOTO_B64=$(base64 -w 0 "$FACE_IMG")
@@ -174,9 +178,9 @@ if [ "$FIXTURE_AVAILABLE" = "true" ]; then
     r2_status=$(echo "$r2" | tail -n 1)
     r2_fv=$(echo "$r2_body" | grep -o '"faceVerified":[^,}]*' | cut -d: -f2 | tr -d ' "')
     r2_out=$(echo "$r2_body" | grep -o '"outcome":"[^"]*"' | cut -d'"' -f4)
-    check_val "With photo → HTTP 200" "$r2_status" "200"
-    check_val "With photo → faceVerified=null initially" "$r2_fv" "null"
-    check_val "With photo → outcome=pass initially (fail-open)" "$r2_out" "pass"
+    check_val "With photo, not enrolled → HTTP 200" "$r2_status" "200"
+    check_val "With photo, not enrolled → faceVerified=false" "$r2_fv" "false"
+    check_val "With photo, not enrolled → outcome=fail" "$r2_out" "fail"
 else
     echo "SKIP: No fixture — skipping photo test"
     CHECK2=""
@@ -186,9 +190,11 @@ echo ""
 # ── Test 3: E2E — enroll, respond, poll for faceVerified ─────────────────────
 echo "--- Test 3: E2E — enrolled employee face verification via check response ---"
 if [ "$FIXTURE_AVAILABLE" = "true" ] && [ -n "${CHECK2:-}" ]; then
-    # Enroll employee face
+    # Consent must come from the data subject (employee), not HR/Admin on their behalf —
+    # POST /consent deliberately rejects ADMIN_TOKEN with 403 (see FaceIdService.giveConsent).
     curl -s -o /dev/null -X POST "$FACE_URL/consent" \
-        -H "Authorization: Bearer $ADMIN_TOKEN"
+        -H "Authorization: Bearer $EMP_TOKEN"
+    # HR-assisted enrollment (raw photos, non-self-service) is fine via ADMIN_TOKEN.
     enroll_st=$(curl -s -o /dev/null -w "%{http_code}" \
         -X POST "$FACE_URL/enroll" \
         -H "Authorization: Bearer $ADMIN_TOKEN" \
@@ -197,6 +203,15 @@ if [ "$FIXTURE_AVAILABLE" = "true" ] && [ -n "${CHECK2:-}" ]; then
         -F "photos=@$FACE_IMG;type=image/jpeg")
 
     if [ "$enroll_st" -eq 200 ]; then
+        # enroll() lands in reviewStatus=pending, not yet active for checkin — must be approved
+        # by HR/Admin before the profile's status flips to "enrolled" (FaceIdService.approveEnrollment).
+        approve_st=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST "$FACE_URL/approve" \
+            -H "Authorization: Bearer $ADMIN_TOKEN")
+        if [ "$approve_st" -ne 200 ]; then
+            echo "FAIL: Approve enrollment failed (status=$approve_st)"
+            FAIL=$((FAIL + 1))
+        fi
         # New check (test 2's check is already responded)
         CHECK3=$(insert_check "location_face")
         PHOTO_B64=$(base64 -w 0 "$FACE_IMG")
@@ -247,52 +262,96 @@ else
 fi
 echo ""
 
-# ── Test 4: location_face_liveness mode — photo + liveness required (Task 104) ─
-echo "--- Test 4: location_face_liveness mode, photo provided → 200, async liveness ---"
+# ── Test 4: location_face_liveness mode — requires an active-liveness challenge (Task 104,
+# upgraded 2026-08-18 from passive single-photo liveness by explicit user decision — mirrors
+# check-in's gps_face_liveness challenge flow, see CheckResponseService#consumeRandomCheckChallenge)
+echo "--- Test 4a: location_face_liveness mode, NO challengeId → rejected (422 FACE_ID_REQUIRED) ---"
+if [ "$FIXTURE_AVAILABLE" = "true" ]; then
+    CHECK4A=$(insert_check "location_face_liveness")
+    r4a_status=$(curl -s -o /dev/null -w "%{http_code}" \
+        -X POST "$BASE_CHECKS/$CHECK4A/respond" \
+        -H "Content-Type: application/json" -H "Authorization: Bearer $EMP_TOKEN" \
+        -d '{"latitude":21.0285,"longitude":105.8542}')
+    check_val "No challengeId → HTTP 422" "$r4a_status" "422"
+else
+    echo "SKIP: No fixture"
+fi
+echo ""
+
+echo "--- Test 4b: location_face_liveness mode, with a passed random_check challenge → 200, async liveness ---"
 if [ "$FIXTURE_AVAILABLE" = "true" ]; then
     CHECK4=$(insert_check "location_face_liveness")
-    PHOTO_B64=$(base64 -w 0 "$FACE_IMG")
-    TMPFILE4=$(mktemp /tmp/cr_live_body4.XXXXXX.json)
-    printf '{"latitude":21.0285,"longitude":105.8542,"employeePhotoBase64":"%s"}' \
-        "$PHOTO_B64" > "$TMPFILE4"
+    # Synthesize an already-'passed' active-liveness challenge — driving the real capture flow
+    # (center + 2 random pose actions) needs an actual moving face, which a single static fixture
+    # image can't provide. Bypass the challenge/frames endpoints directly the same way other
+    # tests in this suite insert scheduled_checks directly, and copy the fixture onto the
+    # storage bind mount at the exact path fams-ai's worker reads (see storage_service.py).
+    CHALLENGE_ID=$(docker exec fams-postgres psql -U fams_user -d fams_db -t -c \
+        "SELECT gen_random_uuid();" | tr -d ' \n')
+    # /app/storage is root-owned inside the fams-ai container (matches how the app itself writes
+    # there) — write via docker exec instead of the host bind-mount path directly.
+    docker exec fams-ai mkdir -p "/app/storage/liveness_challenges/$TENANT_ID"
+    docker cp "$FACE_IMG" "fams-ai:/app/storage/liveness_challenges/$TENANT_ID/$CHALLENGE_ID.jpg"
+    docker exec fams-postgres psql -U fams_user -d fams_db -c "
+        INSERT INTO liveness_challenges
+          (id, tenant_id, employee_id, purpose, actions, status, center_frame_path, site_id,
+           created_at, expires_at, completed_at)
+        VALUES
+          ('$CHALLENGE_ID', '$TENANT_ID', '$EMP_ID', 'random_check', ARRAY['center','turn_left','blink'],
+           'passed', '/app/storage/liveness_challenges/$TENANT_ID/$CHALLENGE_ID.jpg', '$SITE_ID',
+           now(), now() + interval '90 seconds', now());" > /dev/null
+
     r4=$(curl -s -w "\n%{http_code}" \
         -X POST "$BASE_CHECKS/$CHECK4/respond" \
         -H "Content-Type: application/json" -H "Authorization: Bearer $EMP_TOKEN" \
-        --data @"$TMPFILE4")
-    rm -f "$TMPFILE4"
+        -d "{\"latitude\":21.0285,\"longitude\":105.8542,\"livenessChallengeId\":\"$CHALLENGE_ID\"}")
     r4_body=$(echo "$r4" | head -n -1)
     r4_status=$(echo "$r4" | tail -n 1)
     r4_lv=$(echo "$r4_body" | grep -o '"livenessVerified":[^,}]*' | cut -d: -f2 | tr -d ' "')
-    check_val "Liveness check-in → HTTP 200" "$r4_status" "200"
+    check_val "With passed challenge → HTTP 200" "$r4_status" "200"
     check_val "Liveness mode → livenessVerified=null initially" "$r4_lv" "null"
 
-    # Poll for liveness result
+    # Challenge must now be 'consumed' — atomic single-use guard
+    challenge_status=$(docker exec fams-postgres psql -U fams_user -d fams_db -t -c \
+        "SELECT status FROM liveness_challenges WHERE id='$CHALLENGE_ID';" | tr -d ' \n')
+    check_val "Challenge consumed after use" "$challenge_status" "consumed"
+
+    # Poll for the async face-match result. Note: liveness_verified is expected to STAY NULL for
+    # the challenge path — the worker sets requires_liveness=false when a challenge_id is present
+    # (publishFromChallenge), since liveness was already proven by the passed active challenge
+    # itself; re-running the passive single-frame check on top would be redundant. This exactly
+    # mirrors check-in's identical behavior after a gps_face_liveness challenge (verified via
+    # FaceResultCallbackController — same callback code path, sourceType='check_response').
     RESP4_ID=$(echo "$r4_body" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
     if [ -n "$RESP4_ID" ]; then
-        echo "Polling for liveness result..."
-        LV_RESULT=""
+        echo "Polling for face-match result (via challenge frame)..."
+        FV_RESULT=""
         for i in $(seq 1 8); do
             sleep 5
-            lv_poll=$(docker exec fams-postgres psql -U fams_user -d fams_db -t -c \
-                "SELECT liveness_verified FROM check_responses WHERE id='$RESP4_ID';" | tr -d ' \n')
-            if [ -n "$lv_poll" ] && [ "$lv_poll" != "" ]; then
-                LV_RESULT="$lv_poll"
+            fv_poll=$(docker exec fams-postgres psql -U fams_user -d fams_db -t -c \
+                "SELECT face_verified FROM check_responses WHERE id='$RESP4_ID';" | tr -d ' \n')
+            if [ -n "$fv_poll" ] && [ "$fv_poll" != "" ]; then
+                FV_RESULT="$fv_poll"
                 break
             fi
-            echo "  Poll $i: liveness_verified still NULL..."
+            echo "  Poll $i: face_verified still NULL..."
         done
 
-        if [ "$LV_RESULT" = "t" ]; then
-            echo "PASS: liveness_verified=true (real image passed MiniFASNet)"
-            PASS=$((PASS + 1))
-        elif [ "$LV_RESULT" = "f" ]; then
-            echo "INFO: liveness_verified=false (static image may fail anti-spoof — expected)"
-            echo "PASS: Liveness pipeline ran end-to-end"
+        if [ "$FV_RESULT" = "t" ]; then
+            echo "PASS: face_verified=true via challenge frame (same enrolled employee)"
             PASS=$((PASS + 1))
         else
-            echo "FAIL: liveness_verified never resolved — worker may not be running"
+            echo "FAIL: face_verified never resolved to true via challenge frame (got '$FV_RESULT') — worker may not be running"
             FAIL=$((FAIL + 1))
         fi
+
+        lv_final=$(docker exec fams-postgres psql -U fams_user -d fams_db -t -c \
+            "SELECT liveness_verified FROM check_responses WHERE id='$RESP4_ID';" | tr -d ' \n')
+        check_val "liveness_verified stays NULL (proven via challenge, not re-checked passively)" "$lv_final" ""
+
+        outcome4=$(docker exec fams-postgres psql -U fams_user -d fams_db -t -c \
+            "SELECT outcome FROM check_responses WHERE id='$RESP4_ID';" | tr -d ' \n')
+        check_val "outcome=pass (location+face ok, liveness trusted via challenge)" "$outcome4" "pass"
     fi
 else
     echo "SKIP: No fixture"

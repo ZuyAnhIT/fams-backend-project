@@ -8,6 +8,7 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 import java.math.BigDecimal;
+import java.util.UUID;
 
 @Getter
 @Setter
@@ -36,4 +37,11 @@ public class SubmitCheckResponseRequest {
     @DecimalMin(value = "0.0", message = "livenessScore must be >= 0")
     @DecimalMax(value = "1.0", message = "livenessScore must be <= 1")
     private BigDecimal livenessScore;
+
+    /** A PASSED, purpose=random_check active-liveness challenge (head-pose/blink sequence) from
+     *  POST .../face-id/liveness-challenge, started at this check's siteId. Required (not
+     *  optional) for location_face_liveness mode as of #104 (2026-08-18, upgraded from passive
+     *  single-photo liveness by explicit user decision) — employeePhotoBase64 alone is no longer
+     *  accepted for that mode. Ignored for location_only/location_face. */
+    private UUID livenessChallengeId;
 }

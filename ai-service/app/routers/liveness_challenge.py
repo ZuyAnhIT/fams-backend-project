@@ -38,8 +38,10 @@ def start_challenge(
     purpose: str = Form(...),
     site_id: str | None = Form(None),
 ) -> dict:
-    if purpose not in ("enroll", "checkin", "checkout"):
-        raise HTTPException(status_code=400, detail="purpose must be 'enroll', 'checkin', or 'checkout'")
+    if purpose not in ("enroll", "checkin", "checkout", "random_check"):
+        raise HTTPException(
+            status_code=400, detail="purpose must be 'enroll', 'checkin', 'checkout', or 'random_check'"
+        )
 
     # Always starts with 'center' (the frontal reference frame used for the actual embedding +
     # single-frame anti-spoofing), followed by 2 randomly chosen, non-repeating dynamic actions

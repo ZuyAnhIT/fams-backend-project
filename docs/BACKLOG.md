@@ -851,26 +851,31 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 
 - [x] **#101 — App hiển thị random check đang chờ** `P0` · 3sp · Nền tảng: Backend, Mobile App
   - *Audit (2026-07-22):* ✅ ĐÃ XONG — bằng chứng: /scheduled-checks/my-pending, test_employee_pending_checks.sh
+  - *Audit (2026-08-18):* ✅ ĐÃ TEST LIVE — không có gap. Xem `sprint-4-feature-101-pending-check-display.md`.
   - *User Story:* Là một nhân viên, tôi muốn thấy random check và thời gian còn lại để phản hồi kịp thời.
   - *Acceptance Criteria:* App mở từ deep_link; hiển thị countdown đến expires_at; hiển thị yêu cầu theo mode.
   - *DB Entities:* `scheduled_checks, notifications`
 - [x] **#102 — Phản hồi mode chỉ vị trí** `P0` · 5sp · Nền tảng: Backend, Mobile App
   - *Audit (2026-07-22):* ✅ ĐÃ XONG — bằng chứng: CheckResponseService.submit location_only, test_respond_check.sh
+  - *Audit (2026-08-18):* ✅ ĐÃ TEST LIVE — không có gap. Xem `sprint-4-feature-102-respond-location-only.md`.
   - *User Story:* Là một nhân viên, tôi muốn phản hồi random check bằng GPS để xác minh đang ở công trình.
   - *Acceptance Criteria:* Lấy GPS; gửi lat/lng/accuracy; kiểm tra geofence; face fields NULL; result pass/fail_location.
   - *DB Entities:* `random_check_responses, scheduled_checks, site_geofences`
 - [x] **#103 — Phản hồi mode vị trí + Face ID** `P0` · 8sp · Nền tảng: Backend, Mobile App, Queue/AI/Automation
   - *Audit (2026-07-22):* ✅ ĐÃ XONG — bằng chứng: location_face path async, test_check_response_face.sh
+  - *Audit (2026-08-18):* ✅ ĐÃ VÁ — AI worker container bị treo do bind-mount gãy (hạ tầng, đã fix) + test script lỗi thời (thiếu bước approve, sai actor consent, sai kỳ vọng). Sau fix: 11/11 PASS, nhánh async thật qua AI worker xác nhận đúng. Xem `sprint-4-feature-103-respond-location-face.md`.
   - *User Story:* Là một nhân viên, tôi muốn phản hồi bằng GPS và selfie Face ID để xác minh đúng người ở đúng nơi.
   - *Acceptance Criteria:* Bắt GPS + selfie; kiểm tra geofence và face score; lưu selfie_url; result fail_location/fail_face/pass.
   - *DB Entities:* `random_check_responses, face_embeddings, scheduled_checks`
-- [ ] **#104 — Phản hồi mode vị trí + Face ID + Liveness** `P1` · 8sp · Nền tảng: Backend, Mobile App, Queue/AI/Automation
+- [x] **#104 — Phản hồi mode vị trí + Face ID + Liveness** `P1` · 8sp · Nền tảng: Backend, Mobile App, Queue/AI/Automation
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: location_face_liveness path; thiếu: livenessScore được nhận/lưu nhưng KHÔNG BAO GIỜ được đọc lại để quyết định pass/fail — dead code path
+  - *Audit (2026-08-18):* 🟡→✅ CÁO BUỘC LỖI THỜI (bug dead-code đã được vá trước đây) + **nâng cấp liveness từ thụ động lên chủ động** theo quyết định người dùng — dùng lại `FaceLivenessCamera` (quay đầu/nháy mắt) giống check-in thay vì 1 ảnh tĩnh. Migration V105, `livenessChallengeId` bắt buộc cho mode này. Test live 15/15 PASS qua AI worker thật + UI thật. Xem `sprint-4-feature-104-respond-location-face-liveness.md`.
   - *User Story:* Là một nhân viên, tôi muốn phản hồi bằng GPS, Face ID và liveness để chống gian lận ảnh/video.
   - *Acceptance Criteria:* Bắt GPS + selfie/liveness; validate theo snapshot; lưu liveness_passed; fail tạo result tương ứng.
   - *DB Entities:* `random_check_responses, face_embeddings, scheduled_checks`
 - [x] **#105 — Từ chối phản hồi trễ** `P0` · 3sp · Nền tảng: Backend, Mobile App, Queue/AI/Automation
   - *Audit (2026-07-22):* ✅ ĐÃ XONG — bằng chứng: CheckExpiredException, test_late_response_rejection.sh
+  - *Audit (2026-08-18):* ✅ ĐÃ TEST LIVE — không có gap. Xem `sprint-4-feature-105-late-response-rejection.md`.
   - *User Story:* Là một hệ thống, tôi muốn không chấp nhận response sau expires_at để đảm bảo kiểm tra đúng thời điểm.
   - *Acceptance Criteria:* Nếu responded_at > expires_at thì result=late_response hoặc reject; status expired/responded theo rule; ghi violation nếu cần.
   - *DB Entities:* `scheduled_checks, random_check_responses, violations`

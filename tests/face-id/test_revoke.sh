@@ -46,12 +46,25 @@ TENANT_ID=$(curl -s -X POST "$BASE_URL/api/v1/tenants" \
     | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 [ -z "$TENANT_ID" ] && { echo "SETUP FAILED: tenant"; exit 1; }
 
-EMP_ID=$(curl -s -X POST "$BASE_URL/api/v1/tenants/$TENANT_ID/employees" \
+# Employee created via invitation+accept (not plain POST /employees) so it has a linked user_id —
+# required for the self-only consent step below (see test_consent.sh).
+EMP_EMAIL="dave.revoke.${TS}@corp.com"
+curl -s -o /dev/null -X POST "$BASE_URL/api/v1/tenants/$TENANT_ID/invitations" \
+    -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" \
+    -d "{\"email\":\"$EMP_EMAIL\",\"firstName\":\"Dave\",\"lastName\":\"Revoke\"}"
+INV_TOKEN=$(docker exec fams-postgres psql -U "${DB_USER:-fams_user}" -d "${DB_NAME:-fams_db}" -t -c \
+    "SELECT token FROM employee_invitations WHERE email='$EMP_EMAIL' AND status='pending' LIMIT 1;" \
+    2>/dev/null | tr -d ' \n')
+[ -z "$INV_TOKEN" ] && { echo "SETUP FAILED: invitation token"; exit 1; }
+accept_resp=$(curl -s -X POST "$BASE_URL/api/v1/invitations/accept" \
     -H "Content-Type: application/json" \
-    -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d '{"firstName":"Dave","lastName":"Revoke","email":"dave.revoke@corp.com","employeeCode":"EMP-DR01","position":"Eng","department":"Tech"}' \
-    | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
-[ -z "$EMP_ID" ] && { echo "SETUP FAILED: employee"; exit 1; }
+    -d "{\"token\":\"$INV_TOKEN\",\"password\":\"Employee@1234\"}")
+EMP_TOKEN=$(echo "$accept_resp" | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4)
+[ -z "$EMP_TOKEN" ] && { echo "SETUP FAILED: accept invitation"; exit 1; }
+EMP_ID=$(docker exec fams-postgres psql -U "${DB_USER:-fams_user}" -d "${DB_NAME:-fams_db}" -t -c \
+    "SELECT e.id FROM employees e JOIN users u ON u.id = e.user_id WHERE u.email='$EMP_EMAIL' AND e.deleted_at IS NULL LIMIT 1;" \
+    2>/dev/null | tr -d ' \n')
+[ -z "$EMP_ID" ] && { echo "SETUP FAILED: resolve employee id"; exit 1; }
 echo "Tenant=$TENANT_ID  Employee=$EMP_ID"
 
 BASE_FACE_URL="$BASE_URL/api/v1/tenants/$TENANT_ID/employees/$EMP_ID/face-id"
@@ -63,8 +76,9 @@ run_test "Revoke no profile" 404 \
     -X DELETE "$BASE_FACE_URL" \
     -H "Authorization: Bearer $ADMIN_TOKEN"
 
-# Setup: consent + enroll (if fixture available)
-curl -s -X POST "$BASE_FACE_URL/consent" -H "Authorization: Bearer $ADMIN_TOKEN" > /dev/null
+# Setup: consent (self-only, see test_consent.sh) + enroll + HR approve (if fixture available) —
+# a genuine 'enrolled' profile before testing revoke, not just a pending submission.
+curl -s -X POST "$BASE_FACE_URL/consent" -H "Authorization: Bearer $EMP_TOKEN" > /dev/null
 ENROLLED=false
 if [ -f "$FACE_IMG" ]; then
     enroll_status=$(curl -s -o /dev/null -w "%{http_code}" \
@@ -73,7 +87,11 @@ if [ -f "$FACE_IMG" ]; then
         -F "photos=@$FACE_IMG;type=image/jpeg" \
         -F "photos=@$FACE_IMG;type=image/jpeg" \
         -F "photos=@$FACE_IMG;type=image/jpeg")
-    [ "$enroll_status" -eq 200 ] && ENROLLED=true
+    if [ "$enroll_status" -eq 200 ]; then
+        approve_status=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST "$BASE_FACE_URL/approve" -H "Authorization: Bearer $ADMIN_TOKEN")
+        [ "$approve_status" -eq 200 ] && ENROLLED=true
+    fi
 fi
 
 # Test 2: Happy path — revoke an enrolled profile

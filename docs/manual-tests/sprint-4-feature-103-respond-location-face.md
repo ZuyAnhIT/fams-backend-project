@@ -43,7 +43,37 @@
 
 ---
 
+## ✅ ĐÃ FIX (2026-08-18) — ĐÃ KHÓA
+
+Test live phát hiện 2 vấn đề THẬT, không phải bug ở business logic của #103 mà ở môi trường/test:
+
+1. **Container `fams-ai` (AI worker) bị treo do bind-mount host bị "gãy"** — `docker exec fams-ai
+   ls /app/app` rỗng dù thư mục host có đủ file, khiến `uvicorn` không import được `app.main` và
+   container restart-loop liên tục (unhealthy nhiều giờ). Đây là lỗi hạ tầng WSL2/Docker Desktop
+   quen thuộc (bind mount không remount đúng sau khi máy sleep/hibernate), không phải lỗi code.
+   **Fix:** `docker compose -f docker-compose.full.yml restart fams-ai` — remount lại đúng, healthy
+   ngay, models load lại bình thường.
+2. **`test_check_response_face.sh` lỗi thời so với 2 thay đổi nghiệp vụ đã có từ trước:**
+   - Test gọi `POST /consent` bằng `ADMIN_TOKEN` — nhưng theo thiết kế hiện tại (đúng, có chủ đích:
+     "biometric consent must come from the data subject"), endpoint này CHỈ chấp nhận chính nhân
+     viên gọi, admin gọi bị từ chối 403. Test cũ gọi sai actor nên luôn fail ở bước enroll
+     ("Consent not recorded").
+   - Test thiếu hẳn bước `POST /approve` — enroll() hiện nay đưa hồ sơ vào trạng thái chờ HR duyệt
+     (`reviewStatus=pending`), KHÔNG kích hoạt ngay `status=enrolled` như trước (tính năng
+     HR-review đã được thêm sau khi test này được viết). Thiếu approve → face luôn ở trạng thái
+     chưa enrolled → nhánh async không bao giờ chạy được.
+   - Test 2's kỳ vọng cũ ("có ảnh nhưng chưa enroll → fail-open, outcome=pass ngay") sai với thiết
+     kế thật: theo code + Javadoc `CheckResponseService`, chưa enroll thì fail NGAY dù có ảnh hay
+     không — cùng nhánh với Test 1, không có khái niệm "fail-open" nào ở đây.
+   **Fix:** sửa `tests/face-id/test_check_response_face.sh` — consent dùng `EMP_TOKEN`, thêm bước
+   approve sau enroll, sửa lại assertion Test 2 khớp đúng hành vi thật.
+
+Sau khi fix cả 2: **11/11 PASS**, bao gồm nhánh E2E thật qua AI worker (enroll → approve → respond
+→ async callback → `face_verified=true` trong DB, `face_verify_score` có giá trị).
+
+### Test trên Mobile App — ✅ PASS, test live qua Expo Web thật kết nối backend thật (2026-08-18)
+- Case 6: panel phản hồi mode `location_face` cho nhân viên chưa enroll hiển thị đúng cảnh báo
+  "Face ID chưa sẵn sàng" + nút "Mở đăng ký Face ID", không hiện nút gửi vị trí đơn thuần.
+
 ## Ghi chú
-Kịch bản này chưa được test live qua UI thật — mới hoàn tất bước nghiên cứu code + viết kịch bản.
-Không có gap cần vá. `test_check_response_face.sh` đã phủ phần backend cốt lõi. Case 6 cần test tay
-trên App thật.
+`test_check_response_face.sh` đã phủ phần backend cốt lõi (đã sửa, xem trên).

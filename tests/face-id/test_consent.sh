@@ -79,39 +79,17 @@ echo ""
 
 CONSENT_URL="$BASE_URL/api/v1/tenants/$TENANT_ID/employees/$EMP_ID/face-id/consent"
 
-# Test 1: Happy path — admin gives consent for employee
-echo "--- Test 1: Admin gives consent (happy path) ---"
-consent_resp=$(curl -s -w "\n%{http_code}" \
-    -X POST "$CONSENT_URL" \
-    -H "Authorization: Bearer $ADMIN_TOKEN")
-consent_body=$(echo "$consent_resp" | head -n -1)
-consent_status=$(echo "$consent_resp" | tail -n 1)
-if [ "$consent_status" -eq 200 ]; then
-    consent_given=$(echo "$consent_body" | grep -o '"consentGiven":true' || true)
-    face_status=$(echo "$consent_body" | grep -o '"status":"not_enrolled"' || true)
-    if [ -n "$consent_given" ] && [ -n "$face_status" ]; then
-        echo "PASS: Admin gives consent (HTTP 200, consentGiven=true, status=not_enrolled)"
-        PASS=$((PASS + 1))
-    else
-        echo "FAIL: Admin gives consent — unexpected body: $consent_body"
-        FAIL=$((FAIL + 1))
-    fi
-else
-    echo "FAIL: Admin gives consent — expected HTTP 200, got HTTP $consent_status"
-    echo "Body: $consent_body"
-    FAIL=$((FAIL + 1))
-fi
-
-# Test 2: Idempotent — giving consent again returns 200 with same state
-echo ""
-echo "--- Test 2: Idempotent consent (call twice) ---"
-run_test "Idempotent consent" 200 \
+# Test 1: Admin CANNOT give consent on the employee's behalf — deliberate policy (2026-08-16+):
+# biometric consent must come from the data subject themselves (Nghị định 13/2023/NĐ-CP, GDPR
+# Art.9), not manufactured by HR even with face_id:manage. See FaceIdService.giveConsent javadoc.
+echo "--- Test 1: Admin cannot give consent on employee's behalf (403, deliberate) ---"
+run_test "Admin consent on behalf forbidden" 403 \
     -X POST "$CONSENT_URL" \
     -H "Authorization: Bearer $ADMIN_TOKEN"
 
-# Test 3: Own employee gives consent
+# Test 2 (was Test 3): Own employee gives consent — the only valid path
 echo ""
-echo "--- Test 3: Own employee gives consent ---"
+echo "--- Test 2: Own employee gives consent ---"
 INV_EMAIL="alice.linked.${TS}@example.com"
 inv_resp=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/tenants/$TENANT_ID/invitations" \
@@ -143,22 +121,37 @@ else
                 "SELECT id FROM employees WHERE user_id='$EMP_USER_ID' AND tenant_id='$TENANT_ID' LIMIT 1;" \
                 2>/dev/null | grep -oE '[0-9a-f-]{36}' | head -1 || true)
             if [ -n "$OWN_EMP_ID" ]; then
+                OWN_CONSENT_URL="$BASE_URL/api/v1/tenants/$TENANT_ID/employees/$OWN_EMP_ID/face-id/consent"
                 own_consent_resp=$(curl -s -w "\n%{http_code}" \
-                    -X POST "$BASE_URL/api/v1/tenants/$TENANT_ID/employees/$OWN_EMP_ID/face-id/consent" \
-                    -H "Authorization: Bearer $EMP_TOKEN")
+                    -X POST "$OWN_CONSENT_URL" -H "Authorization: Bearer $EMP_TOKEN")
+                own_body=$(echo "$own_consent_resp" | head -n -1)
                 own_status=$(echo "$own_consent_resp" | tail -n 1)
                 if [ "$own_status" -eq 200 ]; then
-                    echo "PASS: Own employee gives consent (HTTP 200)"
-                    PASS=$((PASS + 1))
+                    consent_given=$(echo "$own_body" | grep -o '"consentGiven":true' || true)
+                    face_status=$(echo "$own_body" | grep -o '"status":"not_enrolled"' || true)
+                    if [ -n "$consent_given" ] && [ -n "$face_status" ]; then
+                        echo "PASS: Own employee gives consent (HTTP 200, consentGiven=true, status=not_enrolled)"
+                        PASS=$((PASS + 1))
+                    else
+                        echo "FAIL: Own employee consent — unexpected body: $own_body"
+                        FAIL=$((FAIL + 1))
+                    fi
                 else
                     echo "FAIL: Own employee consent — expected 200, got $own_status"
                     FAIL=$((FAIL + 1))
                 fi
+
+                # Test 3 (was Test 2): Idempotent — same employee giving consent again returns
+                # 200 with the same state (not a 409/error on the second call)
+                echo ""
+                echo "--- Test 3: Idempotent consent (own employee calls twice) ---"
+                run_test "Idempotent consent" 200 \
+                    -X POST "$OWN_CONSENT_URL" -H "Authorization: Bearer $EMP_TOKEN"
             else
-                echo "SKIP: Could not find own employee record — skipping"
+                echo "SKIP: Could not find own employee record — skipping own-employee tests"
             fi
         else
-            echo "SKIP: Could not accept invitation (HTTP $accept_status) — skipping own-employee test"
+            echo "SKIP: Could not accept invitation (HTTP $accept_status) — skipping own-employee tests"
         fi
     fi
 fi
@@ -189,7 +182,10 @@ echo "--- Test 6: Unauthenticated ---"
 run_test "Unauthenticated" 401 \
     -X POST "$CONSENT_URL"
 
-# Test 7: User without face_id:manage permission → 403
+# Test 7: A random unrelated authenticated user (not the employee, no face_id:manage) → 403.
+# Note: this now overlaps in spirit with Test 1 — /consent is self-only regardless of RBAC
+# permission, so this 403 comes from the same "not the data subject" check, not a separate
+# permission gate. Kept as its own test since it still exercises a genuinely different caller.
 echo ""
 echo "--- Test 7: User without permission ---"
 reg_resp=$(curl -s -w "\n%{http_code}" \

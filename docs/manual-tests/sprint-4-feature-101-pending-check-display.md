@@ -31,7 +31,19 @@ tại — **ĐÚNG, không lỗi thời:**
 
 ---
 
+## ✅ PASS — ĐÃ KHÓA (2026-08-18)
+
+Test live qua Expo Web thật (Playwright, kết nối backend thật) + `test_employee_pending_checks.sh`
+(15/15 PASS). Seed 4 scheduled_checks (3 mode + 1 đã hết hạn) cho 1 nhân viên thật, đăng nhập qua
+UI, xác nhận:
+- Đếm ngược mm:ss chạy đúng, giảm dần theo thời gian thực (theo dõi qua nhiều lần chụp màn hình
+  cách nhau).
+- Cả 3 mode hiển thị đúng nhãn: "Vị trí GPS" / "GPS + khuôn mặt" / "GPS + khuôn mặt + người thật".
+- Check hết hạn hiển thị pill "Hết hạn" (xám), không có nút phản hồi.
+- Deep-link `/(tabs)/random-check?checkId=<id>` mở thẳng đúng panel phản hồi của check đó (tự động
+  chọn qua `useLocalSearchParams`), không cần người dùng tự bấm chọn — đúng như audit gốc mô tả.
+
+Không có gap cần vá.
+
 ## Ghi chú
-Kịch bản này chưa được test live qua UI thật — mới hoàn tất bước nghiên cứu code + viết kịch bản.
-Không có gap cần vá. Case 2-4 cần test tay trên App thật (đếm ngược/deep-link khó test đầy đủ qua
-script tự động). `test_employee_pending_checks.sh` đã phủ phần backend cốt lõi.
+`test_employee_pending_checks.sh` đã phủ phần backend cốt lõi.
