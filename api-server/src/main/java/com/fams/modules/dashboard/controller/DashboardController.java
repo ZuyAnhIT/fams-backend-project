@@ -71,9 +71,10 @@ public class DashboardController {
 
     @Operation(
         summary = "HR/Admin dashboard",
-        description = "Returns a tenant-wide dashboard for HR/Admin: personnel headcount, " +
-                      "today's attendance snapshot (present, late, on-site now), " +
-                      "violation counts with breakdown by type, and site overview. " +
+        description = "Returns a tenant-wide (or single-site, via ?siteId=) dashboard for HR/Admin: " +
+                      "personnel headcount, today's attendance snapshot (present, late, on-site now, " +
+                      "pending review, missing checkout), violation counts with breakdown by type, " +
+                      "and site overview. " +
                       "Requires the employees:list permission (tenant_admin and hr_manager). " +
                       "Platform admins bypass the permission check."
     )
@@ -92,10 +93,13 @@ public class DashboardController {
     @GetMapping("/hr")
     public ResponseEntity<ApiResponse<HrDashboardResponse>> getHrDashboard(
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
+            @Parameter(description = "Optional site UUID — narrows every metric to this single site "
+                    + "instead of the whole tenant (#120, 2026-08-18)")
+                @RequestParam(required = false) UUID siteId,
             @AuthenticationPrincipal FamsUserDetails userDetails) {
-        log.info("HR dashboard tenantId={} userId={}", tenantId, userDetails.getUserId());
+        log.info("HR dashboard tenantId={} siteId={} userId={}", tenantId, siteId, userDetails.getUserId());
         HrDashboardResponse response = hrDashboardService
-                .getDashboard(tenantId, userDetails.getUserId(), userDetails.isPlatformAdmin());
+                .getDashboard(tenantId, userDetails.getUserId(), userDetails.isPlatformAdmin(), siteId);
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 

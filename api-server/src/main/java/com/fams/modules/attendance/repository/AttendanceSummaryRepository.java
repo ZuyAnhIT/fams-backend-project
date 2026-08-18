@@ -43,11 +43,20 @@ public interface AttendanceSummaryRepository
             @Param("tenantId") UUID tenantId, @Param("employeeId") UUID employeeId,
             @Param("siteId") UUID siteId, @Param("from") LocalDate from, @Param("to") LocalDate to);
 
-    @Query("SELECT COUNT(a) FROM AttendanceSummary a WHERE a.tenantId = :tenantId AND a.attendanceDate = :date AND a.deletedAt IS NULL")
-    long countByTenantAndDate(@Param("tenantId") UUID tenantId, @Param("date") LocalDate date);
+    @Query("SELECT COUNT(a) FROM AttendanceSummary a WHERE a.tenantId = :tenantId AND a.attendanceDate = :date " +
+           "AND (:siteId IS NULL OR a.siteId = :siteId) AND a.deletedAt IS NULL")
+    long countByTenantAndDate(@Param("tenantId") UUID tenantId, @Param("date") LocalDate date, @Param("siteId") UUID siteId);
 
-    @Query("SELECT COUNT(a) FROM AttendanceSummary a WHERE a.tenantId = :tenantId AND a.attendanceDate = :date AND a.late = true AND a.deletedAt IS NULL")
-    long countLateByTenantAndDate(@Param("tenantId") UUID tenantId, @Param("date") LocalDate date);
+    @Query("SELECT COUNT(a) FROM AttendanceSummary a WHERE a.tenantId = :tenantId AND a.attendanceDate = :date " +
+           "AND a.late = true AND (:siteId IS NULL OR a.siteId = :siteId) AND a.deletedAt IS NULL")
+    long countLateByTenantAndDate(@Param("tenantId") UUID tenantId, @Param("date") LocalDate date, @Param("siteId") UUID siteId);
+
+    /** #120 (2026-08-18): HR dashboard "missing checkout today" count — the missingCheckout flag
+     *  already existed on the entity (see AttendanceSummaryService#notifyMissingCheckout, #84)
+     *  but was never surfaced as a dashboard metric. */
+    @Query("SELECT COUNT(a) FROM AttendanceSummary a WHERE a.tenantId = :tenantId AND a.attendanceDate = :date " +
+           "AND a.missingCheckout = true AND (:siteId IS NULL OR a.siteId = :siteId) AND a.deletedAt IS NULL")
+    long countMissingCheckoutByTenantAndDate(@Param("tenantId") UUID tenantId, @Param("date") LocalDate date, @Param("siteId") UUID siteId);
 
     /**
      * HR monthly aggregate (one row per employee+site), grouped and paginated at the DB level —

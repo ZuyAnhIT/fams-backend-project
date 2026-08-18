@@ -127,6 +127,14 @@ public final class NotificationEventTypeCatalog {
                     "Gửi cho HR/quản lý khi một nhân viên gửi giải trình trực tiếp cho một vi phạm.",
                     true,
                     false,
+                    "normal"),
+            new NotificationEventTypeInfo(
+                    // Must match com.fams.modules.violation.constant.ViolationEventTypes.VIOLATION_DISMISSED_EMPLOYEE
+                    "VIOLATION_DISMISSED_EMPLOYEE",
+                    "Vi phạm đã được bỏ qua",
+                    "Gửi cho bạn khi HR/quản lý bỏ qua (không tính) một vi phạm đã ghi nhận trước đó.",
+                    true,
+                    false,
                     "normal")
     );
 

@@ -34,6 +34,18 @@ public interface EmployeeRepository extends JpaRepository<Employee, UUID>, JpaSp
     @Query("SELECT COUNT(e) FROM Employee e WHERE e.tenantId = :tenantId AND e.deletedAt IS NULL AND e.createdAt >= :since")
     long countNewSince(@Param("tenantId") UUID tenantId, @Param("since") OffsetDateTime since);
 
+    /** #120 (2026-08-18): HR dashboard site filter — Employee has no siteId column of its own
+     *  (site relationship is via Assignment, many-to-many over time), so a site-filtered
+     *  personnel count goes through the pre-resolved employee-ID set for that site instead
+     *  (see AssignmentRepository#findDistinctEmployeeIdsByTenantIdAndSiteIdIn). */
+    @Query("SELECT COUNT(e) FROM Employee e WHERE e.tenantId = :tenantId AND e.id IN :ids AND e.deletedAt IS NULL")
+    long countByTenantIdAndIdInAndDeletedAtIsNull(@Param("tenantId") UUID tenantId, @Param("ids") Collection<UUID> ids);
+
+    @Query("SELECT COUNT(e) FROM Employee e WHERE e.tenantId = :tenantId AND e.id IN :ids " +
+           "AND e.deletedAt IS NULL AND e.createdAt >= :since")
+    long countNewSinceByIdIn(@Param("tenantId") UUID tenantId, @Param("ids") Collection<UUID> ids,
+                             @Param("since") OffsetDateTime since);
+
     @Query("SELECT e FROM Employee e WHERE e.tenantId = :tenantId AND e.id IN :ids AND e.deletedAt IS NULL")
     List<Employee> findAllByTenantIdAndIdInAndDeletedAtIsNull(
             @Param("tenantId") UUID tenantId, @Param("ids") Collection<UUID> ids);

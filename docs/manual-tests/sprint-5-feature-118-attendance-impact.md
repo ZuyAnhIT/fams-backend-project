@@ -45,10 +45,21 @@ nhận lại qua code hiện tại — **1 điểm cần làm rõ lại (không 
 
 ---
 
+## ✅ ĐÃ VÁ (2026-08-18) — ĐÃ KHÓA
+
+### Case 2 — đã hỏi người dùng, quyết định: GIỮ NGUYÊN
+Người dùng xác nhận giữ nguyên thiết kế "sửa `affectsAttendance` được bất kỳ lúc nào kể cả violation
+đã `dismissed`/`confirmed` từ lâu" — KHÔNG khóa lại theo AC. Lý do: linh hoạt hơn khi phát hiện sai
+sót muộn, và giờ đã có audit log (case 4) nên vẫn truy vết được ai sửa lúc nào. Không thay đổi code
+cho case này ngoài phần audit log.
+
+### Case 4 — gap audit log: ĐÃ VÁ
+Dùng chung `recordViolationAudit()` với #116/#117, action `violation_attendance_impact_updated`,
+ghi cả `oldAffectsAttendance` và `newAffectsAttendance`.
+
+### Test live — ✅ PASS (2026-08-18)
+Cập nhật `affectsAttendance` cho 1 violation qua API thật: audit log ghi đúng
+`oldAffectsAttendance=false` → `newAffectsAttendance=true`.
+
 ## Ghi chú
-Kịch bản này chưa được test live qua UI thật — mới hoàn tất bước nghiên cứu code + viết kịch bản.
-**Trọng tâm khi test: case 2 — đây là điểm code VIẾT NGƯỢC HẲN với AC (có chủ đích, ghi rõ trong
-Javadoc), không phải bug quên sửa. Bắt buộc phải hỏi chủ dự án: giữ nguyên "sửa được bất kỳ lúc nào"
-(linh hoạt hơn, nhưng rủi ro HR vô tình đổi ảnh hưởng công của 1 vụ đã xử lý xong từ lâu) hay vá lại
-đúng AC (chỉ sửa được khi `pending`/`confirmed`, khóa lại sau khi `dismissed`).** Case 4 (audit) xử
-lý chung với #116/#117. Case 1, 3 rủi ro fail thấp, đã có `test_hr_attendance_impact.sh` phủ.
+Regression: 34/34 (bao gồm `test_hr_attendance_impact.sh`).

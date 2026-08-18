@@ -48,6 +48,12 @@ public class HrDashboardResponse {
 
         @Schema(description = "Number of employees currently on-site (open check-in session)")
         private long onSiteNow;
+
+        @Schema(description = "Check-ins today still flagged pending_review, awaiting HR override (#120, 2026-08-18)")
+        private long pendingReview;
+
+        @Schema(description = "Attendance summaries today flagged missingCheckout — employee checked in but never checked out (#120, 2026-08-18)")
+        private long missingCheckoutToday;
     }
 
     @Data

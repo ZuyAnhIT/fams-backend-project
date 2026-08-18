@@ -971,18 +971,21 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 
 #### Xử lý vi phạm
 
-- [ ] **#116 — Xác nhận vi phạm** `P0` · 3sp · Nền tảng: Backend, Web Admin, Queue/AI/Automation
+- [x] **#116 — Xác nhận vi phạm** `P0` · 3sp · Nền tảng: Backend, Web Admin, Queue/AI/Automation
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: ViolationService.confirmViolation, test_hr_confirm_violation.sh; thiếu: không refresh attendance_summaries; không ghi audit
+  - *Audit (2026-08-18):* 🟡→✅ ĐÃ VÁ — cải chính "không refresh summary" là sai (đã vá từ trước). Đã thêm audit log (chung #117/#118). Xem `sprint-5-feature-116-confirm-violation.md`.
   - *User Story:* Là một HR/Admin, tôi muốn xác nhận violation là đúng để áp dụng ảnh hưởng công nếu cần.
   - *Acceptance Criteria:* Set status=confirmed; nhập hr_note; cập nhật resolved_by/at; nếu affects_attendance thì refresh summary.
   - *DB Entities:* `violations, attendance_summaries, audit_logs`
-- [ ] **#117 — Bỏ qua vi phạm** `P0` · 3sp · Nền tảng: Backend, Web Admin, Queue/AI/Automation
+- [x] **#117 — Bỏ qua vi phạm** `P0` · 3sp · Nền tảng: Backend, Web Admin, Queue/AI/Automation
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: ViolationService.dismissViolation, test_hr_dismiss_violation.sh; thiếu: không gửi notification nhân viên; không ghi audit
+  - *Audit (2026-08-18):* 🟡→✅ ĐÃ VÁ — thêm notification nhân viên (VIOLATION_DISMISSED_EMPLOYEE), audit log. **Vá gap nghiêm trọng nhất: dismiss giờ tự động set affectsAttendance=false**, bảng công không còn tính vi phạm đã bỏ qua là ảnh hưởng. Xem `sprint-5-feature-117-dismiss-violation.md`.
   - *User Story:* Là một HR/Admin, tôi muốn dismiss violation có lý do để tránh ảnh hưởng công sai.
   - *Acceptance Criteria:* Set status=dismissed; bắt buộc hr_note; affects_attendance=false nếu policy; gửi notification nhân viên.
   - *DB Entities:* `violations, notifications, audit_logs`
-- [ ] **#118 — Cập nhật ảnh hưởng công** `P1` · 3sp · Nền tảng: Backend, Web Admin, Queue/AI/Automation
+- [x] **#118 — Cập nhật ảnh hưởng công** `P1` · 3sp · Nền tảng: Backend, Web Admin, Queue/AI/Automation
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: ViolationService.updateAttendanceImpact, test_hr_attendance_impact.sh; thiếu: không refresh violation_count; không ghi audit
+  - *Audit (2026-08-18):* 🟡→✅ ĐÃ VÁ audit log (chung #116/#117). Gap "chỉ sửa khi confirmed/pending" — đã hỏi người dùng, quyết định GIỮ NGUYÊN cho sửa bất kỳ lúc nào (linh hoạt hơn AC, đã có audit để truy vết). Xem `sprint-5-feature-118-attendance-impact.md`.
   - *User Story:* Là một HR/Admin, tôi muốn chọn violation có ảnh hưởng attendance hay không để kiểm soát bảng công chính xác.
   - *Acceptance Criteria:* Chỉ cập nhật khi confirmed/pending theo quyền; refresh attendance_summaries.violation_count; ghi audit.
   - *DB Entities:* `violations, attendance_summaries, audit_logs`
@@ -991,16 +994,18 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 
 #### Employee Dashboard
 
-- [ ] **#119 — Dashboard nhân viên** `P0` · 5sp · Nền tảng: Backend, Mobile App
+- [x] **#119 — Dashboard nhân viên** `P0` · 5sp · Nền tảng: Backend, Mobile App
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: EmployeeDashboardService, test_employee_dashboard.sh; thiếu: thiếu random-check-pending, violation-pending, notifications
+  - *Audit (2026-08-18):* 🟡→✅ CÁO BUỘC LỖI THỜI — `alerts.pendingExplanations`/`unreadNotifications` đã có sẵn; random-check-pending hiển thị đúng qua API riêng trên Home screen Mobile App, không có gap thực tế. Xem `sprint-5-feature-119-employee-dashboard.md`.
   - *User Story:* Là một nhân viên, tôi muốn xem ca hôm nay, trạng thái chấm công, công tháng và thông báo để biết việc cần làm trong ngày.
   - *Acceptance Criteria:* Hiển thị assignment hôm nay, nút check-in/out, random check pending, công tháng, violation pending, thông báo mới.
   - *DB Entities:* `assignments, checkins, attendance_summaries, scheduled_checks, notifications`
 
 #### HR Dashboard
 
-- [ ] **#120 — Dashboard HR** `P0` · 8sp · Nền tảng: Backend, Web Admin
+- [x] **#120 — Dashboard HR** `P0` · 8sp · Nền tảng: Backend, Web Admin
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: HrDashboardService, test_hr_dashboard.sh; thiếu: không có filter workspace/site; thiếu missing-checkout/pending-review
+  - *Audit (2026-08-18):* 🟡→✅ ĐÃ VÁ đầy đủ cả 2 gap — filter `?siteId=` cho mọi khối số liệu (personnel qua join assignment, còn lại qua siteId trực tiếp) + thêm `pendingReview`/`missingCheckoutToday`. Web Admin: dropdown lọc site + 2 StatCard mới. Xem `sprint-5-feature-120-hr-dashboard.md`.
   - *User Story:* Là một HR/Admin, tôi muốn xem tổng quan nhân sự, chấm công, vi phạm và công trình để ra quyết định nhanh.
   - *Acceptance Criteria:* KPI nhân viên active, check-in hôm nay, pending review, violation pending, missing checkout, site active; filter theo workspace/site.
   - *DB Entities:* `tenant_users, checkins, attendance_summaries, violations, sites`
