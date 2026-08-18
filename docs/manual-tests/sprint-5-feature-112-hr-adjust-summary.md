@@ -39,7 +39,12 @@ cho đúng endpoint này). Chỉ cần XÁC NHẬN LẠI qua test live, không c
 
 ---
 
+## ✅ PASS — ĐÃ KHÓA (2026-08-18)
+
+Xác nhận lại qua regression suite thật (`test_adjust_attendance_summary.sh`, PASS trong đợt
+31/31): audit log `attendance_summary_adjusted` ghi đủ before/after 8 field + reason, bản ghi có
+`adjustmentReason` được bảo vệ khỏi tính lại tự động đúng như thiết kế.
+
 ## Ghi chú
-Kịch bản này chưa được test live qua UI thật — mới hoàn tất bước nghiên cứu code + viết kịch bản.
 **Không có gap cần vá — gap của audit gốc đã tự động được giải quyết nhờ công việc trước đó trong
-cùng phiên làm việc (đợt #84).** `test_adjust_attendance_summary.sh` đã có sẵn và pass.
+cùng phiên làm việc (đợt #84).**

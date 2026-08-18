@@ -923,21 +923,24 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 
 #### Manual Review
 
-- [ ] **#111 — HR override check-in** `P0` · 5sp · Nền tảng: Backend, Web Admin, Queue/AI/Automation
+- [x] **#111 — HR override check-in** `P0` · 5sp · Nền tảng: Backend, Web Admin, Queue/AI/Automation
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: CheckinService.overrideCheckin, test_override_checkin.sh; thiếu: không ghi audit
+  - *Audit (2026-08-18):* 🟡→✅ Gap đã tự vá từ đợt #79 trong phiên này. Xác nhận lại qua test live: PASS, không cần sửa. Xem `sprint-5-feature-111-hr-override-checkin.md`.
   - *User Story:* Là một HR/Admin, tôi muốn chấp nhận hoặc sửa check-in đang invalid/pending để xử lý trường hợp hợp lệ nhưng hệ thống đánh dấu lỗi.
   - *Acceptance Criteria:* Chỉ người có quyền override; nhập override_note; set status manual_override; cập nhật summary; ghi audit.
   - *DB Entities:* `checkins, attendance_summaries, audit_logs`
-- [ ] **#112 — HR chỉnh attendance summary** `P1` · 5sp · Nền tảng: Backend, Web Admin, Queue/AI/Automation
+- [x] **#112 — HR chỉnh attendance summary** `P1` · 5sp · Nền tảng: Backend, Web Admin, Queue/AI/Automation
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: AttendanceSummaryService.adjustSummary, test_adjust_attendance_summary.sh; thiếu: không ghi audit
+  - *Audit (2026-08-18):* 🟡→✅ Gap đã tự vá từ đợt #84 trong phiên này. Xác nhận lại qua test live: PASS, không cần sửa. Xem `sprint-5-feature-112-hr-adjust-summary.md`.
   - *User Story:* Là một HR/Admin, tôi muốn chỉnh công ngày khi có lý do hợp lệ để đảm bảo bảng công cuối cùng đúng.
   - *Acceptance Criteria:* Cập nhật attendance_value/total_work/OT/status; set manual_adjusted; bắt buộc adjustment_note; ghi audit.
   - *DB Entities:* `attendance_summaries, audit_logs`
 
 #### Giải trình
 
-- [ ] **#113 — Nhân viên gửi giải trình check-in lỗi** `P2` · 5sp · Nền tảng: Backend, Web Admin, Mobile App
+- [x] **#113 — Nhân viên gửi giải trình check-in lỗi** `P2` · 5sp · Nền tảng: Backend, Web Admin, Mobile App
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: CheckinService.explainCheckin, test_employee_explanation.sh; thiếu: không gửi notification cho HR
+  - *Audit (2026-08-18):* 🟡→✅ ĐÃ VÁ — thêm notification cho cả 2 đường giải trình (checkin-scoped + violation-scoped). Cải chính: "không liên kết được với violation" đã SAI/lỗi thời — `POST .../violations/{id}/explain` đã tồn tại sẵn từ trước. Xem `sprint-5-feature-113-employee-explanation.md`.
   - *User Story:* Là một nhân viên, tôi muốn gửi ghi chú/ảnh bổ sung cho check-in hoặc violation để HR có thêm thông tin xử lý.
   - *Acceptance Criteria:* Chọn bản ghi lỗi; nhập lý do; gửi notification HR; lưu metadata hoặc liên kết violation nếu có.
   - *DB Entities:* `checkins, violations, notifications`
@@ -950,8 +953,9 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 
 #### Danh sách vi phạm
 
-- [ ] **#114 — HR xem danh sách vi phạm** `P0` · 5sp · Nền tảng: Backend, Web Admin
+- [x] **#114 — HR xem danh sách vi phạm** `P0` · 5sp · Nền tảng: Backend, Web Admin
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: ViolationController.listViolations, test_hr_list_violations.sh; thiếu: thiếu filter affectsAttendance; severity chưa có trong schema thật
+  - *Audit (2026-08-18):* 🟡→✅ ĐÃ VÁ filter `affectsAttendance` (field có sẵn, chỉ thiếu predicate) + dropdown Web Admin. Gap `severity` giữ nguyên — cần đổi schema, ngoài phạm vi vá nhanh. Xem `sprint-5-feature-114-list-violations.md`.
   - *User Story:* Là một HR/Admin, tôi muốn xem violation có tìm kiếm, lọc, sort, phân trang để xử lý vi phạm hiệu quả.
   - *Acceptance Criteria:* Lọc date/site/employee/type/severity/status/affects_attendance; sort occurred_at; phân trang.
   - *DB Entities:* `violations, tenant_users, sites`
@@ -960,6 +964,7 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 
 - [x] **#115 — HR xem chi tiết violation** `P0` · 3sp · Nền tảng: Backend, Web Admin
   - *Audit (2026-07-22):* ✅ ĐÃ XONG — bằng chứng: ViolationController.getViolationDetail, test_hr_violation_detail.sh
+  - *Audit (2026-08-18):* 🟡→✅ ĐÃ VÁ gap thiếu bằng chứng cho violation từ check-in thường — join thêm `checkin` evidence (GPS/Face/Liveness) giống random-check. Quyết định người dùng: giữ nguyên không phân tầng hiển thị theo vai trò. Xem `sprint-5-feature-115-violation-detail.md`.
   - *User Story:* Là một HR/Admin, tôi muốn xem bằng chứng chi tiết của vi phạm để quyết định xử lý chính xác.
   - *Acceptance Criteria:* Hiển thị details, checkin/response liên quan, ảnh selfie, GPS, lịch sử xử lý; ẩn dữ liệu theo quyền.
   - *DB Entities:* `violations, checkins, random_check_responses, scheduled_checks`

@@ -53,6 +53,7 @@ import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -80,6 +81,7 @@ public class CheckinService {
     private final LivenessChallengeRepository livenessChallengeRepository;
     private final ExplanationEvidenceStorageService evidenceStorageService;
     private final AuditLogService auditLogService;
+    private final com.fams.modules.notification.service.NotificationService notificationService;
 
     public CheckinService(EmployeeRepository employeeRepository,
                           AssignmentService assignmentService,
@@ -94,7 +96,9 @@ public class CheckinService {
                           FaceProfileRepository faceProfileRepository,
                           LivenessChallengeRepository livenessChallengeRepository,
                           ExplanationEvidenceStorageService evidenceStorageService,
-                          AuditLogService auditLogService) {
+                          AuditLogService auditLogService,
+                          @org.springframework.context.annotation.Lazy
+                          com.fams.modules.notification.service.NotificationService notificationService) {
         this.employeeRepository = employeeRepository;
         this.assignmentService = assignmentService;
         this.siteRepository = siteRepository;
@@ -108,6 +112,7 @@ public class CheckinService {
         this.faceProfileRepository = faceProfileRepository;
         this.livenessChallengeRepository = livenessChallengeRepository;
         this.evidenceStorageService = evidenceStorageService;
+        this.notificationService = notificationService;
         this.auditLogService = auditLogService;
     }
 
@@ -732,6 +737,7 @@ public class CheckinService {
         checkinRepository.save(record);
 
         log.info("Employee explanation submitted: checkinId={} employeeId={}", checkinId, employee.getId());
+        notifyExplanationSubmitted(tenantId, record, employee);
 
         return com.fams.shared.dto.ExplanationResponse.builder()
                 .id(record.getId())
@@ -758,12 +764,45 @@ public class CheckinService {
         record.setEmployeeNote(note.trim());
         record.setEmployeePhotoUrl(marker);
         checkinRepository.save(record);
+        log.info("Employee explanation with photo submitted: checkinId={} employeeId={}", checkinId, employee.getId());
+        notifyExplanationSubmitted(tenantId, record, employee);
         return com.fams.shared.dto.ExplanationResponse.builder()
                 .id(record.getId())
                 .employeeNote(record.getEmployeeNote())
                 .employeePhotoUrl(toEvidenceUrl(record))
                 .updatedAt(record.getUpdatedAt())
                 .build();
+    }
+
+    /** #113 (2026-08-18): notify every tenant holder of checkins:list that a new explanation
+     *  landed — HR previously had no way to know one exists short of proactively re-checking
+     *  every flagged record. Best-effort, mirrors ViolationNotificationService's pattern. */
+    private void notifyExplanationSubmitted(UUID tenantId, CheckinRecord record, Employee employee) {
+        try {
+            String empName = (employee.getFirstName() + " " + employee.getLastName()).trim();
+            String siteName = siteRepository.findByIdAndTenantIdAndDeletedAtIsNull(record.getSiteId(), tenantId)
+                    .map(Site::getName).orElse(null);
+            String body = empName + " vừa gửi giải trình cho check-in"
+                    + (siteName != null ? " tại " + siteName : "") + ".";
+            Map<String, Object> metadata = Map.of(
+                    "checkinId", record.getId().toString(),
+                    "employeeId", employee.getId().toString(),
+                    "siteId", record.getSiteId().toString());
+
+            Set<UUID> hrUserIds = userRoleRepository
+                    .findDistinctActiveHolderIdsOfPermissionInTenant(tenantId, "checkins:list");
+            for (UUID hrUserId : hrUserIds) {
+                if (hrUserId.equals(employee.getUserId())) continue;
+                notificationService.createNotification(
+                        tenantId, hrUserId,
+                        com.fams.modules.checkin.constant.CheckinEventTypes.EXPLANATION_SUBMITTED_HR,
+                        "Nhân viên gửi giải trình check-in",
+                        body, metadata);
+            }
+        } catch (Exception e) {
+            log.warn("Failed to send explanation-submitted notification checkinId={} employeeId={}: {}",
+                    record.getId(), employee.getId(), e.getMessage());
+        }
     }
 
     @Transactional(readOnly = true)

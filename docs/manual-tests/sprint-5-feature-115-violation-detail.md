@@ -44,10 +44,23 @@ HẠ TRẠNG THÁI xuống 🟡 LÀM MỘT PHẦN — đúng phần lớn, nhưn
 
 ---
 
+## ✅ ĐÃ VÁ (2026-08-18) — ĐÃ KHÓA
+
+### Case 2 — gap thiếu bằng chứng cho violation từ check-in thường: ĐÃ VÁ
+- `ViolationDetailResponse` thêm field `checkin` (`CheckinEvidence`) — join qua `checkinId` khi có,
+  gồm `status`, `checkInAt`, GPS (lat/lon/accuracy), `checkInInsideGeofence`, `faceVerified`,
+  `livenessVerified`, `faceVerifyScore`. Cùng mức chi tiết `checkResponse` đã có cho random-check.
+- Web Admin (`ViolationDetailModal.tsx`): thêm block "Bằng chứng check-in" hiển thị đầy đủ các
+  field trên khi `data.checkin` có giá trị.
+
+### Test live — ✅ PASS (2026-08-18)
+Tạo 1 checkin thật qua API, gắn 1 violation `face_verify_timeout` vào checkin đó. Xem chi tiết
+violation trả đúng đầy đủ block `checkin` (status=valid, GPS đúng tọa độ, checkInInsideGeofence=
+true, faceVerified/livenessVerified=null vì site không yêu cầu Face ID).
+
+### Case 3 — gap "không ẩn dữ liệu theo quyền": ĐÃ HỎI NGƯỜI DÙNG, quyết định GIỮ NGUYÊN
+Người dùng xác nhận không cần phân tầng hiển thị theo vai trò — ai có `violations:read` vẫn thấy
+đầy đủ dữ liệu (ảnh selfie, GPS chi tiết) như hiện tại. Không thay đổi gì thêm cho case này.
+
 ## Ghi chú
-Kịch bản này chưa được test live qua UI thật — mới hoàn tất bước nghiên cứu code + viết kịch bản.
-**Hạ trạng thái từ "✅ đã xong" xuống "🟡 làm một phần"** do 2 gap MỚI audit gốc bỏ sót. Trọng tâm
-khi test: case 2 (thiếu bằng chứng cho violation từ check-in thường — ảnh hưởng thực tế tới khả năng
-HR xử lý tranh chấp cho loại vi phạm này) và case 3 (thiếu phân quyền hiển thị — cần quyết định
-nghiệp vụ có thực sự cần ẩn bớt dữ liệu nhạy cảm theo vai trò hay hiện tại "ai có quyền đọc thì thấy
-hết" đã đủ). Case 1 rủi ro fail thấp, đã có `test_hr_violation_detail.sh` phủ.
+Regression: 31/31 (bao gồm `test_hr_violation_detail.sh`).

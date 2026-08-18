@@ -44,8 +44,13 @@ QUYẾT nhờ công việc trước đó, giờ chỉ cần XÁC NHẬN LẠI qu
 
 ---
 
+## ✅ PASS — ĐÃ KHÓA (2026-08-18)
+
+Xác nhận lại qua regression suite thật (`test_override_checkin.sh`, 1 trong 31/31 script PASS
+trong đợt test #111-115): audit log `checkin_overridden` vẫn ghi đúng đầy đủ oldStatus/newStatus/
+reason, permission 2 lớp (checkins:list + site-scope) hoạt động đúng, attendance summary được
+tính lại ngay sau override.
+
 ## Ghi chú
-Kịch bản này chưa được test live qua UI thật — mới hoàn tất bước nghiên cứu code + viết kịch bản.
 **Không có gap cần vá — gap của audit gốc đã tự động được giải quyết nhờ công việc trước đó trong
-cùng phiên làm việc.** Trọng tâm khi test: case 5 (xác nhận live audit log vẫn hoạt động đúng qua
-UI thật, chưa từng được test live trước đây dù code đã đúng). `test_override_checkin.sh` đã có sẵn.
+cùng phiên làm việc.**

@@ -52,6 +52,8 @@ public class ViolationService {
     private final CheckResponseRepository checkResponseRepository;
     private final AttendanceSummaryService attendanceSummaryService;
     private final ExplanationEvidenceStorageService evidenceStorageService;
+    private final com.fams.modules.checkin.repository.CheckinRepository checkinRepository;
+    private final ViolationNotificationService violationNotificationService;
 
     public ViolationService(ViolationRepository violationRepository,
                             EmployeeRepository employeeRepository,
@@ -59,7 +61,9 @@ public class ViolationService {
                             ScheduledCheckRepository scheduledCheckRepository,
                             CheckResponseRepository checkResponseRepository,
                             AttendanceSummaryService attendanceSummaryService,
-                            ExplanationEvidenceStorageService evidenceStorageService) {
+                            ExplanationEvidenceStorageService evidenceStorageService,
+                            com.fams.modules.checkin.repository.CheckinRepository checkinRepository,
+                            ViolationNotificationService violationNotificationService) {
         this.violationRepository = violationRepository;
         this.employeeRepository = employeeRepository;
         this.userRoleRepository = userRoleRepository;
@@ -67,6 +71,8 @@ public class ViolationService {
         this.checkResponseRepository = checkResponseRepository;
         this.attendanceSummaryService = attendanceSummaryService;
         this.evidenceStorageService = evidenceStorageService;
+        this.checkinRepository = checkinRepository;
+        this.violationNotificationService = violationNotificationService;
     }
 
     @Transactional
@@ -103,6 +109,8 @@ public class ViolationService {
 
         log.info("Employee explanation submitted for violation: violationId={} employeeId={}",
                 violationId, employee.getId());
+        violationNotificationService.notifyExplanationSubmitted(
+                tenantId, employee.getId(), violation.getSiteId(), violationId);
 
         return ExplanationResponse.builder()
                 .id(violation.getId())
@@ -132,6 +140,10 @@ public class ViolationService {
         violation.setEmployeeNote(note.trim());
         violation.setEmployeePhotoUrl(marker);
         violationRepository.save(violation);
+        log.info("Employee explanation with photo submitted for violation: violationId={} employeeId={}",
+                violationId, employee.getId());
+        violationNotificationService.notifyExplanationSubmitted(
+                tenantId, employee.getId(), violation.getSiteId(), violationId);
         return ExplanationResponse.builder()
                 .id(violationId)
                 .employeeNote(violation.getEmployeeNote())
@@ -159,7 +171,7 @@ public class ViolationService {
                                                                UUID callerUserId,
                                                                boolean callerIsPlatformAdmin) {
         return listViolations(tenantId, employeeId, siteId, violationType, resolved, from, to,
-                null, sortBy, sortDir, page, size, callerUserId, callerIsPlatformAdmin);
+                null, null, sortBy, sortDir, page, size, callerUserId, callerIsPlatformAdmin);
     }
 
     @Transactional(readOnly = true)
@@ -168,6 +180,23 @@ public class ViolationService {
                                                                String violationType, Boolean resolved,
                                                                LocalDate from, LocalDate to,
                                                                UUID scheduledCheckId,
+                                                               String sortBy, String sortDir,
+                                                               int page, int size,
+                                                               UUID callerUserId,
+                                                               boolean callerIsPlatformAdmin) {
+        return listViolations(tenantId, employeeId, siteId, violationType, resolved, from, to,
+                scheduledCheckId, null, sortBy, sortDir, page, size, callerUserId, callerIsPlatformAdmin);
+    }
+
+    /** @param affectsAttendance found via audit (2026-08-18) — the field already exists on the
+     *  entity, this was purely a missing filter predicate (see ViolationSpecification). */
+    @Transactional(readOnly = true)
+    public PageResponse<ViolationListResponse> listViolations(UUID tenantId,
+                                                               UUID employeeId, UUID siteId,
+                                                               String violationType, Boolean resolved,
+                                                               LocalDate from, LocalDate to,
+                                                               UUID scheduledCheckId,
+                                                               Boolean affectsAttendance,
                                                                String sortBy, String sortDir,
                                                                int page, int size,
                                                                UUID callerUserId,
@@ -186,7 +215,7 @@ public class ViolationService {
 
         Specification<Violation> spec =
                 ViolationSpecification.build(tenantId, employeeId, siteId, violationType, resolved,
-                        from, to, scheduledCheckId);
+                        from, to, scheduledCheckId, affectsAttendance);
 
         Page<ViolationListResponse> resultPage = violationRepository.findAll(spec, pageable)
                 .map(this::toListResponse);
@@ -271,6 +300,24 @@ public class ViolationService {
                     .orElse(null);
         }
 
+        ViolationDetailResponse.CheckinEvidence checkinEvidence = null;
+        if (violation.getCheckinId() != null) {
+            checkinEvidence = checkinRepository.findByIdAndTenantIdAndDeletedAtIsNull(violation.getCheckinId(), tenantId)
+                    .map(c -> ViolationDetailResponse.CheckinEvidence.builder()
+                            .id(c.getId())
+                            .status(c.getStatus())
+                            .checkInAt(c.getCheckInAt())
+                            .checkInLat(c.getCheckInLat())
+                            .checkInLon(c.getCheckInLon())
+                            .checkInAccuracy(c.getCheckInAccuracy())
+                            .checkInInsideGeofence(c.isCheckInInsideGeofence())
+                            .faceVerified(c.getFaceVerified())
+                            .livenessVerified(c.getLivenessVerified())
+                            .faceVerifyScore(c.getFaceVerifyScore())
+                            .build())
+                    .orElse(null);
+        }
+
         log.info("HR violation detail fetched: tenantId={} violationId={}", tenantId, violationId);
 
         return ViolationDetailResponse.builder()
@@ -295,6 +342,7 @@ public class ViolationService {
                 .createdAt(violation.getCreatedAt())
                 .scheduledCheck(scheduledCheckSummary)
                 .checkResponse(checkResponseEvidence)
+                .checkin(checkinEvidence)
                 .build();
     }
 

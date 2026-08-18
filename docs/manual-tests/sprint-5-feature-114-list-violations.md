@@ -48,9 +48,24 @@ làm rõ về "status":**
 
 ---
 
+## ✅ ĐÃ VÁ (2026-08-18) — ĐÃ KHÓA
+
+### Case 4 — gap `affectsAttendance`: ĐÃ VÁ
+- `ViolationSpecification.build` thêm predicate `affectsAttendance` (field đã có sẵn trên entity).
+- `ViolationService.listViolations` + `ViolationController` thêm tham số
+  `?affectsAttendance=true|false`, giữ nguyên các overload cũ (không phá client cũ).
+- Web Admin (`violation.component.tsx`): thêm dropdown "Ảnh hưởng công" vào lưới filter (6 cột,
+  trước đó 5).
+
+### Test live — ✅ PASS (2026-08-18)
+Seed 2 violation cùng site/employee, 1 `affects_attendance=true` + 1 `=false`. Lọc
+`?affectsAttendance=true` chỉ trả đúng bản ghi true, lọc `=false` chỉ trả đúng bản ghi false —
+tách biệt hoàn toàn, không lẫn.
+
+### Case 3 — gap `severity`: GIỮ NGUYÊN, chưa vá
+Field không tồn tại trên entity, cần đổi schema (thêm cột + logic tính severity) — chi phí cao hơn
+hẳn so với `affectsAttendance`, không nằm trong đợt vá nhanh này. Không phải business-blocker —
+`violationType` + `affectsAttendance` hiện đã đủ phân biệt mức độ quan trọng cho phần lớn use-case.
+
 ## Ghi chú
-Kịch bản này chưa được test live qua UI thật — mới hoàn tất bước nghiên cứu code + viết kịch bản.
-Trọng tâm khi test: case 4 (gap affectsAttendance — ưu tiên vá trước vì chi phí thấp, dữ liệu sẵn
-có) so với case 3 (gap severity — chi phí cao hơn nhiều, cần quyết định nghiệp vụ có thực sự cần
-phân loại mức độ nghiêm trọng hay dùng `violationType` + `affectsAttendance` hiện tại đã đủ phân
-biệt mức độ quan trọng). Case 1-2 rủi ro fail thấp, đã có `test_hr_list_violations.sh` phủ.
+Regression: 31/31 (bao gồm `test_hr_list_violations.sh`).
