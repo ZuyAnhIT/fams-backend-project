@@ -168,6 +168,8 @@ public class NotificationService {
               .title(resolvedTitle)
               .body(resolvedBody)
               .metadata(metadata)
+              .priority(com.fams.modules.notification.constant.NotificationEventTypeCatalog
+                      .defaultPriorityFor(eventType))
               .isRead(false)
               .build();
       saved = notificationRepository.save(notification);
@@ -302,6 +304,7 @@ public class NotificationService {
         .title(n.getTitle())
         .body(n.getBody())
         .metadata(n.getMetadata())
+        .priority(n.getPriority())
         .isRead(n.isRead())
         .readAt(n.getReadAt())
         .createdAt(n.getCreatedAt())

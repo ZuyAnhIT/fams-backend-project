@@ -114,10 +114,18 @@ public class UserDeviceService {
           .attemptNumber(result.attempts())
           .status(status)
           .errorMessage(result.lastError())
+          .providerMessageId(result.messageId())
           .build());
 
       if (result.success()) {
         sent++;
+      } else if ("UNREGISTERED".equals(result.errorCode())) {
+        // #88 (2026-08-17): token is permanently dead — deactivate now so every future push to
+        // this user stops retrying it. Previously nothing ever cleared a dead token, so it was
+        // retried 3x with backoff on EVERY send, forever, until someone deleted it by hand.
+        device.setDeletedAt(OffsetDateTime.now());
+        userDeviceRepository.save(device);
+        log.info("Deactivated stale device id={} userId={} (FCM UNREGISTERED)", device.getId(), userId);
       }
     }
 

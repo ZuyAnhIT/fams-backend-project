@@ -1,0 +1,57 @@
+@startuml FAMS_Face_ID
+title FAMS — Face ID và Liveness (Mức 2)
+left to right direction
+skinparam packageStyle rectangle
+skinparam shadowing false
+
+actor "Employee" as EE
+actor "Tenant Admin / Owner" as TA
+actor "HR Manager" as HR
+actor "Object Storage" as Storage <<external system>>
+
+rectangle "FAMS — Face ID" {
+  usecase "Ghi nhận đồng ý\nsử dụng Face ID" as Consent
+  usecase "Đăng ký khuôn mặt" as Enroll
+  usecase "Kiểm tra chất lượng ảnh" as Quality
+  usecase "Kiểm tra liveness" as Liveness
+  usecase "Tạo face embedding" as Embedding
+  usecase "Xem trạng thái Face ID" as Status
+  usecase "Duyệt đăng ký Face ID" as Approve
+  usecase "Từ chối đăng ký Face ID" as Reject
+  usecase "Thu hồi Face ID" as Revoke
+  usecase "Xác minh khuôn mặt" as Verify
+  usecase "Xóa dữ liệu sinh trắc học" as DeleteBio
+}
+
+EE --> Consent
+EE --> Enroll
+EE --> Status
+EE --> Revoke : hồ sơ của mình
+TA --> Status
+TA --> Approve
+TA --> Reject
+TA --> Revoke
+HR --> Status
+HR --> Approve
+HR --> Reject
+HR --> Revoke
+
+Enroll .> Consent : <<include>>
+Enroll .> Quality : <<include>>
+Enroll .> Liveness : <<include>>
+Enroll .> Embedding : <<include>>
+Approve .> Status : <<extend>>\nkhi hồ sơ chờ duyệt
+Reject .> Status : <<extend>>\nkhi hồ sơ chờ duyệt
+Revoke .> DeleteBio : <<include>>
+Storage --> Enroll
+Storage --> DeleteBio
+
+note right of Verify
+  Use case dùng lại bởi check-in và random check;
+  actor khởi tạo được thể hiện ở các sơ đồ module tương ứng.
+end note
+note bottom of Enroll
+  AI service là thành phần nội bộ FAMS, không phải actor.
+  Quyết định duyệt cuối cùng thuộc HR/Admin.
+end note
+@enduml

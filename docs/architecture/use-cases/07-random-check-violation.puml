@@ -1,0 +1,81 @@
+@startuml FAMS_Random_Check_Violation
+title FAMS — Random Check và Vi phạm (Mức 2)
+left to right direction
+skinparam packageStyle rectangle
+skinparam shadowing false
+
+actor "Employee" as EE
+actor "Tenant Admin / Owner" as TA
+actor "HR Manager" as HR
+actor "Site Supervisor" as SS
+actor "Firebase FCM" as FCM <<external system>>
+actor "Object Storage" as Storage <<external system>>
+
+rectangle "FAMS — Random Check & Violation" {
+  usecase "Cấu hình random check mặc định" as DefaultConfig
+  usecase "Cấu hình override theo site" as SiteConfig
+  usecase "Xem cấu hình hiệu lực" as EffectiveConfig
+  usecase "Theo dõi scheduled checks" as Monitor
+  usecase "Kích hoạt kiểm tra thủ công" as Manual
+  usecase "Hủy lượt kiểm tra" as Cancel
+  usecase "Nhận yêu cầu kiểm tra" as Receive
+  usecase "Xem lượt kiểm tra đang chờ" as Pending
+  usecase "Phản hồi random check" as Respond
+  usecase "Xác minh vị trí" as Location
+  usecase "Xác minh Face ID" as Face
+  usecase "Kiểm tra liveness" as Liveness
+  usecase "Xem kết quả kiểm tra" as Result
+  usecase "Ghi nhận vi phạm tự động" as AutoViolation
+  usecase "Xem danh sách/chi tiết vi phạm" as ViewViolation
+  usecase "Gửi giải trình và minh chứng" as Explain
+  usecase "Xác nhận/bỏ qua vi phạm" as Resolve
+  usecase "Cập nhật ảnh hưởng bảng công" as AffectAttendance
+}
+
+TA --> DefaultConfig
+TA --> SiteConfig
+TA --> EffectiveConfig
+TA --> Monitor
+TA --> Manual
+TA --> Cancel
+TA --> ViewViolation
+TA --> Resolve
+TA --> AffectAttendance
+HR --> DefaultConfig
+HR --> SiteConfig
+HR --> EffectiveConfig
+HR --> Monitor
+HR --> Manual
+HR --> Cancel
+HR --> ViewViolation
+HR --> Resolve
+HR --> AffectAttendance
+SS --> Monitor : theo site được giao
+SS --> Manual : theo quyền/site
+SS --> ViewViolation : theo site được giao
+SS --> Resolve : theo quyền
+EE --> Receive
+EE --> Pending
+EE --> Respond
+EE --> Result
+EE --> ViewViolation : của bản thân
+EE --> Explain
+
+SiteConfig .> DefaultConfig : <<extend>>\nkhi site cần cấu hình riêng
+Manual .> Monitor : <<extend>>
+Cancel .> Monitor : <<extend>>
+Respond .> Location : <<include>>
+Face .> Respond : <<extend>>\nkhi mode yêu cầu Face ID
+Liveness .> Face : <<extend>>\nkhi mode yêu cầu liveness
+AutoViolation .> Respond : <<extend>>\nkhi kết quả xác minh thất bại
+Explain .> ViewViolation : <<extend>>\nkhi cần giải trình
+Resolve .> ViewViolation : <<extend>>
+AffectAttendance .> Resolve : <<extend>>
+FCM --> Receive
+Storage --> Explain
+
+note bottom of AutoViolation
+  Vi phạm được hệ thống tạo từ no-response/location/face/liveness fail;
+  frontend không có use case "tạo vi phạm" thủ công.
+end note
+@enduml

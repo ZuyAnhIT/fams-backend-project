@@ -121,6 +121,8 @@ public class AttendanceSummaryController {
     @GetMapping("/me")
     public ResponseEntity<ApiResponse<PageResponse<AttendanceSummaryResponse>>> getMyAttendance(
             @PathVariable UUID tenantId,
+            @Parameter(description = "Filter by site ID — an employee working multiple sites can "
+                    + "narrow their own timesheet down to one site (#85)") @RequestParam(required = false) UUID siteId,
             @Parameter(description = "Start date (inclusive, yyyy-MM-dd)") @RequestParam(required = false)
                 @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
             @Parameter(description = "End date (inclusive, yyyy-MM-dd)") @RequestParam(required = false)
@@ -130,7 +132,7 @@ public class AttendanceSummaryController {
             @AuthenticationPrincipal FamsUserDetails caller) {
 
         PageResponse<AttendanceSummaryResponse> result = attendanceSummaryService.getMyAttendance(
-                tenantId, caller.getUserId(), from, to, page, size);
+                tenantId, caller.getUserId(), siteId, from, to, page, size);
 
         return ResponseEntity.ok(ApiResponse.success(result));
     }
@@ -160,6 +162,13 @@ public class AttendanceSummaryController {
             @Parameter(description = "Month (1–12)", required = true) @RequestParam int month,
             @Parameter(description = "Filter by employee ID") @RequestParam(required = false) UUID employeeId,
             @Parameter(description = "Filter by site ID") @RequestParam(required = false) UUID siteId,
+            @Parameter(description = "Keep only employee+site rows with at least one day this month "
+                    + "matching this status: present | incomplete (#86)") @RequestParam(required = false) String status,
+            @Parameter(description = "Sort by: totalWorkMinutes | totalLateMinutes | totalOtMinutes | "
+                    + "missingCheckoutDays | presentDays. Omit for default stable order (#86)")
+                @RequestParam(required = false) String sortBy,
+            @Parameter(description = "Sort direction: asc | desc (default asc) (#86)")
+                @RequestParam(required = false) String sortDir,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
             @AuthenticationPrincipal FamsUserDetails caller) {
@@ -169,7 +178,7 @@ public class AttendanceSummaryController {
         }
 
         PageResponse<AttendanceHrMonthlyResponse> result = attendanceSummaryService.listMonthlyAttendance(
-                tenantId, employeeId, siteId, year, month, page, size,
+                tenantId, employeeId, siteId, status, sortBy, sortDir, year, month, page, size,
                 caller.getUserId(), caller.isPlatformAdmin());
 
         return ResponseEntity.ok(ApiResponse.success(result));
@@ -196,6 +205,8 @@ public class AttendanceSummaryController {
     @GetMapping("/me/monthly")
     public ResponseEntity<ApiResponse<AttendanceMonthlyResponse>> getMyMonthlyAttendance(
             @PathVariable UUID tenantId,
+            @Parameter(description = "Filter by site ID — an employee working multiple sites can "
+                    + "narrow their own monthly summary down to one site (#85)") @RequestParam(required = false) UUID siteId,
             @Parameter(description = "Year (e.g. 2026)", required = true) @RequestParam int year,
             @Parameter(description = "Month (1–12)", required = true) @RequestParam int month,
             @AuthenticationPrincipal FamsUserDetails caller) {
@@ -205,7 +216,7 @@ public class AttendanceSummaryController {
         }
 
         AttendanceMonthlyResponse result = attendanceSummaryService
-                .getMyMonthlyAttendance(tenantId, caller.getUserId(), year, month);
+                .getMyMonthlyAttendance(tenantId, caller.getUserId(), siteId, year, month);
 
         return ResponseEntity.ok(ApiResponse.success(result));
     }

@@ -72,6 +72,7 @@ public class NotificationController {
             .description(info.description())
             .defaultInAppEnabled(info.defaultInAppEnabled())
             .defaultPushEnabled(info.defaultPushEnabled())
+            .defaultPriority(info.defaultPriority())
             .build())
         .collect(Collectors.toList());
     return ResponseEntity.ok(ApiResponse.success(catalog));

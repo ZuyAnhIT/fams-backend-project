@@ -380,7 +380,8 @@ public class ReportService {
         LocalDate to   = from.plusMonths(1);
 
         List<com.fams.modules.attendance.repository.AttendanceMonthlyAggregateProjection> rows = summaryRepository
-                .aggregateMonthly(tenantId, null, effectiveSiteId, from, to, PageRequest.of(0, Integer.MAX_VALUE))
+                .aggregateMonthly(tenantId, null, effectiveSiteId, from, to, null, null, "asc",
+                        PageRequest.of(0, Integer.MAX_VALUE))
                 .getContent();
 
         Set<UUID> empIds = rows.stream()

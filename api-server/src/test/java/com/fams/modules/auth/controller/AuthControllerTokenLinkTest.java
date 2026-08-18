@@ -46,7 +46,7 @@ class AuthControllerTokenLinkTest {
                 mock(LoginTotpService.class),
                 mock(GoogleLoginService.class),
                 mock(RefreshTokenService.class),
-                "http://192.168.1.135:3000");
+                "http://192.168.1.145:3000");
     }
 
     @Test
@@ -55,7 +55,7 @@ class AuthControllerTokenLinkTest {
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FOUND);
         assertThat(response.getHeaders().getLocation())
-                .hasToString("http://192.168.1.135:3000/verify-email?token=registration-token");
+                .hasToString("http://192.168.1.145:3000/verify-email?token=registration-token");
         verify(emailVerificationService, never()).verifyToken("registration-token");
     }
 
@@ -65,7 +65,7 @@ class AuthControllerTokenLinkTest {
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FOUND);
         assertThat(response.getHeaders().getLocation())
-                .hasToString("http://192.168.1.135:3000/verify-email?token=email-change-token&mode=email-change");
+                .hasToString("http://192.168.1.145:3000/verify-email?token=email-change-token&mode=email-change");
         verify(emailVerificationService, never()).confirmEmailChange("email-change-token");
     }
 

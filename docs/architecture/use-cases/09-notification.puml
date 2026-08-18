@@ -1,0 +1,50 @@
+@startuml FAMS_Notification
+title FAMS — Thông báo (Mức 2)
+left to right direction
+skinparam packageStyle rectangle
+skinparam shadowing false
+
+actor "Người dùng đã xác thực" as User
+actor "Tenant Admin / Owner" as TA
+actor "HR Manager" as HR
+actor "Platform Admin" as PA
+actor "Hệ thống tích hợp được ủy quyền" as Integration <<external system>>
+actor "Firebase FCM" as FCM <<external system>>
+actor "Dịch vụ Email" as Mail <<external system>>
+
+rectangle "FAMS — Notification" {
+  usecase "Xem hộp thư thông báo" as Inbox
+  usecase "Đánh dấu đã đọc" as Read
+  usecase "Cấu hình kênh nhận cá nhân" as Preference
+  usecase "Đăng ký/hủy thiết bị nhận push" as Device
+  usecase "Quản lý template thông báo" as Template
+  usecase "Tạo thông báo từ sự kiện nghiệp vụ" as Create
+  usecase "Gửi push notification" as Push
+  usecase "Gửi email fallback" as Email
+  usecase "Theo dõi và retry kết quả gửi" as Delivery
+  usecase "Tạo thông báo qua internal API" as ExternalCreate
+}
+
+User --> Inbox
+User --> Read
+User --> Preference
+User --> Device
+TA --> Template
+HR --> Template : theo permission
+PA --> Template
+Integration --> ExternalCreate
+FCM --> Push
+Mail --> Email
+
+Read .> Inbox : <<extend>>
+Push .> Create : <<extend>>\nkhi bật kênh push
+Email .> Create : <<extend>>\nkhi cần fallback
+Push .> Delivery : <<include>>
+Email .> Delivery : <<include>>
+ExternalCreate .> Create : <<include>>
+
+note bottom of ExternalCreate
+  API có thật và được bảo vệ bằng X-Internal-Secret,
+  nhưng repository chưa định danh hệ thống gọi cụ thể.
+end note
+@enduml

@@ -26,4 +26,8 @@ public class NotificationEventTypeResponse {
 
     @Schema(description = "System default for push notifications if the user hasn't customized this event type")
     private boolean defaultPushEnabled;
+
+    @Schema(description = "Priority every notification of this eventType is created with (#89, "
+            + "2026-08-17) — low | normal | high | critical", example = "high")
+    private String defaultPriority;
 }

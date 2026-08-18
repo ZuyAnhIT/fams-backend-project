@@ -729,11 +729,13 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 
 - [x] **#85 — Nhân viên xem bảng công ngày/tháng** `P0` · 5sp · Nền tảng: Backend, Mobile App
   - *Audit (2026-07-22):* ✅ ĐÃ XONG — bằng chứng: AttendanceSummaryController /me, /me/monthly, test_employee_timesheet.sh
+  - *Audit (2026-08-17):* ✅→✅ ĐÃ VÁ THÊM — gap thật: `/me`/`/me/monthly` không lọc site. Đã thêm `siteId` optional cho cả 2 endpoint + chip filter site trên App (chỉ hiện khi ≥ 2 site). "Violation" giữ nguyên cờ dẫn xuất theo quyết định chủ dự án. Test live qua UI thật: PASS (xem `sprint-3-feature-85-employee-timesheet.md`).
   - *User Story:* Là một nhân viên, tôi muốn xem tổng công, giờ làm, đi muộn, OT theo ngày/tháng để biết dữ liệu công của mình.
   - *Acceptance Criteria:* Hiển thị calendar/list; lọc tháng/site; tổng attendance_value/OT/violation; highlight ngày lỗi.
   - *DB Entities:* `attendance_summaries, violations`
 - [x] **#86 — HR xem bảng công tổng hợp** `P0` · 5sp · Nền tảng: Backend, Web Admin
   - *Audit (2026-07-22):* ✅ ĐÃ XONG — bằng chứng: /monthly HR endpoint, test_hr_monthly.sh
+  - *Audit (2026-08-17):* ✅→✅ ĐÃ VÁ THÊM — 3 gap thật: thiếu lọc workspace/status/sort. Đã thêm `status` + `sortBy`/`sortDir` (whitelist, 400 khi sai) cho `/monthly` + 2 dropdown mới trên Web Admin. KHÔNG thêm lọc workspace (quyết định chủ dự án — chưa gắn với module chấm công ở đâu khác). Test live qua UI thật: PASS (xem `sprint-3-feature-86-hr-monthly.md`).
   - *User Story:* Là một HR/Admin, tôi muốn xem bảng công theo nhân viên/site/tháng để kiểm tra trước khi xuất lương.
   - *Acceptance Criteria:* Lọc tháng/site/workspace/status; sort; phân trang; xem total_work_minutes, công, OT, vi phạm.
   - *DB Entities:* `attendance_summaries, tenant_users, sites, workspaces`
@@ -744,24 +746,28 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 
 - [x] **#87 — Đăng ký thiết bị nhận push** `P0` · 3sp · Nền tảng: Backend, Mobile App
   - *Audit (2026-07-22):* ✅ ĐÃ XONG — bằng chứng: UserDeviceService.registerDevice, test_fcm_devices.sh
+  - *Audit (2026-08-17):* ✅ XÁC NHẬN LẠI, không có gap — bảng thật là `user_devices` (AC ghi nhầm `tokens`, không phải bug); token mới của cùng thiết bị tạo bản ghi mới thay vì update tại chỗ là giới hạn hợp lý của FCM SDK. Không sửa code. Test live: PASS (xem `sprint-3-feature-87-register-device.md`).
   - *User Story:* Là một nhân viên dùng app, tôi muốn đăng ký FCM token cho thiết bị để nhận thông báo realtime.
   - *Acceptance Criteria:* App gửi fcm_token/device_id; lưu vào token/session hiện tại; cập nhật khi token đổi.
   - *DB Entities:* `tokens, users`
 - [x] **#88 — Gửi push notification** `P0` · 5sp · Nền tảng: Backend, Mobile App, Queue/AI/Automation
   - *Audit (2026-07-22):* ✅ ĐÃ XONG — bằng chứng: sendPush + retry + delivery log, test_fcm_retry_fallback.sh
+  - *Audit (2026-08-17):* ✅→✅ ĐÃ VÁ THÊM — gap nghiêm trọng nhất nhóm #85-90: **token chết (FCM UNREGISTERED) không bao giờ bị dọn, retry vô hạn mỗi lần gửi**. Đã vá: dừng retry ngay khi UNREGISTERED + vô hiệu hóa thiết bị đó (soft-delete). Đã thêm lưu `provider_message_id` (trước đây bị bỏ qua). KHÔNG thêm field `channel` riêng trên Notification (đã có tương đương ở NotificationDeliveryLog.channel). Test live: PASS (xem `sprint-3-feature-88-send-push.md`); case UNREGISTERED thật cần test tay trên thiết bị thật.
   - *User Story:* Là một hệ thống, tôi muốn gửi push đến thiết bị người dùng để thông báo kịp thời.
   - *Acceptance Criteria:* Tạo notification channel=push_fcm; gửi FCM; lưu provider_message_id; cập nhật delivery_status/retry_count/failure_reason.
   - *DB Entities:* `notifications, tokens`
 
 #### In-app Inbox
 
-- [ ] **#89 — Danh sách thông báo trong app/web** `P0` · 3sp · Nền tảng: Backend, Web Admin, Mobile App
+- [x] **#89 — Danh sách thông báo trong app/web** `P0` · 3sp · Nền tảng: Backend, Web Admin, Mobile App
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: NotificationController.getNotifications; thiếu: Notification entity không có priority/deep_link
+  - *Audit (2026-08-17):* 🟡→✅ ĐÃ FIX — **cải chính gap "deep_link" từ audit gốc: SAI/lỗi thời, đã hoạt động qua field `metadata` từ 2026-07-31, cả 2 FE đang dùng thật.** Gap thật duy nhất: thiếu `priority`. Đã thêm `priority` (low/normal/high/critical) resolve theo eventType lúc tạo (snapshot), badge "Khẩn cấp"/"Quan trọng" trên cả Web Admin và App (chỉ hiện cho high/critical). Test live: PASS trên cả 2 nền tảng (xem `sprint-3-feature-89-notification-list.md`).
   - *User Story:* Là một người dùng, tôi muốn xem các thông báo trong hộp thư để không bỏ lỡ thông tin quan trọng.
   - *Acceptance Criteria:* Lọc unread/all; sort created_at; phân trang; hiển thị title/body/priority; deep_link mở đúng màn hình.
   - *DB Entities:* `notifications`
 - [x] **#90 — Đánh dấu đã đọc** `P0` · 2sp · Nền tảng: Backend, Web Admin, Mobile App
   - *Audit (2026-07-22):* ✅ ĐÃ XONG — bằng chứng: markAsRead/markAllAsRead, test_mark_read.sh
+  - *Audit (2026-08-17):* ✅ XÁC NHẬN LẠI, không có gap — quyền sở hữu/idempotent/unread badge đều đúng. Bổ sung test live cho luồng batch (đánh dấu nhiều thông báo được chọn lọc) vốn trước đây chỉ có bằng chứng qua code. Không sửa code. Test live: PASS (xem `sprint-3-feature-90-mark-read.md`).
   - *User Story:* Là một người dùng, tôi muốn đánh dấu một hoặc nhiều thông báo đã đọc để quản lý inbox gọn gàng.
   - *Acceptance Criteria:* Update is_read/read_at; unread badge giảm; chỉ user nhận được mới được update.
   - *DB Entities:* `notifications`

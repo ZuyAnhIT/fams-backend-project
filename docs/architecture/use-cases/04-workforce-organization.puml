@@ -1,0 +1,92 @@
+@startuml FAMS_Workforce_Organization
+title FAMS — Tổ chức, nhân sự, site và lịch làm (Mức 2)
+left to right direction
+skinparam packageStyle rectangle
+skinparam shadowing false
+
+actor "Tenant Admin / Owner" as TA
+actor "HR Manager" as HR
+actor "Site Supervisor" as SS
+actor "Employee" as EE
+actor "Người được mời" as Invitee
+actor "Dịch vụ Email" as Mail <<external system>>
+
+rectangle "FAMS — Workforce & Organization" {
+  usecase "Quản lý hồ sơ nhân viên" as Employees
+  usecase "Tạo nhân viên thủ công" as ManualEmployee
+  usecase "Mời nhân viên" as InviteEmployee
+  usecase "Chấp nhận lời mời" as AcceptInvite
+  usecase "Hủy lời mời" as CancelInvite
+  usecase "Import nhân viên" as Import
+  usecase "Export nhân viên" as Export
+  usecase "Tạm ngừng/chấm dứt nhân viên" as Terminate
+  usecase "Quản lý workspace" as Workspace
+  usecase "Gán/chuyển thành viên workspace" as WorkspaceMember
+  usecase "Xem cây tổ chức" as OrgTree
+  usecase "Quản lý site" as Site
+  usecase "Quản lý geofence và lịch sử" as Geofence
+  usecase "Quản lý ca và cấu hình OT" as Shift
+  usecase "Quản lý phân công site/ca" as Assignment
+  usecase "Xem site có thể chấm công hôm nay" as AvailableSites
+  usecase "Xem lịch/phân công của tôi" as MyAssignment
+  usecase "Kiểm tra giới hạn gói" as PlanLimit
+  usecase "Giới hạn dữ liệu theo site" as SiteScope
+}
+
+TA --> Employees
+TA --> ManualEmployee
+TA --> InviteEmployee
+TA --> CancelInvite
+TA --> Import
+TA --> Export
+TA --> Terminate
+TA --> Workspace
+TA --> WorkspaceMember
+TA --> OrgTree
+TA --> Site
+TA --> Geofence
+TA --> Shift
+TA --> Assignment
+
+HR --> Employees
+HR --> ManualEmployee
+HR --> InviteEmployee
+HR --> CancelInvite
+HR --> Import
+HR --> Export
+HR --> Terminate
+HR --> Workspace
+HR --> WorkspaceMember
+HR --> OrgTree
+HR --> Site
+HR --> Geofence
+HR --> Shift
+HR --> Assignment
+
+SS --> Employees : chỉ đọc
+SS --> Site : chỉ đọc
+SS --> Assignment : chỉ đọc
+SS --> SiteScope
+EE --> AvailableSites
+EE --> MyAssignment
+Invitee --> AcceptInvite
+Mail --> InviteEmployee
+Mail --> AcceptInvite
+
+ManualEmployee .> Employees : <<extend>>
+InviteEmployee .> Employees : <<extend>>
+Terminate .> Employees : <<extend>>
+InviteEmployee .> PlanLimit : <<include>>
+AcceptInvite .> PlanLimit : <<include>>
+ManualEmployee .> PlanLimit : <<include>>
+Site .> PlanLimit : <<include>>\nkhi tạo mới
+Geofence .> Site : <<include>>
+WorkspaceMember .> Workspace : <<include>>
+Assignment .> Site : <<include>>
+Assignment .> Shift : <<include>>
+
+note bottom of SiteScope
+  Supervisor chỉ thấy nhân viên, phân công và dữ liệu
+  thuộc hợp các site được gán qua role scope.
+end note
+@enduml

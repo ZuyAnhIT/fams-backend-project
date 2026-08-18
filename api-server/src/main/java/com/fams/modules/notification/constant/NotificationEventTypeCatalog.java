@@ -1,6 +1,7 @@
 package com.fams.modules.notification.constant;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * Single source of truth for every {@code eventType} the system actually sends notifications
@@ -33,6 +34,11 @@ public final class NotificationEventTypeCatalog {
     private NotificationEventTypeCatalog() {
     }
 
+    /** low | normal | high | critical — used to resolve a default {@code priority} for any
+     *  eventType not found in {@link #ALL} (should not happen in practice, but keeps
+     *  {@link #defaultPriorityFor} total instead of throwing). */
+    public static final String FALLBACK_PRIORITY = "normal";
+
     public static final List<NotificationEventTypeInfo> ALL = List.of(
             new NotificationEventTypeInfo(
                     // Must match com.fams.modules.randomcheck.constant.RandomCheckEventTypes.RANDOM_CHECK_SENT
@@ -40,56 +46,77 @@ public final class NotificationEventTypeCatalog {
                     "Kiểm tra ngẫu nhiên",
                     "Gửi khi hệ thống yêu cầu bạn phản hồi một lượt kiểm tra ngẫu nhiên (vị trí/khuôn mặt).",
                     true,
-                    true),
+                    true,
+                    "high"),
             new NotificationEventTypeInfo(
                     // Must match com.fams.modules.employee.constant.InvitationEventTypes.EMPLOYEE_INVITED
                     "EMPLOYEE_INVITED",
                     "Được mời vào công ty",
                     "Gửi khi bạn được mời tham gia một công ty (chỉ áp dụng nếu bạn đã có tài khoản FAMS).",
                     true,
-                    true),
+                    true,
+                    "normal"),
             new NotificationEventTypeInfo(
                     // Must match com.fams.modules.employee.constant.InvitationEventTypes.INVITATION_ACCEPTED
                     "INVITATION_ACCEPTED",
                     "Lời mời đã được chấp nhận",
                     "Gửi cho người gửi lời mời khi người được mời chấp nhận tham gia.",
                     true,
-                    false),
+                    false,
+                    "low"),
             new NotificationEventTypeInfo(
                     // Must match com.fams.modules.rbac.constant.RoleEventTypes.ROLE_ASSIGNED
                     "ROLE_ASSIGNED",
                     "Được gán vai trò mới",
                     "Gửi khi bạn được gán một vai trò (role) mới trong một công ty.",
                     true,
-                    false),
+                    false,
+                    "normal"),
             new NotificationEventTypeInfo(
                     // Must match com.fams.modules.rbac.constant.RoleEventTypes.ROLE_REVOKED
                     "ROLE_REVOKED",
                     "Bị thu hồi vai trò",
                     "Gửi khi một vai trò (role) bạn đang giữ bị thu hồi trong một công ty.",
                     true,
-                    true),
+                    true,
+                    "high"),
             new NotificationEventTypeInfo(
                     // Must match com.fams.modules.attendance.constant.AttendanceEventTypes.MISSING_CHECKOUT_EMPLOYEE
                     "MISSING_CHECKOUT_EMPLOYEE",
                     "Quên check-out",
                     "Gửi cho bạn khi hệ thống phát hiện một ngày công trước đó bạn chưa check-out.",
                     true,
-                    true),
+                    true,
+                    "normal"),
             new NotificationEventTypeInfo(
                     // Must match com.fams.modules.attendance.constant.AttendanceEventTypes.MISSING_CHECKOUT_HR
                     "MISSING_CHECKOUT_HR",
                     "Nhân viên quên check-out",
                     "Gửi cho HR/quản lý khi một nhân viên có ngày công trước đó chưa check-out.",
                     true,
-                    false)
+                    false,
+                    "normal")
     );
+
+    private static final Map<String, String> PRIORITY_BY_EVENT_TYPE = ALL.stream()
+            .collect(java.util.stream.Collectors.toMap(
+                    NotificationEventTypeInfo::eventType, NotificationEventTypeInfo::defaultPriority));
+
+    /** #89 (2026-08-17): resolves the default priority for an eventType — used by
+     *  {@code NotificationService#createNotification} at creation time so each notification's
+     *  priority is a real backend decision, not a FE-hardcoded color per eventType. Falls back
+     *  to {@link #FALLBACK_PRIORITY} for an eventType this catalog doesn't (yet) know about,
+     *  rather than throwing — a send should never fail just because priority lookup missed. */
+    public static String defaultPriorityFor(String eventType) {
+        return PRIORITY_BY_EVENT_TYPE.getOrDefault(eventType, FALLBACK_PRIORITY);
+    }
 
     public record NotificationEventTypeInfo(
             String eventType,
             String label,
             String description,
             boolean defaultInAppEnabled,
-            boolean defaultPushEnabled) {
+            boolean defaultPushEnabled,
+            String defaultPriority) {
     }
 }
