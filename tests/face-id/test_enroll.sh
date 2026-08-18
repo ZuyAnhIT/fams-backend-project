@@ -61,8 +61,10 @@ ADMIN_TOKEN=$(echo "$login_body" | grep -o '"accessToken":"[^"]*"' | head -1 | c
 echo "Admin token obtained."
 echo ""
 
-# Setup: create tenant + employee
-echo "--- Setup: Create tenant and employee ---"
+# Setup: create tenant + employee. Employee is created via invitation+accept (not a plain
+# POST /employees) so it has a linked user_id — required for the consent step below, since
+# consent is self-only and an employee with no account can never satisfy that (see test_consent.sh).
+echo "--- Setup: Create tenant and employee (invited, with linked account) ---"
 TS=$(date +%s)
 t_resp=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/tenants" \
@@ -72,13 +74,23 @@ t_resp=$(curl -s -w "\n%{http_code}" \
 TENANT_ID=$(echo "$t_resp" | head -n -1 | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 [ -z "$TENANT_ID" ] && { echo "SETUP FAILED: Could not create tenant"; exit 1; }
 
-emp_resp=$(curl -s -w "\n%{http_code}" \
-    -X POST "$BASE_URL/api/v1/tenants/$TENANT_ID/employees" \
+EMP_EMAIL="bob.enroll.${TS}@corp.com"
+curl -s -o /dev/null -X POST "$BASE_URL/api/v1/tenants/$TENANT_ID/invitations" \
+    -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" \
+    -d "{\"email\":\"$EMP_EMAIL\",\"firstName\":\"Bob\",\"lastName\":\"Enroll\"}"
+INV_TOKEN=$(docker exec fams-postgres psql -U "${DB_USER:-fams_user}" -d "${DB_NAME:-fams_db}" -t -c \
+    "SELECT token FROM employee_invitations WHERE email='$EMP_EMAIL' AND status='pending' LIMIT 1;" \
+    2>/dev/null | tr -d ' \n')
+[ -z "$INV_TOKEN" ] && { echo "SETUP FAILED: Could not retrieve invitation token"; exit 1; }
+accept_resp=$(curl -s -X POST "$BASE_URL/api/v1/invitations/accept" \
     -H "Content-Type: application/json" \
-    -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d '{"firstName":"Bob","lastName":"Enroll","email":"bob.enroll@corp.com","employeeCode":"EMP-BE01","position":"Engineer","department":"Tech"}')
-EMP_ID=$(echo "$emp_resp" | head -n -1 | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
-[ -z "$EMP_ID" ] && { echo "SETUP FAILED: Could not create employee"; exit 1; }
+    -d "{\"token\":\"$INV_TOKEN\",\"password\":\"Employee@1234\"}")
+EMP_TOKEN=$(echo "$accept_resp" | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4)
+[ -z "$EMP_TOKEN" ] && { echo "SETUP FAILED: Could not accept invitation"; exit 1; }
+EMP_ID=$(docker exec fams-postgres psql -U "${DB_USER:-fams_user}" -d "${DB_NAME:-fams_db}" -t -c \
+    "SELECT e.id FROM employees e JOIN users u ON u.id = e.user_id WHERE u.email='$EMP_EMAIL' AND e.deleted_at IS NULL LIMIT 1;" \
+    2>/dev/null | tr -d ' \n')
+[ -z "$EMP_ID" ] && { echo "SETUP FAILED: Could not resolve employee id"; exit 1; }
 echo "Tenant=$TENANT_ID  Employee=$EMP_ID"
 echo ""
 
@@ -109,12 +121,13 @@ else
     echo "SKIP: No fixture image — skipping"
 fi
 
-# Setup: give consent before remaining tests
+# Setup: give consent before remaining tests. Consent is self-only (deliberate policy, see
+# test_consent.sh) — must use EMP_TOKEN, not ADMIN_TOKEN.
 echo ""
-echo "--- Setup: Give consent ---"
+echo "--- Setup: Give consent (self) ---"
 curl -s -X POST \
     "$BASE_URL/api/v1/tenants/$TENANT_ID/employees/$EMP_ID/face-id/consent" \
-    -H "Authorization: Bearer $ADMIN_TOKEN" > /dev/null
+    -H "Authorization: Bearer $EMP_TOKEN" > /dev/null
 echo "Consent recorded."
 echo ""
 
@@ -142,12 +155,35 @@ if [ -f "$FACE_IMG" ]; then
     enroll_body=$(echo "$enroll_resp" | head -n -1)
     enroll_status=$(echo "$enroll_resp" | tail -n 1)
     if [ "$enroll_status" -eq 200 ]; then
-        enrolled=$(echo "$enroll_body" | grep -o '"status":"enrolled"' || true)
-        if [ -n "$enrolled" ]; then
-            echo "PASS: Happy path enrollment (HTTP 200, status=enrolled)"
+        # enroll() lands in reviewStatus=pending, NOT status=enrolled directly — it must be
+        # approved by HR/Admin first (FaceIdService.approveEnrollment, HR-review workflow added
+        # after this test was originally written).
+        pending=$(echo "$enroll_body" | grep -o '"reviewStatus":"pending"' || true)
+        if [ -n "$pending" ]; then
+            echo "PASS: Happy path submission (HTTP 200, reviewStatus=pending)"
             PASS=$((PASS + 1))
+
+            approve_status=$(curl -s -o /dev/null -w "%{http_code}" \
+                -X POST "$BASE_URL/api/v1/tenants/$TENANT_ID/employees/$EMP_ID/face-id/approve" \
+                -H "Authorization: Bearer $ADMIN_TOKEN")
+            if [ "$approve_status" -eq 200 ]; then
+                status_resp=$(curl -s -X GET \
+                    "$BASE_URL/api/v1/tenants/$TENANT_ID/employees/$EMP_ID/face-id" \
+                    -H "Authorization: Bearer $ADMIN_TOKEN")
+                enrolled=$(echo "$status_resp" | grep -o '"status":"enrolled"' || true)
+                if [ -n "$enrolled" ]; then
+                    echo "PASS: After HR approval, status=enrolled"
+                    PASS=$((PASS + 1))
+                else
+                    echo "FAIL: After approval, status still not enrolled — body: $status_resp"
+                    FAIL=$((FAIL + 1))
+                fi
+            else
+                echo "FAIL: HR approve — expected HTTP 200, got $approve_status"
+                FAIL=$((FAIL + 1))
+            fi
         else
-            echo "FAIL: Happy path — HTTP 200 but status not enrolled"
+            echo "FAIL: Happy path — HTTP 200 but reviewStatus not pending"
             echo "Body: $enroll_body"
             FAIL=$((FAIL + 1))
         fi

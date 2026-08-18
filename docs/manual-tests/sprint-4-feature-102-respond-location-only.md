@@ -28,7 +28,13 @@ code hiện tại — **ĐÚNG, không lỗi thời:**
 
 ---
 
+## ✅ PASS — ĐÃ KHÓA (2026-08-18)
+
+Backend: `test_respond_check.sh` 23/23 PASS. Frontend: test live qua Expo Web thật (Playwright) —
+mở panel phản hồi cho 1 check `location_only` thật, xác nhận UI chỉ hiện nút "Xác minh vị trí và
+gửi", không có bất kỳ bước chụp ảnh/selfie nào trong panel — đúng thiết kế.
+
+Không có gap cần vá.
+
 ## Ghi chú
-Kịch bản này chưa được test live qua UI thật — mới hoàn tất bước nghiên cứu code + viết kịch bản.
-Không có gap cần vá. `test_respond_check.sh` đã phủ phần backend cốt lõi. Case 4 cần test tay trên
-App thật.
+`test_respond_check.sh` đã phủ phần backend cốt lõi.
