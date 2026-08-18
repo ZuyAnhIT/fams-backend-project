@@ -60,8 +60,14 @@ public interface CheckinRepository extends JpaRepository<CheckinRecord, UUID>, J
      *  this bound, a single forgotten checkout would silently and permanently inflate every
      *  "currently on-site" count shown to HR/supervisors (audit 2026-08-04). */
     @Query("SELECT COUNT(c) FROM CheckinRecord c WHERE c.tenantId = :tenantId AND c.checkOutAt IS NULL " +
-           "AND c.checkInAt >= :since AND c.deletedAt IS NULL")
-    long countOpenSessions(@Param("tenantId") UUID tenantId, @Param("since") OffsetDateTime since);
+           "AND c.checkInAt >= :since AND (:siteId IS NULL OR c.siteId = :siteId) AND c.deletedAt IS NULL")
+    long countOpenSessions(@Param("tenantId") UUID tenantId, @Param("since") OffsetDateTime since, @Param("siteId") UUID siteId);
+
+    /** #120 (2026-08-18): HR dashboard "pending review" count — checkins flagged pending_review
+     *  (e.g. face verification mismatch) that HR hasn't overridden yet. */
+    @Query("SELECT COUNT(c) FROM CheckinRecord c WHERE c.tenantId = :tenantId AND c.status = 'pending_review' " +
+           "AND (:siteId IS NULL OR c.siteId = :siteId) AND c.deletedAt IS NULL")
+    long countPendingReview(@Param("tenantId") UUID tenantId, @Param("siteId") UUID siteId);
 
     /** Open check-in sessions for a specific site, opened on-or-after {@code since} — same
      *  stale-session guard as {@link #countOpenSessions}, see its javadoc. */

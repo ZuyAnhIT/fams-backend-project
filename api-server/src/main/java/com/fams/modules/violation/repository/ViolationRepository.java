@@ -22,18 +22,21 @@ public interface ViolationRepository extends JpaRepository<Violation, UUID>, Jpa
 
     java.util.Optional<Violation> findByIdAndTenantIdAndDeletedAtIsNull(UUID id, UUID tenantId);
 
-    @Query("SELECT COUNT(v) FROM Violation v WHERE v.tenantId = :tenantId AND v.resolved = false AND v.deletedAt IS NULL")
-    long countUnresolved(@Param("tenantId") UUID tenantId);
+    @Query("SELECT COUNT(v) FROM Violation v WHERE v.tenantId = :tenantId AND v.resolved = false " +
+           "AND (:siteId IS NULL OR v.siteId = :siteId) AND v.deletedAt IS NULL")
+    long countUnresolved(@Param("tenantId") UUID tenantId, @Param("siteId") UUID siteId);
 
     /** Used by the employee dashboard's "needs my attention" count — mirrors ViolationService
      *  #listMyViolations scoping (own violations, unresolved only). */
     long countByTenantIdAndEmployeeIdAndResolvedFalseAndDeletedAtIsNull(UUID tenantId, UUID employeeId);
 
-    @Query("SELECT v.violationType, COUNT(v) FROM Violation v WHERE v.tenantId = :tenantId AND v.resolved = false AND v.deletedAt IS NULL GROUP BY v.violationType")
-    List<Object[]> countUnresolvedByType(@Param("tenantId") UUID tenantId);
+    @Query("SELECT v.violationType, COUNT(v) FROM Violation v WHERE v.tenantId = :tenantId AND v.resolved = false " +
+           "AND (:siteId IS NULL OR v.siteId = :siteId) AND v.deletedAt IS NULL GROUP BY v.violationType")
+    List<Object[]> countUnresolvedByType(@Param("tenantId") UUID tenantId, @Param("siteId") UUID siteId);
 
-    @Query("SELECT COUNT(v) FROM Violation v WHERE v.tenantId = :tenantId AND v.resolved = true AND v.resolvedAt >= :since AND v.deletedAt IS NULL")
-    long countResolvedSince(@Param("tenantId") UUID tenantId, @Param("since") OffsetDateTime since);
+    @Query("SELECT COUNT(v) FROM Violation v WHERE v.tenantId = :tenantId AND v.resolved = true AND v.resolvedAt >= :since " +
+           "AND (:siteId IS NULL OR v.siteId = :siteId) AND v.deletedAt IS NULL")
+    long countResolvedSince(@Param("tenantId") UUID tenantId, @Param("since") OffsetDateTime since, @Param("siteId") UUID siteId);
 
     @Query("SELECT v FROM Violation v WHERE v.tenantId = :tenantId AND v.deletedAt IS NULL " +
            "ORDER BY v.createdAt DESC")
