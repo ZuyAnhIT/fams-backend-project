@@ -780,28 +780,33 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 
 #### Cấu hình
 
-- [ ] **#91 — Tạo cấu hình random check mặc định tenant** `P0` · 5sp · Nền tảng: Backend, Web Admin
+- [x] **#91 — Tạo cấu hình random check mặc định tenant** `P0` · 5sp · Nền tảng: Backend, Web Admin
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: RandomCheckConfigService.createTenantDefault; thiếu: checksPerShift là số cố định, không phải khoảng min/max; không ghi audit
+  - *Audit (2026-08-18):* 🟡→✅ ĐÃ VÁ — thêm audit log cho toàn bộ 6 method mutate của RandomCheckConfigService (áp dụng chung #91-95). Quyết định chủ dự án: giữ nguyên checksPerShift số cố định, không đổi min/max (chi phí đổi schema lớn hơn giá trị thực tế). Test live: PASS (xem `sprint-4-feature-91-random-check-tenant-default.md`).
   - *User Story:* Là một Company Admin, tôi muốn tạo cấu hình random check mặc định cho công ty để kiểm tra nhân viên hiện trường theo policy.
   - *Acceptance Criteria:* site_id=NULL; cấu hình min/max/window/gap; chỉ một config default mỗi tenant; validate min<=max.
   - *DB Entities:* `random_check_configs, audit_logs`
-- [ ] **#92 — Tạo cấu hình override theo site** `P0` · 5sp · Nền tảng: Backend, Web Admin
+- [x] **#92 — Tạo cấu hình override theo site** `P0` · 5sp · Nền tảng: Backend, Web Admin
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: createSiteOverride, test_random_check_config_site_override.sh; thiếu: thiếu audit log
+  - *Audit (2026-08-18):* 🟡→✅ ĐÃ VÁ — audit log đã thêm cùng đợt với #91 (dùng chung service). Test live: PASS (xem `sprint-4-feature-92-random-check-site-override.md`).
   - *User Story:* Là một HR/Admin, tôi muốn tạo cấu hình riêng cho công trình để kiểm soát site rủi ro cao.
   - *Acceptance Criteria:* Chọn site; override tenant config; chỉ một config/site; bật/tắt riêng; ghi audit.
   - *DB Entities:* `random_check_configs, sites, audit_logs`
-- [ ] **#93 — Cấu hình số lần và khung giờ check** `P0` · 5sp · Nền tảng: Backend, Web Admin
+- [x] **#93 — Cấu hình số lần và khung giờ check** `P0` · 5sp · Nền tảng: Backend, Web Admin
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: validateSchedulingFields, test_scheduling_fields.sh; thiếu: field cố định không phải min/max
+  - *Audit (2026-08-18):* 🟡→✅ ĐÃ VÁ audit log (chung #91). Quyết định chủ dự án: giữ nguyên checksPerShift cố định + 1 khung giờ/ngày, không đổi min/max hay nhiều khung giờ. Test live: PASS (xem `sprint-4-feature-93-scheduling-fields.md`).
   - *User Story:* Là một HR/Admin, tôi muốn thiết lập số lần check, khoảng cách và khung giờ cho phép để tránh kiểm tra quá dày hoặc sai giờ.
   - *Acceptance Criteria:* Nhập checks_per_shift_min/max, min_gap, allowed_time_ranges; validate nằm trong ca; hiển thị cảnh báo nếu không thể sinh lịch.
   - *DB Entities:* `random_check_configs, shift_templates`
-- [ ] **#94 — Cấu hình mode kiểm tra** `P0` · 5sp · Nền tảng: Backend, Web Admin
+- [x] **#94 — Cấu hình mode kiểm tra** `P0` · 5sp · Nền tảng: Backend, Web Admin
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: checkMode enum, test_check_mode.sh; thiếu: không lưu threshold GPS/face riêng
+  - *Audit (2026-08-18):* 🟡→✅ ĐÃ VÁ audit log (chung #91). Quyết định chủ dự án: giữ nguyên không có threshold GPS/face riêng theo tenant/site. Test live: PASS (xem `sprint-4-feature-94-check-mode.md`).
   - *User Story:* Là một HR/Admin, tôi muốn chọn mode location_only/location_face/location_face_liveness để linh hoạt theo mức độ kiểm soát.
   - *Acceptance Criteria:* Chọn mode; tự set require_location/face/liveness; validate liveness phải có face; lưu threshold GPS/face.
   - *DB Entities:* `random_check_configs`
 - [x] **#95 — Cấu hình áp dụng theo vai trò** `P1` · 3sp · Nền tảng: Backend, Web Admin
   - *Audit (2026-07-22):* ✅ ĐÃ XONG — bằng chứng: applicableRoles filter, test_applicable_roles.sh
+  - *Audit (2026-08-18):* ✅ XÁC NHẬN LẠI, không có gap chức năng — filter role hoạt động đúng thật. Audit log (dùng chung service) đã vá cùng #91. AC nhắc "lead" là sai ở tầng hệ thống (Assignment chỉ có worker/supervisor), không phải gap của tính năng này. Test live: PASS (xem `sprint-4-feature-95-applicable-roles.md`).
   - *User Story:* Là một HR/Admin, tôi muốn chọn role_at_site được áp dụng random check để không làm phiền nhóm không cần kiểm tra.
   - *Acceptance Criteria:* Chọn worker/lead/supervisor; hệ thống chỉ sinh check cho assignment có role phù hợp.
   - *DB Entities:* `random_check_configs, assignments`

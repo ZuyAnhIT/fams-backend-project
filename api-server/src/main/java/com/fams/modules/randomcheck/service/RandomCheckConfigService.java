@@ -7,11 +7,13 @@ import com.fams.modules.randomcheck.dto.request.UpdateRandomCheckConfigRequest;
 import com.fams.modules.randomcheck.dto.response.RandomCheckConfigResponse;
 import com.fams.modules.randomcheck.entity.RandomCheckConfig;
 import com.fams.modules.randomcheck.repository.RandomCheckConfigRepository;
+import com.fams.modules.audit.service.AuditLogService;
 import com.fams.modules.rbac.repository.UserRoleRepository;
 import com.fams.modules.rbac.service.SiteScopeService;
 import com.fams.modules.site.repository.SiteRepository;
 import com.fams.shared.exception.DuplicateResourceException;
 import com.fams.shared.exception.ResourceNotFoundException;
+import com.fams.shared.security.HttpRequestUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
@@ -20,7 +22,9 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalTime;
 import java.time.OffsetDateTime;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -36,15 +40,18 @@ public class RandomCheckConfigService {
     private final UserRoleRepository userRoleRepository;
     private final SiteRepository siteRepository;
     private final SiteScopeService siteScopeService;
+    private final AuditLogService auditLogService;
 
     public RandomCheckConfigService(RandomCheckConfigRepository configRepository,
                                     UserRoleRepository userRoleRepository,
                                     SiteRepository siteRepository,
-                                    SiteScopeService siteScopeService) {
+                                    SiteScopeService siteScopeService,
+                                    AuditLogService auditLogService) {
         this.configRepository = configRepository;
         this.userRoleRepository = userRoleRepository;
         this.siteRepository = siteRepository;
         this.siteScopeService = siteScopeService;
+        this.auditLogService = auditLogService;
     }
 
     @Transactional
@@ -79,6 +86,11 @@ public class RandomCheckConfigService {
 
         config = configRepository.save(config);
         log.info("Created tenant-default random check config id={} tenantId={} createdBy={}", config.getId(), tenantId, callerId);
+        auditLogService.record(
+                tenantId, callerId, null,
+                "RandomCheckConfig", config.getId().toString(), "random_check_config_created",
+                null, configSnapshot(config),
+                HttpRequestUtils.currentRequestId(), null, null);
         return toResponse(config);
     }
 
@@ -118,6 +130,11 @@ public class RandomCheckConfigService {
         config = configRepository.save(config);
         log.info("Created site random check config id={} tenantId={} siteId={} createdBy={}",
                 config.getId(), tenantId, siteId, callerId);
+        auditLogService.record(
+                tenantId, callerId, null,
+                "RandomCheckConfig", config.getId().toString(), "random_check_config_created",
+                null, configSnapshot(config),
+                HttpRequestUtils.currentRequestId(), null, null);
         return toResponse(config);
     }
 
@@ -214,6 +231,8 @@ public class RandomCheckConfigService {
         int effectiveInterval = req.getMinIntervalMinutes()  != null ? req.getMinIntervalMinutes()  : config.getMinIntervalMinutes();
         validateSchedulingFields(effectiveStart, effectiveEnd, effectiveChecks, effectiveInterval);
 
+        Map<String, Object> oldValue = configSnapshot(config);
+
         if (req.getChecksPerShift() != null) config.setChecksPerShift(req.getChecksPerShift());
         if (req.getMinIntervalMinutes() != null) config.setMinIntervalMinutes(req.getMinIntervalMinutes());
         if (req.getAllowedStartTime() != null) config.setAllowedStartTime(req.getAllowedStartTime());
@@ -226,6 +245,11 @@ public class RandomCheckConfigService {
 
         config = configRepository.save(config);
         log.info("Updated random check config id={} tenantId={} updatedBy={}", configId, tenantId, callerId);
+        auditLogService.record(
+                tenantId, callerId, null,
+                "RandomCheckConfig", configId.toString(), "random_check_config_updated",
+                oldValue, configSnapshot(config),
+                HttpRequestUtils.currentRequestId(), null, null);
         return toResponse(config);
     }
 
@@ -239,10 +263,17 @@ public class RandomCheckConfigService {
                 .orElseThrow(() -> new ResourceNotFoundException("Random check config not found: " + configId));
         assertConfigInScope(callerId, tenantId, config, callerIsPlatformAdmin);
 
+        String oldRoles = config.getApplicableRoles();
         config.setApplicableRoles(toRolesString(req.getApplicableRoles()));
         config = configRepository.save(config);
         log.info("Updated applicable_roles for config id={} tenantId={} roles='{}' updatedBy={}",
                 configId, tenantId, config.getApplicableRoles(), callerId);
+        auditLogService.record(
+                tenantId, callerId, null,
+                "RandomCheckConfig", configId.toString(), "random_check_config_applicable_roles_updated",
+                Map.of("applicableRoles", oldRoles == null ? "" : oldRoles),
+                Map.of("applicableRoles", config.getApplicableRoles()),
+                HttpRequestUtils.currentRequestId(), null, null);
         return toResponse(config);
     }
 
@@ -256,10 +287,16 @@ public class RandomCheckConfigService {
                 .orElseThrow(() -> new ResourceNotFoundException("Random check config not found: " + configId));
         assertConfigInScope(callerId, tenantId, config, callerIsPlatformAdmin);
 
+        String oldMode = config.getCheckMode();
         config.setCheckMode(req.getCheckMode());
         config = configRepository.save(config);
         log.info("Updated check_mode to '{}' for config id={} tenantId={} updatedBy={}",
                 req.getCheckMode(), configId, tenantId, callerId);
+        auditLogService.record(
+                tenantId, callerId, null,
+                "RandomCheckConfig", configId.toString(), "random_check_config_check_mode_updated",
+                Map.of("checkMode", oldMode), Map.of("checkMode", config.getCheckMode()),
+                HttpRequestUtils.currentRequestId(), null, null);
         return toResponse(config);
     }
 
@@ -274,6 +311,11 @@ public class RandomCheckConfigService {
         config.setDeletedAt(OffsetDateTime.now());
         configRepository.save(config);
         log.info("Soft-deleted random check config id={} tenantId={} deletedBy={}", configId, tenantId, callerId);
+        auditLogService.record(
+                tenantId, callerId, null,
+                "RandomCheckConfig", configId.toString(), "random_check_config_deleted",
+                configSnapshot(config), null,
+                HttpRequestUtils.currentRequestId(), null, null);
     }
 
     private void validateSchedulingFields(LocalTime startTime, LocalTime endTime,
@@ -312,6 +354,21 @@ public class RandomCheckConfigService {
         if (config.getSiteId() != null) {
             assertSiteInScope(callerId, tenantId, config.getSiteId(), callerIsPlatformAdmin);
         }
+    }
+
+    /** Snapshot of every mutable field, for audit log old/new values. */
+    private Map<String, Object> configSnapshot(RandomCheckConfig c) {
+        Map<String, Object> map = new LinkedHashMap<>();
+        map.put("checksPerShift", c.getChecksPerShift());
+        map.put("minIntervalMinutes", c.getMinIntervalMinutes());
+        map.put("allowedStartTime", String.valueOf(c.getAllowedStartTime()));
+        map.put("allowedEndTime", String.valueOf(c.getAllowedEndTime()));
+        map.put("checkMode", c.getCheckMode());
+        map.put("applicableRoles", c.getApplicableRoles());
+        map.put("responseWindowSeconds", c.getResponseWindowSeconds());
+        map.put("failureEscalationThreshold", c.getFailureEscalationThreshold());
+        map.put("isActive", c.isActive());
+        return map;
     }
 
     private String toRolesString(List<String> roles) {
