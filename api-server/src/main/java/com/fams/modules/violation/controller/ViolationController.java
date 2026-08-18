@@ -80,6 +80,8 @@ public class ViolationController {
                     + "for 'which violation(s) came from this exact check', instead of filtering by "
                     + "employeeId+date range and guessing which row matches")
                 @RequestParam(required = false) UUID scheduledCheckId,
+            @Parameter(description = "Filter by whether the violation affects the employee's attendance summary (true | false)")
+                @RequestParam(required = false) Boolean affectsAttendance,
             @Parameter(description = "Sort field (default: checkDate)")
                 @RequestParam(defaultValue = "checkDate") String sortBy,
             @Parameter(description = "Sort direction: asc | desc (default: desc)")
@@ -91,11 +93,11 @@ public class ViolationController {
             @AuthenticationPrincipal FamsUserDetails userDetails) {
         size = Math.min(size, 100);
         log.info("HR violation list tenantId={} employeeId={} siteId={} violationType={} resolved={} "
-                        + "scheduledCheckId={} page={} size={}",
-                tenantId, employeeId, siteId, violationType, resolved, scheduledCheckId, page, size);
+                        + "scheduledCheckId={} affectsAttendance={} page={} size={}",
+                tenantId, employeeId, siteId, violationType, resolved, scheduledCheckId, affectsAttendance, page, size);
         PageResponse<ViolationListResponse> result = violationService.listViolations(
                 tenantId, employeeId, siteId, violationType, resolved, from, to, scheduledCheckId,
-                sortBy, sortDir, page, size,
+                affectsAttendance, sortBy, sortDir, page, size,
                 userDetails.getUserId(), userDetails.isPlatformAdmin());
         return ResponseEntity.ok(ApiResponse.success(result));
     }

@@ -27,6 +27,16 @@ public class ViolationSpecification {
                                                   String violationType, Boolean resolved,
                                                   LocalDate from, LocalDate to,
                                                   UUID scheduledCheckId) {
+        return build(tenantId, employeeId, siteId, violationType, resolved, from, to, scheduledCheckId, null);
+    }
+
+    /** @param affectsAttendance found via audit (2026-08-18): the AC calls for filtering by this,
+     *  and unlike `severity` (a computed/derived value with no backing column — see #114) this
+     *  field genuinely exists on the entity already; the gap was purely a missing predicate. */
+    public static Specification<Violation> build(UUID tenantId, UUID employeeId, UUID siteId,
+                                                  String violationType, Boolean resolved,
+                                                  LocalDate from, LocalDate to,
+                                                  UUID scheduledCheckId, Boolean affectsAttendance) {
         return (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
 
@@ -47,6 +57,9 @@ public class ViolationSpecification {
             }
             if (resolved != null) {
                 predicates.add(cb.equal(root.get("resolved"), resolved));
+            }
+            if (affectsAttendance != null) {
+                predicates.add(cb.equal(root.get("affectsAttendance"), affectsAttendance));
             }
             if (from != null) {
                 predicates.add(cb.greaterThanOrEqualTo(root.get("checkDate"), from));

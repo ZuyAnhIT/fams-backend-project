@@ -80,6 +80,11 @@ public class ViolationDetailResponse {
     @Schema(description = "Employee's check response evidence (present when employee did respond)")
     private CheckResponseEvidence checkResponse;
 
+    @Schema(description = "Evidence from the regular check-in this violation came from (#115, "
+            + "2026-08-18 — previously violations with a checkinId only exposed the bare UUID, "
+            + "with no GPS/face evidence joined in the way random-check violations already had)")
+    private CheckinEvidence checkin;
+
     @Data
     @Builder
     @Schema(description = "Summary of the scheduled check that triggered this violation")
@@ -141,5 +146,41 @@ public class ViolationDetailResponse {
 
         @Schema(description = "Reason the response failed (null on pass)")
         private String failureReason;
+    }
+
+    @Data
+    @Builder
+    @Schema(description = "Evidence from a regular check-in (#115, 2026-08-18)")
+    public static class CheckinEvidence {
+
+        @Schema(description = "Check-in UUID")
+        private UUID id;
+
+        @Schema(description = "Check-in status")
+        private String status;
+
+        @Schema(description = "When the employee checked in")
+        private OffsetDateTime checkInAt;
+
+        @Schema(description = "Check-in latitude")
+        private double checkInLat;
+
+        @Schema(description = "Check-in longitude")
+        private double checkInLon;
+
+        @Schema(description = "GPS accuracy in metres at check-in")
+        private Double checkInAccuracy;
+
+        @Schema(description = "Whether check-in was inside the site's geofence")
+        private boolean checkInInsideGeofence;
+
+        @Schema(description = "Whether face verification passed at check-in")
+        private Boolean faceVerified;
+
+        @Schema(description = "Whether liveness check passed at check-in")
+        private Boolean livenessVerified;
+
+        @Schema(description = "Face match score at check-in (0.0–1.0)")
+        private Double faceVerifyScore;
     }
 }
