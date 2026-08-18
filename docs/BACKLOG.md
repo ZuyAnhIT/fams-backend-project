@@ -882,21 +882,24 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 
 #### Vi phạm
 
-- [ ] **#106 — Tạo violation khi không phản hồi** `P0` · 5sp · Nền tảng: Backend, Web Admin, Mobile App, Queue/AI/Automation
+- [x] **#106 — Tạo violation khi không phản hồi** `P0` · 5sp · Nền tảng: Backend, Web Admin, Mobile App, Queue/AI/Automation
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: NoResponseViolationService/Job, test_no_response_violation.sh; thiếu: không gửi notification cho HR/nhân viên
+  - *Audit (2026-08-18):* 🟡→✅ ĐÃ VÁ — `ViolationNotificationService` mới gửi notification cho nhân viên + mọi HR/Admin giữ `violations:list`. Test live qua API/DB thật: PASS. Xem `sprint-4-feature-106-no-response-violation.md`.
   - *User Story:* Là một hệ thống, tôi muốn tạo vi phạm no_response khi check hết hạn để HR có dữ liệu xử lý.
   - *Acceptance Criteria:* Cron/worker tìm sent quá expires_at; set expired; tạo violation type=no_response; gửi notification HR/employee.
   - *DB Entities:* `scheduled_checks, violations, notifications`
-- [ ] **#107 — Tạo violation khi fail random check** `P0` · 5sp · Nền tảng: Backend, Web Admin, Mobile App, Queue/AI/Automation
+- [x] **#107 — Tạo violation khi fail random check** `P0` · 5sp · Nền tảng: Backend, Web Admin, Mobile App, Queue/AI/Automation
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: location_fail/face_fail violations, test_fail_violations.sh; thiếu: liveness_fail KHÔNG BAO GIỜ được tạo ra thực tế (không có logic nối livenessScore -> violation); không gửi notification
+  - *Audit (2026-08-18):* 🟡→✅ ĐÃ VÁ — cáo buộc liveness_fail dead-code đã lỗi thời (vá cùng #104). Notification đã vá chung với #106. "Bằng chứng không nằm sẵn trong violation" cải chính: `ViolationDetailModal.tsx` (Web Admin) ĐÃ hiển thị đầy đủ GPS/Face/Liveness/ảnh ngay trong modal, không phải gap thực tế. Xem `sprint-4-feature-107-fail-violations.md`.
   - *User Story:* Là một hệ thống, tôi muốn tạo violation theo lỗi location/face/liveness để ghi nhận bất thường kịp thời.
   - *Acceptance Criteria:* fail_location -> wrong_location; fail_face -> face_mismatch; fail_liveness -> liveness_fail; details chứa snapshot bằng chứng.
   - *DB Entities:* `random_check_responses, violations, notifications`
 
 #### Manual Check
 
-- [ ] **#108 — HR kích hoạt kiểm tra ngay** `P1` · 5sp · Nền tảng: Backend, Web Admin, Queue/AI/Automation
+- [x] **#108 — HR kích hoạt kiểm tra ngay** `P1` · 5sp · Nền tảng: Backend, Web Admin, Queue/AI/Automation
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: ManualCheckService.trigger, test_manual_check.sh; thiếu: trigger_type dùng sentinel ngầm không phải field rõ ràng; không ghi audit
+  - *Audit (2026-08-18):* 🟡→✅ ĐÃ VÁ — cải chính "không ghi audit" là sai (có ghi đầy đủ). `trigger_type` đã có sẵn tín hiệu thô (`triggeredBy`), chỉ cần derive + expose `triggerType` qua response DTO + filter param mới, không cần migration. Xem `sprint-4-feature-108-manual-trigger.md`.
   - *User Story:* Là một HR/Supervisor, tôi muốn gửi random check thủ công cho nhân viên tại site để xác minh tình huống nghi ngờ.
   - *Acceptance Criteria:* Chọn nhân viên active tại site; tạo scheduled_check scheduled_at=now; trigger_type=manual_hr; gửi notification ngay.
   - *DB Entities:* `scheduled_checks, assignments, notifications, audit_logs`
@@ -905,11 +908,13 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 
 - [x] **#109 — HR xem danh sách scheduled checks** `P0` · 3sp · Nền tảng: Backend, Web Admin
   - *Audit (2026-07-22):* ✅ ĐÃ XONG — bằng chứng: ScheduledCheckController.list, test_list_scheduled_checks.sh
+  - *Audit (2026-08-18):* 🟡→✅ ĐÃ VÁ — filter `triggerType` đã thêm (vá cùng #108). Web Admin: thêm dropdown "Lọc theo loại". Test live qua API+UI thật: PASS. Xem `sprint-4-feature-109-list-scheduled-checks.md`.
   - *User Story:* Là một HR/Admin, tôi muốn xem các random check đã sinh và trạng thái để giám sát tiến trình kiểm tra.
   - *Acceptance Criteria:* Lọc date/site/user/status/trigger_type; sort scheduled_at; phân trang; xem response nếu có.
   - *DB Entities:* `scheduled_checks, random_check_responses, tenant_users, sites`
 - [x] **#110 — HR xem chi tiết random check** `P0` · 3sp · Nền tảng: Backend, Web Admin
   - *Audit (2026-07-22):* ✅ ĐÃ XONG — bằng chứng: getDetail config_snapshot, test_check_detail.sh
+  - *Audit (2026-08-18):* ✅ ĐÃ TEST LIVE — `sent_at` tự khắc phục từ #100 như dự đoán, xác nhận qua test thật. Bổ sung `triggerType` cho nhất quán với #108/#109. Xem `sprint-4-feature-110-check-detail.md`.
   - *User Story:* Là một HR/Admin, tôi muốn xem chi tiết scheduled check và response để xử lý khi có tranh chấp.
   - *Acceptance Criteria:* Hiển thị config_snapshot, sent_at, expires_at, response, GPS, face, result, violation liên quan.
   - *DB Entities:* `scheduled_checks, random_check_responses, violations`

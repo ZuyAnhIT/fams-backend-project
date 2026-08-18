@@ -37,8 +37,16 @@ nhận ở #100):**
 
 ---
 
+## ✅ PASS — ĐÃ KHÓA (2026-08-18)
+
+### Case 2 — gap "sent_at": xác nhận đã tự khắc phục từ #100
+Test live: xem chi tiết 1 check thủ công (đã chắc chắn có `sentAt` vì `ManualCheckService` set
+trực tiếp) — response trả đúng `sentAt` có giá trị thật (không null), khớp đúng dự đoán rằng vá
+#100 sẽ tự động khắc phục gap này ở #110 mà không cần đổi gì thêm.
+
+### Bổ sung nhất quán (2026-08-18)
+Thêm field `triggerType` vào `ScheduledCheckDetailResponse` (cùng logic derive như #108/#109) —
+không phải fix gap, chỉ để chi tiết và danh sách nhất quán cùng 1 field.
+
 ## Ghi chú
-Kịch bản này chưa được test live qua UI thật — mới hoàn tất bước nghiên cứu code + viết kịch bản.
-**Không có gap MỚI cần vá riêng cho #110** — gap duy nhất (case 2) là hệ quả trực tiếp của gap đã
-ghi nhận ở #100 (`ScheduledCheck` thiếu `sent_at`), nên vá 1 lần ở #100 sẽ tự động khắc phục cho cả
-#110. Case 1, 3, 4 rủi ro fail thấp, đã có `test_check_detail.sh` phủ phần cốt lõi.
+Regression: 26/26. Case 1, 3, 4 rủi ro fail thấp, đã có `test_check_detail.sh` phủ phần cốt lõi.

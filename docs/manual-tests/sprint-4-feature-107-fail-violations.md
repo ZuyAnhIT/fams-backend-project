@@ -52,10 +52,27 @@ là đặt tên, 1 điểm là gap thật):
 
 ---
 
+## ✅ ĐÃ VÁ (2026-08-18) — ĐÃ KHÓA
+
+### Case 4 — gap notification: ĐÃ VÁ (chung `ViolationNotificationService` với #106)
+`CheckResponseService.createViolation()` (dùng chung cho cả location_fail/face_fail/liveness_fail)
+giờ gọi `violationNotificationService.notifyRandomCheckViolation(...)` ngay sau khi lưu violation.
+Test live qua API+DB thật (seed enrolled employee, ép fail location + face + liveness): mỗi
+violation đều sinh đúng 2 notification (nhân viên + mọi HR/Admin giữ `violations:list`).
+
+### Case 5 — gap "bằng chứng không nằm sẵn": KHÔNG CÒN LÀ GAP, đã cải chính
+Kiểm tra lại phía Web Admin (`ViolationDetailModal.tsx`) phát hiện bằng chứng đã được hiển thị
+ĐẦY ĐỦ ngay trong modal chi tiết vi phạm — không cần tra riêng qua `checkResponseId`:
+- `ViolationDetailResponse` (backend) đã có sẵn field `checkResponse` (kiểu
+  `CheckResponseEvidence`) chứa latitude/longitude (kèm link Google Maps), accuracyMeters,
+  locationVerified, faceVerified, livenessVerified, livenessScore, failureReason, faceImageUrl —
+  join sẵn ở tầng response, không phải chỉ có `description` dạng chuỗi như audit ban đầu lo ngại.
+- Modal Web Admin render đầy đủ toàn bộ các field trên trong 1 khối "Bằng chứng phản hồi".
+- **Kết luận: không cần thêm field `details`/`metadata` JSON trùng lặp lên entity `Violation`** —
+  thiết kế chuẩn hoá qua liên kết `checkResponseId` là đúng và đã đủ dùng ở tầng UI/API, gap chỉ
+  tồn tại ở mức đọc entity thô (không phải vấn đề thực tế cho HR).
+
 ## Ghi chú
-Kịch bản này chưa được test live qua UI thật — mới hoàn tất bước nghiên cứu code + viết kịch bản.
-**Tin quan trọng: bug nghiêm trọng nhất (liveness_fail dead code) ĐÃ ĐƯỢC VÁ từ trước — chỉ cần test
-live xác nhận (case 3).** Trọng tâm còn lại: case 4 (gap notification, xử lý CHUNG với #106) và case
-5 (gap thiếu snapshot bằng chứng trực tiếp trên violation — cần quyết định nghiệp vụ có đáng thêm
-field `details` JSON hay giữ nguyên cách tra gián tiếp qua response, vì đây là thay đổi schema có
-phạm vi vừa phải, không nhỏ). Case 1-2 chỉ cần lưu ý đúng tên field khi test, không phải gap.
+**Tin quan trọng: bug nghiêm trọng nhất (liveness_fail dead code) ĐÃ ĐƯỢC VÁ từ trước — xác nhận lại
+qua test live case 3, PASS.** Regression: 26/26. Case 1-2 chỉ cần lưu ý đúng tên field khi test,
+không phải gap.

@@ -182,6 +182,10 @@ public class ScheduledCheckController {
             @Parameter(description = "Filter by employee UUID") @RequestParam(required = false) UUID employeeId,
             @Parameter(description = "Filter by status (pending/sent/responded/no_response/cancelled)")
                 @RequestParam(required = false) String status,
+            @Parameter(description = "Filter by trigger type: 'auto' (system-generated) or "
+                    + "'manual_hr' (HR-triggered via POST .../manual-check) — derived from "
+                    + "triggeredBy, not a separate stored field (#108/#109, 2026-08-18)")
+                @RequestParam(required = false) String triggerType,
             @Parameter(description = "Filter from date (inclusive)", example = "2026-06-01")
                 @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate dateFrom,
             @Parameter(description = "Filter to date (inclusive)", example = "2026-06-30")
@@ -197,6 +201,9 @@ public class ScheduledCheckController {
                 throw new AccessDeniedException("Missing permission: randomchecks:list");
             }
         }
+        if (triggerType != null && !"auto".equals(triggerType) && !"manual_hr".equals(triggerType)) {
+            throw new IllegalArgumentException("triggerType must be 'auto' or 'manual_hr'");
+        }
 
         java.util.Optional<UUID> effectiveSiteFilter;
         try {
@@ -210,7 +217,7 @@ public class ScheduledCheckController {
         LocalDate from = dateFrom != null ? dateFrom : LocalDate.of(1970, 1, 1);
         LocalDate to = dateTo != null ? dateTo : LocalDate.of(2099, 12, 31);
         Page<ScheduledCheck> rawPage = scheduledCheckRepository
-                .findByTenantWithFilters(tenantId, siteId, employeeId, status, from, to, pageable);
+                .findByTenantWithFilters(tenantId, siteId, employeeId, status, triggerType, from, to, pageable);
 
         // Batch-hydrate employee/site names and outcome/failureReason for the page — found via FE
         // audit (2026-07-31): the list previously returned bare IDs with no result, forcing the
@@ -290,7 +297,7 @@ public class ScheduledCheckController {
                 // Any other explicit status (sent, responded, no_response, cancelled) carries no
                 // "reveal the future schedule" risk — already happened or already dispatched.
                 checks = scheduledCheckRepository
-                        .findByTenantWithFilters(tenantId, null, employeeId, status,
+                        .findByTenantWithFilters(tenantId, null, employeeId, status, null,
                                 LocalDate.of(1970, 1, 1), LocalDate.of(2099, 12, 31),
                                 PageRequest.of(0, 1000, Sort.by(Sort.Direction.ASC, "expiresAt")))
                         .getContent();
@@ -300,7 +307,7 @@ public class ScheduledCheckController {
             checks = scheduledCheckRepository
                     .findPendingForEmployeeDueSoon(tenantId, employeeId, pendingCutoff);
             List<ScheduledCheck> sent = scheduledCheckRepository
-                    .findByTenantWithFilters(tenantId, null, employeeId, "sent",
+                    .findByTenantWithFilters(tenantId, null, employeeId, "sent", null,
                             LocalDate.of(1970, 1, 1), LocalDate.of(2099, 12, 31),
                             PageRequest.of(0, 1000, Sort.by(Sort.Direction.ASC, "expiresAt")))
                     .getContent();
@@ -863,6 +870,7 @@ public class ScheduledCheckController {
                 .response(responseDto)
                 .manualReason(s.getManualReason())
                 .triggeredBy(s.getTriggeredBy())
+                .triggerType(s.getTriggeredBy() != null ? "manual_hr" : "auto")
                 .sentAt(s.getSentAt())
                 .notificationId(s.getNotificationId())
                 .cancelledBy(s.getCancelledBy())
@@ -918,6 +926,7 @@ public class ScheduledCheckController {
                 .createdAt(s.getCreatedAt())
                 .manualReason(s.getManualReason())
                 .triggeredBy(s.getTriggeredBy())
+                .triggerType(s.getTriggeredBy() != null ? "manual_hr" : "auto")
                 .outcome(outcome)
                 .failureReason(failureReason)
                 .build();

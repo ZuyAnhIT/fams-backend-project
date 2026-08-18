@@ -32,8 +32,25 @@ qua code hiện tại — **ĐÚNG, KHÔNG lỗi thời:**
 
 ---
 
+## ✅ ĐÃ VÁ (2026-08-18) — ĐÃ KHÓA
+
+Đã vá gap notification, dùng chung 1 service với #107 (cùng gốc rễ):
+- **`ViolationNotificationService`** (mới, `com.fams.modules.violation.service`) — gửi
+  `RANDOM_CHECK_VIOLATION_EMPLOYEE` cho chính nhân viên (nếu có `userId`) và
+  `RANDOM_CHECK_VIOLATION_HR` cho MỌI user giữ quyền `violations:list` trong tenant (dùng lại đúng
+  pattern `findDistinctActiveHolderIdsOfPermissionInTenant` đã có sẵn từ missing-checkout #84).
+  Best-effort (bọc try/catch, lỗi gửi thông báo không rollback violation).
+- Đăng ký 2 eventType mới vào `NotificationEventTypeCatalog` (bắt buộc để hiện trong
+  `GET /notification-event-types` và settings người dùng).
+- `NoResponseViolationService.processChecks()` gọi `notifyRandomCheckViolation(...)` ngay sau khi
+  lưu violation `no_response`.
+
+### Test live — ✅ PASS (2026-08-18)
+Insert 1 scheduled_check `status=sent` đã hết hạn, gọi `POST .../process-expired` qua API thật:
+- `violations` có đúng 1 row `violation_type=no_response`.
+- `notifications` có đúng 2 row: 1 gửi cho nhân viên ("Bạn vừa bị ghi nhận vi phạm: không phản hồi
+  kiểm tra ngẫu nhiên tại ..."), 1 gửi cho HR/Admin ("... vừa bị ghi nhận vi phạm ...").
+
 ## Ghi chú
-Kịch bản này chưa được test live qua UI thật — mới hoàn tất bước nghiên cứu code + viết kịch bản.
-Trọng tâm khi test: case 3 (gap notification — **chung gốc rễ với #107**, cả 2 tính năng đều thiếu
-notification khi tạo violation, nên xử lý đồng thời 1 lần cho cả 2 nếu quyết định vá, tránh làm 2
-lần riêng lẻ). Case 1-2 rủi ro fail thấp, đã có `test_no_response_violation.sh` phủ.
+Regression: 26/26 (`tests/randomcheck/*.sh` + `tests/face-id/*.sh`), không ảnh hưởng gì khác.
+`test_no_response_violation.sh` đã phủ phần backend cốt lõi (case 1-2), không cần sửa thêm.

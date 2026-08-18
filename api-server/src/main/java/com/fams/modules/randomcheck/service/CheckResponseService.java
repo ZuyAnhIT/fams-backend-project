@@ -14,6 +14,7 @@ import com.fams.modules.randomcheck.repository.CheckResponseRepository;
 import com.fams.modules.randomcheck.repository.ScheduledCheckRepository;
 import com.fams.modules.violation.entity.Violation;
 import com.fams.modules.violation.repository.ViolationRepository;
+import com.fams.modules.violation.service.ViolationNotificationService;
 import com.fams.shared.ai.FaceVerifyJobPublisher;
 import com.fams.shared.exception.BusinessException;
 import com.fams.shared.exception.DuplicateResourceException;
@@ -42,6 +43,7 @@ public class CheckResponseService {
     private final FaceVerifyJobPublisher faceVerifyJobPublisher;
     private final FaceProfileRepository faceProfileRepository;
     private final LivenessChallengeRepository livenessChallengeRepository;
+    private final ViolationNotificationService violationNotificationService;
 
     /** Mirrors CheckinService.CHECKIN_CHALLENGE_FRESHNESS_MINUTES — a 'passed' challenge sitting
      *  unused for too long is a window for reuse far from where/when it was actually performed. */
@@ -54,7 +56,8 @@ public class CheckResponseService {
                                 ViolationRepository violationRepository,
                                 FaceVerifyJobPublisher faceVerifyJobPublisher,
                                 FaceProfileRepository faceProfileRepository,
-                                LivenessChallengeRepository livenessChallengeRepository) {
+                                LivenessChallengeRepository livenessChallengeRepository,
+                                ViolationNotificationService violationNotificationService) {
         this.scheduledCheckRepository = scheduledCheckRepository;
         this.checkResponseRepository = checkResponseRepository;
         this.geofenceRepository = geofenceRepository;
@@ -63,6 +66,7 @@ public class CheckResponseService {
         this.faceVerifyJobPublisher = faceVerifyJobPublisher;
         this.faceProfileRepository = faceProfileRepository;
         this.livenessChallengeRepository = livenessChallengeRepository;
+        this.violationNotificationService = violationNotificationService;
     }
 
     /**
@@ -322,6 +326,8 @@ public class CheckResponseService {
                 .resolved(false)
                 .build();
         violationRepository.save(violation);
+        violationNotificationService.notifyRandomCheckViolation(
+                check.getTenantId(), check.getEmployeeId(), check.getSiteId(), violationType);
         log.info("{} violation created: checkId={} employeeId={}", violationType, check.getId(), check.getEmployeeId());
     }
 

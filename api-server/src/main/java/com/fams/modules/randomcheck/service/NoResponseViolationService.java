@@ -4,6 +4,7 @@ import com.fams.modules.randomcheck.entity.ScheduledCheck;
 import com.fams.modules.randomcheck.repository.ScheduledCheckRepository;
 import com.fams.modules.violation.entity.Violation;
 import com.fams.modules.violation.repository.ViolationRepository;
+import com.fams.modules.violation.service.ViolationNotificationService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -18,11 +19,14 @@ public class NoResponseViolationService {
 
     private final ScheduledCheckRepository scheduledCheckRepository;
     private final ViolationRepository violationRepository;
+    private final ViolationNotificationService violationNotificationService;
 
     public NoResponseViolationService(ScheduledCheckRepository scheduledCheckRepository,
-                                      ViolationRepository violationRepository) {
+                                      ViolationRepository violationRepository,
+                                      ViolationNotificationService violationNotificationService) {
         this.scheduledCheckRepository = scheduledCheckRepository;
         this.violationRepository = violationRepository;
+        this.violationNotificationService = violationNotificationService;
     }
 
     /**
@@ -75,6 +79,9 @@ public class NoResponseViolationService {
 
             violationRepository.save(violation);
             count++;
+
+            violationNotificationService.notifyRandomCheckViolation(
+                    check.getTenantId(), check.getEmployeeId(), check.getSiteId(), "no_response");
 
             log.info("no_response violation created: checkId={} employeeId={} siteId={}",
                     check.getId(), check.getEmployeeId(), check.getSiteId());
