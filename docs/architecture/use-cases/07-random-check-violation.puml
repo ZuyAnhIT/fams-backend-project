@@ -50,8 +50,12 @@ HR --> Cancel
 HR --> ViewViolation
 HR --> Resolve
 HR --> AffectAttendance
+SS --> DefaultConfig : theo quyền\n(randomchecks:configure)
+SS --> SiteConfig : theo quyền/site
+SS --> EffectiveConfig : theo quyền/site
 SS --> Monitor : theo site được giao
 SS --> Manual : theo quyền/site
+SS --> Cancel : theo quyền/site
 SS --> ViewViolation : theo site được giao
 SS --> Resolve : theo quyền
 EE --> Receive
@@ -75,7 +79,13 @@ FCM --> Receive
 Storage --> Explain
 
 note bottom of AutoViolation
-  Vi phạm được hệ thống tạo từ no-response/location/face/liveness fail;
-  frontend không có use case "tạo vi phạm" thủ công.
+  Vi phạm được hệ thống tạo từ no-response/location/face/liveness fail/
+  face-verify-timeout; frontend không có use case "tạo vi phạm" thủ công.
+end note
+
+note bottom of SiteConfig
+  Permission randomchecks:configure được seed sẵn cho Site Supervisor
+  (không chỉ Manual) nên site supervisor cấu hình được cả config,
+  không riêng kích hoạt thủ công.
 end note
 @enduml

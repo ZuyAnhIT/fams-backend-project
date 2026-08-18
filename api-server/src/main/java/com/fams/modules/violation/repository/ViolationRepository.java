@@ -34,6 +34,19 @@ public interface ViolationRepository extends JpaRepository<Violation, UUID>, Jpa
            "AND (:siteId IS NULL OR v.siteId = :siteId) AND v.deletedAt IS NULL GROUP BY v.violationType")
     List<Object[]> countUnresolvedByType(@Param("tenantId") UUID tenantId, @Param("siteId") UUID siteId);
 
+    /** #123 (2026-08-18): monthly attendance report AC calls for a violation_count per
+     *  employee+site, entirely absent before — every violation type counts here (not just the
+     *  random-check-derived subset daysWithRandomCheckFailure already tracks), grouped to be
+     *  merged into the per-employee-per-site monthly aggregate in Java (kept separate from the
+     *  existing native aggregateMonthly query rather than folding it in, to avoid touching that
+     *  already-complex query). */
+    @Query("SELECT v.employeeId, v.siteId, COUNT(v) FROM Violation v WHERE v.tenantId = :tenantId " +
+           "AND (:siteId IS NULL OR v.siteId = :siteId) " +
+           "AND v.checkDate >= :from AND v.checkDate < :to AND v.deletedAt IS NULL " +
+           "GROUP BY v.employeeId, v.siteId")
+    List<Object[]> countByEmployeeAndSiteInRange(@Param("tenantId") UUID tenantId, @Param("siteId") UUID siteId,
+                                                 @Param("from") LocalDate from, @Param("to") LocalDate to);
+
     @Query("SELECT COUNT(v) FROM Violation v WHERE v.tenantId = :tenantId AND v.resolved = true AND v.resolvedAt >= :since " +
            "AND (:siteId IS NULL OR v.siteId = :siteId) AND v.deletedAt IS NULL")
     long countResolvedSince(@Param("tenantId") UUID tenantId, @Param("since") OffsetDateTime since, @Param("siteId") UUID siteId);

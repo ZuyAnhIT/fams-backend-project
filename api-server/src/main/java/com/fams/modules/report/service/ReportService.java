@@ -70,6 +70,8 @@ public class ReportService {
     private final FaceProfileRepository faceProfileRepository;
     private final com.fams.modules.rbac.service.SiteScopeService siteScopeService;
     private final com.fams.modules.randomcheck.repository.RandomCheckConfigRepository randomCheckConfigRepository;
+    private final com.fams.modules.audit.service.AuditLogService auditLogService;
+    private final com.fams.modules.workspace.repository.WorkspaceMemberRepository workspaceMemberRepository;
 
     public ReportService(AttendanceSummaryRepository summaryRepository,
                          AssignmentRepository assignmentRepository,
@@ -80,7 +82,9 @@ public class ReportService {
                          EmployeeRepository employeeRepository,
                          FaceProfileRepository faceProfileRepository,
                          com.fams.modules.rbac.service.SiteScopeService siteScopeService,
-                         com.fams.modules.randomcheck.repository.RandomCheckConfigRepository randomCheckConfigRepository) {
+                         com.fams.modules.randomcheck.repository.RandomCheckConfigRepository randomCheckConfigRepository,
+                         com.fams.modules.audit.service.AuditLogService auditLogService,
+                         com.fams.modules.workspace.repository.WorkspaceMemberRepository workspaceMemberRepository) {
         this.summaryRepository = summaryRepository;
         this.assignmentRepository = assignmentRepository;
         this.violationRepository = violationRepository;
@@ -91,11 +95,24 @@ public class ReportService {
         this.faceProfileRepository = faceProfileRepository;
         this.siteScopeService = siteScopeService;
         this.randomCheckConfigRepository = randomCheckConfigRepository;
+        this.auditLogService = auditLogService;
+        this.workspaceMemberRepository = workspaceMemberRepository;
+    }
+
+    /** #122-#125 (2026-08-18): shared workspace-filter resolution for every report endpoint — a
+     *  workspace has no direct column on AttendanceSummary/Violation (relationship is via
+     *  WorkspaceMember), so every report that wants to filter by it needs this same employee-ID
+     *  resolution first. Returns null (no filter) when workspaceId is null; returns an empty set
+     *  (not null) when the workspace has zero members, which callers must treat as "no results",
+     *  not "no filter" — the two are NOT the same when a real workspaceId was requested. */
+    private java.util.Set<UUID> resolveWorkspaceEmployeeIds(UUID tenantId, UUID workspaceId) {
+        if (workspaceId == null) return null;
+        return workspaceMemberRepository.findDistinctEmployeeIdsByTenantIdAndWorkspaceId(tenantId, workspaceId);
     }
 
     @Transactional(readOnly = true)
     public DailyAttendanceReportResponse getDailyAttendanceReport(
-            UUID tenantId, LocalDate date, UUID siteId, int page, int size,
+            UUID tenantId, LocalDate date, UUID siteId, UUID workspaceId, int page, int size,
             UUID callerUserId, boolean callerIsPlatformAdmin) {
 
         if (!callerIsPlatformAdmin) {
@@ -121,8 +138,20 @@ public class ReportService {
                     .build();
         }
 
+        // #122 (2026-08-18): workspace filter — empty (non-null) set means a real workspaceId
+        // was requested but has zero members, must return no data rather than falling through to
+        // "no filter".
+        Set<UUID> workspaceEmployeeIds = resolveWorkspaceEmployeeIds(tenantId, workspaceId);
+        if (workspaceEmployeeIds != null && workspaceEmployeeIds.isEmpty()) {
+            return DailyAttendanceReportResponse.builder()
+                    .date(date).siteId(siteId)
+                    .absentEmployees(List.of())
+                    .records(PageResponse.from(Page.empty(PageRequest.of(page, size))))
+                    .build();
+        }
+
         Specification<AttendanceSummary> spec =
-                AttendanceSummarySpecification.build(tenantId, null, effectiveSiteId, null, date, date);
+                AttendanceSummarySpecification.build(tenantId, null, effectiveSiteId, null, date, date, workspaceEmployeeIds);
 
         // Load all records for the day to compute aggregate stats across the full result set
         List<AttendanceSummary> allForDay = summaryRepository.findAll(spec);
@@ -147,6 +176,7 @@ public class ReportService {
         List<UUID> absentEmployeeIdList = activeAssignments.stream()
                 .map(Assignment::getEmployeeId)
                 .filter(id -> !presentEmployeeIds.contains(id))
+                .filter(id -> workspaceEmployeeIds == null || workspaceEmployeeIds.contains(id))
                 .distinct()
                 .collect(Collectors.toList());
         List<EmployeeRef> absentEmployeeIds = toEmployeeRefs(tenantId, absentEmployeeIdList);
@@ -176,7 +206,7 @@ public class ReportService {
 
     @Transactional(readOnly = true)
     public MonthlyAttendanceReportResponse getMonthlyAttendanceReport(
-            UUID tenantId, int year, int month, UUID siteId, int page, int size,
+            UUID tenantId, int year, int month, UUID siteId, UUID workspaceId, int page, int size,
             UUID callerUserId, boolean callerIsPlatformAdmin) {
 
         if (!callerIsPlatformAdmin) {
@@ -197,7 +227,8 @@ public class ReportService {
                     .build();
         }
 
-        List<AttendanceHrMonthlyResponse> aggregated = aggregateMonthlyRows(tenantId, siteId, effectiveSiteId, year, month);
+        List<AttendanceHrMonthlyResponse> aggregated =
+                aggregateMonthlyRows(tenantId, siteId, effectiveSiteId, year, month, workspaceId);
 
         // Tenant-wide totals — computed once here, over every row in scope (not just the page
         // being returned), so the UI can show accurate month totals alongside the paginated list.
@@ -248,7 +279,7 @@ public class ReportService {
     }
 
     @Transactional(readOnly = true)
-    public byte[] exportMonthlyAttendance(UUID tenantId, int year, int month, UUID siteId,
+    public byte[] exportMonthlyAttendance(UUID tenantId, int year, int month, UUID siteId, UUID workspaceId,
                                           boolean confirmDespiteWarnings,
                                           UUID callerUserId, boolean callerIsPlatformAdmin) {
         if (!callerIsPlatformAdmin) {
@@ -272,7 +303,8 @@ public class ReportService {
             effectiveSiteId = siteId; // no allowed sites -> aggregateMonthlyRows below returns empty, correct no-data export
         }
 
-        List<AttendanceHrMonthlyResponse> aggregated = aggregateMonthlyRows(tenantId, siteId, effectiveSiteId, year, month);
+        List<AttendanceHrMonthlyResponse> aggregated =
+                aggregateMonthlyRows(tenantId, siteId, effectiveSiteId, year, month, workspaceId);
 
         // Payroll readiness guard (2026-07-31 audit): refuse to export silently when the scope
         // still has unconfirmed/rejected sessions feeding into it — the whole point of the V79
@@ -303,7 +335,8 @@ public class ReportService {
 
         Set<UUID> empIds = aggregated.stream().map(AttendanceHrMonthlyResponse::getEmployeeId).collect(Collectors.toSet());
         Map<UUID, String> empCodes = employeeRepository.findAllByTenantIdAndIdInAndDeletedAtIsNull(tenantId, empIds)
-                .stream().collect(Collectors.toMap(Employee::getId, Employee::getEmployeeCode, (a, b) -> a));
+                .stream().collect(Collectors.toMap(Employee::getId,
+                        e -> e.getEmployeeCode() != null ? e.getEmployeeCode() : "", (a, b) -> a));
 
         try (XSSFWorkbook workbook = new XSSFWorkbook()) {
             Sheet sheet = workbook.createSheet(
@@ -326,7 +359,7 @@ public class ReportService {
                 "Early Leave Days", "Early Leave Minutes",
                 "OT Minutes", "Missing Checkout Days",
                 "Days With Pending Review", "Days With Rejected Session",
-                "Days With Random-Check Failure", "Exceeds Failure Threshold"
+                "Days With Random-Check Failure", "Exceeds Failure Threshold", "Violation Count"
             };
             Row headerRow = sheet.createRow(1);
             for (int i = 0; i < headers.length; i++) {
@@ -353,7 +386,22 @@ public class ReportService {
                 row.createCell(14).setCellValue(rec.getDaysWithRejectedSession());
                 row.createCell(15).setCellValue(rec.getDaysWithRandomCheckFailure());
                 row.createCell(16).setCellValue(rec.isExceedsRandomCheckFailureThreshold());
+                row.createCell(17).setCellValue(rec.getViolationCount());
             }
+
+            // #124 (2026-08-18): AC calls for a totals row so HR/accounting doesn't have to sum
+            // the file themselves before handing it off for payroll — previously the export
+            // ended right after the last employee row with no summary.
+            Row totalRow = sheet.createRow(rowNum);
+            totalRow.createCell(0).setCellValue("TOTAL");
+            totalRow.createCell(5).setCellValue(aggregated.stream().mapToInt(AttendanceHrMonthlyResponse::getPresentDays).sum());
+            totalRow.createCell(6).setCellValue(aggregated.stream().mapToInt(AttendanceHrMonthlyResponse::getTotalWorkMinutes).sum());
+            totalRow.createCell(7).setCellValue(aggregated.stream().mapToInt(AttendanceHrMonthlyResponse::getLateDays).sum());
+            totalRow.createCell(8).setCellValue(aggregated.stream().mapToInt(AttendanceHrMonthlyResponse::getTotalLateMinutes).sum());
+            totalRow.createCell(9).setCellValue(aggregated.stream().mapToInt(AttendanceHrMonthlyResponse::getEarlyLeaveDays).sum());
+            totalRow.createCell(10).setCellValue(aggregated.stream().mapToInt(AttendanceHrMonthlyResponse::getTotalEarlyLeaveMinutes).sum());
+            totalRow.createCell(11).setCellValue(aggregated.stream().mapToInt(AttendanceHrMonthlyResponse::getTotalOtMinutes).sum());
+            totalRow.createCell(12).setCellValue(aggregated.stream().mapToInt(AttendanceHrMonthlyResponse::getMissingCheckoutDays).sum());
 
             for (int i = 0; i < headers.length; i++) {
                 sheet.autoSizeColumn(i);
@@ -365,6 +413,25 @@ public class ReportService {
                     "randomCheckFailureRows={} by={}",
                     tenantId, year, month, siteId, aggregated.size(), rowsWithPendingReview, rowsWithRejected,
                     rowsWithRandomCheckFailure, callerUserId);
+
+            // #124 (2026-08-18): payroll-affecting exports need an audit trail — who exported
+            // what scope and when, same rationale as every other HR mutation this session.
+            try {
+                auditLogService.record(
+                        tenantId, callerUserId, null,
+                        "AttendanceExport", String.format("%d-%02d", year, month), "EXPORT_ATTENDANCE",
+                        null, java.util.Map.of(
+                                "year", year, "month", month,
+                                "siteId", siteId != null ? siteId.toString() : "",
+                                "rows", aggregated.size()),
+                        com.fams.shared.security.HttpRequestUtils.currentRequestId(),
+                        com.fams.shared.security.HttpRequestUtils.currentIpAddress(),
+                        com.fams.shared.security.HttpRequestUtils.currentUserAgent());
+            } catch (Exception e) {
+                log.warn("Failed to record audit log for EXPORT_ATTENDANCE tenantId={} {}/{}: {}",
+                        tenantId, year, month, e.getMessage());
+            }
+
             return out.toByteArray();
         } catch (IOException e) {
             throw new RuntimeException("Failed to generate Excel export", e);
@@ -375,14 +442,23 @@ public class ReportService {
      *  GROUP BY aggregate (AttendanceSummaryRepository.aggregateMonthly), not the old
      *  load-everything-then-group-in-Java approach, and hydrates employee/site display names. */
     private List<AttendanceHrMonthlyResponse> aggregateMonthlyRows(
-            UUID tenantId, UUID requestedSiteId, UUID effectiveSiteId, int year, int month) {
+            UUID tenantId, UUID requestedSiteId, UUID effectiveSiteId, int year, int month, UUID workspaceId) {
         LocalDate from = LocalDate.of(year, month, 1);
         LocalDate to   = from.plusMonths(1);
+
+        // #123 (2026-08-18): workspace filter — resolved once, applied as a post-fetch filter on
+        // the native aggregate rows below (kept out of the already-complex aggregateMonthly SQL).
+        Set<UUID> workspaceEmployeeIds = resolveWorkspaceEmployeeIds(tenantId, workspaceId);
 
         List<com.fams.modules.attendance.repository.AttendanceMonthlyAggregateProjection> rows = summaryRepository
                 .aggregateMonthly(tenantId, null, effectiveSiteId, from, to, null, null, "asc",
                         PageRequest.of(0, Integer.MAX_VALUE))
                 .getContent();
+        if (workspaceEmployeeIds != null) {
+            rows = rows.stream()
+                    .filter(r -> workspaceEmployeeIds.contains(r.getEmployeeId()))
+                    .collect(Collectors.toList());
+        }
 
         Set<UUID> empIds = rows.stream()
                 .map(com.fams.modules.attendance.repository.AttendanceMonthlyAggregateProjection::getEmployeeId)
@@ -399,6 +475,15 @@ public class ReportService {
         int failureThreshold = randomCheckConfigRepository.findTenantDefault(tenantId)
                 .map(com.fams.modules.randomcheck.entity.RandomCheckConfig::getFailureEscalationThreshold)
                 .orElse(Integer.MAX_VALUE);
+
+        // #123 (2026-08-18): violationCount per employee+site — see ViolationRepository
+        // #countByEmployeeAndSiteInRange javadoc for why this is a separate query merged in Java
+        // rather than folded into the native aggregateMonthly query above.
+        Map<String, Integer> violationCounts = violationRepository
+                .countByEmployeeAndSiteInRange(tenantId, effectiveSiteId, from, to).stream()
+                .collect(Collectors.toMap(
+                        r -> r[0] + "|" + r[1],
+                        r -> ((Long) r[2]).intValue()));
 
         return rows.stream()
                 .map(row -> AttendanceHrMonthlyResponse.builder()
@@ -422,6 +507,8 @@ public class ReportService {
                         .daysWithRandomCheckFailure(row.getDaysWithRandomCheckFailure().intValue())
                         .exceedsRandomCheckFailureThreshold(
                                 row.getDaysWithRandomCheckFailure().intValue() >= failureThreshold)
+                        .violationCount(violationCounts.getOrDefault(
+                                row.getEmployeeId() + "|" + row.getSiteId(), 0))
                         .build())
                 .collect(Collectors.toList());
     }
@@ -463,7 +550,7 @@ public class ReportService {
     @Transactional(readOnly = true)
     public ViolationReportResponse getViolationReport(
             UUID tenantId, LocalDate from, LocalDate to,
-            UUID siteId, UUID employeeId, String violationType,
+            UUID siteId, UUID employeeId, String violationType, UUID workspaceId,
             int page, int size,
             UUID callerUserId, boolean callerIsPlatformAdmin) {
 
@@ -489,8 +576,20 @@ public class ReportService {
                     .build();
         }
 
+        // #125 (2026-08-18): workspace filter — empty (non-null) set means the workspace has no
+        // members, must return no data rather than falling through to "no filter".
+        Set<UUID> workspaceEmployeeIds = resolveWorkspaceEmployeeIds(tenantId, workspaceId);
+        if (workspaceEmployeeIds != null && workspaceEmployeeIds.isEmpty()) {
+            return ViolationReportResponse.builder()
+                    .from(from).to(to).siteId(siteId).employeeId(employeeId).violationType(violationType)
+                    .byViolationType(Map.of()).bySite(Map.of()).byEmployee(Map.of()).bySeverity(Map.of())
+                    .records(PageResponse.from(Page.empty(PageRequest.of(page, size))))
+                    .build();
+        }
+
         org.springframework.data.jpa.domain.Specification<Violation> spec =
-                ViolationSpecification.build(tenantId, employeeId, effectiveSiteId, violationType, null, from, to);
+                ViolationSpecification.build(tenantId, employeeId, effectiveSiteId, violationType, null, from, to,
+                        null, null, workspaceEmployeeIds);
 
         // Load all matching violations for aggregate stats
         List<Violation> all = violationRepository.findAll(spec);
@@ -658,6 +757,7 @@ public class ReportService {
     @Transactional(readOnly = true)
     public byte[] exportViolations(UUID tenantId, LocalDate from, LocalDate to,
                                    UUID siteId, UUID employeeId, String violationType, Boolean resolved,
+                                   UUID workspaceId,
                                    UUID callerUserId, boolean callerIsPlatformAdmin) {
         if (!callerIsPlatformAdmin) {
             Set<String> perms = userRoleRepository
@@ -667,17 +767,25 @@ public class ReportService {
             }
         }
 
+        // #125 (2026-08-18): workspace filter, same resolution as getViolationReport.
+        Set<UUID> workspaceEmployeeIds = resolveWorkspaceEmployeeIds(tenantId, workspaceId);
+
         List<Violation> all;
-        try {
-            UUID effectiveSiteId =
-                    resolveSiteFilterForReports(callerUserId, tenantId, siteId, callerIsPlatformAdmin);
-            org.springframework.data.jpa.domain.Specification<Violation> spec = ViolationSpecification.build(
-                    tenantId, employeeId, effectiveSiteId, violationType, resolved, from, to);
-            all = violationRepository.findAll(spec, Sort.by(Sort.Direction.DESC, "checkDate"));
-        } catch (NoSitesAllowedForReport e) {
-            // Caller is site-restricted but has no allowed sites left — correct result is an
-            // empty export, not "no site filter" (which would leak every site's violations).
+        if (workspaceEmployeeIds != null && workspaceEmployeeIds.isEmpty()) {
             all = List.of();
+        } else {
+            try {
+                UUID effectiveSiteId =
+                        resolveSiteFilterForReports(callerUserId, tenantId, siteId, callerIsPlatformAdmin);
+                org.springframework.data.jpa.domain.Specification<Violation> spec = ViolationSpecification.build(
+                        tenantId, employeeId, effectiveSiteId, violationType, resolved, from, to,
+                        null, null, workspaceEmployeeIds);
+                all = violationRepository.findAll(spec, Sort.by(Sort.Direction.DESC, "checkDate"));
+            } catch (NoSitesAllowedForReport e) {
+                // Caller is site-restricted but has no allowed sites left — correct result is an
+                // empty export, not "no site filter" (which would leak every site's violations).
+                all = List.of();
+            }
         }
 
         try (XSSFWorkbook workbook = new XSSFWorkbook()) {

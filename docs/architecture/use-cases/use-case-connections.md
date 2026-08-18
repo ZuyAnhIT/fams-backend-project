@@ -422,6 +422,7 @@ Nguồn: `06-checkin-attendance.puml`
 - Employee — kết nối — Xem kết quả/lịch sử chấm công.
 - Employee — kết nối — Gửi giải trình check-in lỗi.
 - Employee — kết nối — Xem bảng công cá nhân.
+- Employee — kết nối — Xem việc cần xử lý của tôi.
 
 ### Tenant Admin / Owner
 
@@ -459,6 +460,8 @@ Nguồn: `06-checkin-attendance.puml`
 - Duyệt/từ chối check-in bất thường — `<<extend>>` → Xem danh sách/chi tiết check-in — điều kiện: check-in ở trạng thái chờ duyệt.
 - Gửi giải trình check-in lỗi — `<<extend>>` → Xem kết quả/lịch sử chấm công — điều kiện: check-in có lỗi hoặc cần giải trình.
 - Điều chỉnh bảng công — `<<extend>>` → Xem bảng công tổng hợp.
+
+Ghi chú: "Xem việc cần xử lý của tôi" gộp check-in đang chờ duyệt và vi phạm chưa giải quyết của chính nhân viên (endpoint `/me/exceptions`, self-service, không thuộc controller riêng của module nào) — đặt ở sơ đồ Check-in/Attendance vì đa số dữ liệu nguồn là check-in.
 
 ---
 
@@ -503,10 +506,16 @@ Nguồn: `07-random-check-violation.puml`
 
 ### Site Supervisor
 
+- Site Supervisor — kết nối — Cấu hình random check mặc định — constraint: theo quyền (randomchecks:configure).
+- Site Supervisor — kết nối — Cấu hình override theo site — constraint: theo quyền/site.
+- Site Supervisor — kết nối — Xem cấu hình hiệu lực — constraint: theo quyền/site.
 - Site Supervisor — kết nối — Theo dõi scheduled checks — constraint: theo site được giao.
 - Site Supervisor — kết nối — Kích hoạt kiểm tra thủ công — constraint: theo quyền và site.
+- Site Supervisor — kết nối — Hủy lượt kiểm tra — constraint: theo quyền/site.
 - Site Supervisor — kết nối — Xem danh sách/chi tiết vi phạm — constraint: theo site được giao.
 - Site Supervisor — kết nối — Xác nhận/bỏ qua vi phạm — constraint: theo quyền.
+
+Ghi chú: seed data gán permission `randomchecks:configure` cho role `SITE_SUPERVISOR`, không riêng cho thao tác kích hoạt thủ công — vì vậy site supervisor thực tế cấu hình được cả `RandomCheckConfig` trong site được giao, không chỉ theo dõi/kích hoạt.
 
 ### Employee
 

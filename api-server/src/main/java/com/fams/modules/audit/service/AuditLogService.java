@@ -15,6 +15,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
@@ -129,7 +130,12 @@ public class AuditLogService {
     return entries.stream().map(this::toResponse).collect(Collectors.toList());
   }
 
-  @Transactional
+  /** REQUIRES_NEW (found via audit, 2026-08-18): callers occasionally run in a read-only
+   *  transaction (e.g. ReportService#exportMonthlyAttendance) — under the default REQUIRED
+   *  propagation this insert would join that transaction, get silently dropped by Hibernate's
+   *  read-only flush suppression, and commit as a no-op with no exception and no row written.
+   *  Audit records must not depend on the caller's transaction semantics anyway. */
+  @Transactional(propagation = Propagation.REQUIRES_NEW)
   public AuditLogResponse record(
       UUID tenantId,
       UUID actorId,

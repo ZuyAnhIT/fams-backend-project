@@ -1012,8 +1012,17 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 
 #### Supervisor Dashboard
 
-- [ ] **#121 — Dashboard giám sát công trình** `P1` · 5sp · Nền tảng: Backend, Web Admin, Mobile App
+- [x] **#121 — Dashboard giám sát công trình** `P1` · 5sp · Nền tảng: Backend, Web Admin, Mobile App
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: SupervisorDashboardService, test_supervisor_dashboard.sh; thiếu: chỉ hiện check-in, thiếu random check/violation theo site
+  - *Audit (2026-08-18):* ✅ ĐÃ VÁ + ĐÃ TEST LIVE qua Playwright thật (không phải chỉ đọc code).
+    Thêm `randomCheckPending`/`unresolvedViolations` per-site
+    (`ScheduledCheckRepository.countActiveBySite`, `ViolationRepository.countUnresolved`). Web
+    Admin + Mobile App đều đã thêm cảnh báo mới trên site-card, `tsc --noEmit` sạch cả 2. Test live:
+    tạo tài khoản SITE_SUPERVISOR thật, seed 1 random check pending + 1 violation chưa xử lý, xác
+    nhận cả 2 Tag cảnh báo hiện đúng trên dashboard qua Playwright (không chỉ giả định). Trong lúc
+    setup phát hiện thêm 1 gap hệ thống (xem mục 7 "Phát hiện 2026-08-18" bên dưới): JWT không ưu
+    tiên role khi user có nhiều role cùng tenant — **đã vá luôn** (`PrimaryRoleResolver`). Xem
+    `docs/manual-tests/sprint-5-feature-121-supervisor-dashboard.md`.
   - *User Story:* Là một Site Supervisor, tôi muốn xem nhân viên tại site mình phụ trách để quản lý hiện trường.
   - *Acceptance Criteria:* Hiển thị danh sách nhân viên assigned, trạng thái check-in, random check, violation tại site; không thấy site ngoài quyền.
   - *DB Entities:* `sites, assignments, checkins, scheduled_checks, violations`
@@ -1024,16 +1033,42 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 
 - [x] **#122 — Báo cáo công ngày** `P0` · 5sp · Nền tảng: Backend, Web Admin
   - *Audit (2026-07-22):* ✅ ĐÃ XONG — bằng chứng: ReportController.getDailyAttendanceReport, test_daily_attendance_report.sh
+  - *Audit (2026-08-18):* 🟡 Audit gốc SAI/lỗi thời trên 1 điểm — AC yêu cầu filter `workspace`
+    nhưng endpoint chưa từng nhận `workspaceId` (chỉ có `siteId`). **Đã vá** (quyết định người
+    dùng: làm ngay filter workspace cho cả 4 endpoint Report #122-125, không hoãn) — resolve tập
+    employeeId qua `WorkspaceMemberRepository`, lọc qua `AttendanceSummarySpecification`. Web Admin
+    thêm dropdown workspace, `tsc --noEmit` sạch. **Đã test live qua Playwright thật**: chọn
+    workspace trong dropdown → stat "Có mặt" và số dòng bảng giảm đúng từ 2 xuống 1, xác nhận
+    dropdown kích hoạt fetch lọc thật, không phải UI tĩnh. Xem
+    `docs/manual-tests/sprint-5-feature-122-daily-attendance-report.md`.
   - *User Story:* Là một HR/Admin, tôi muốn xem báo cáo công theo ngày để kiểm tra dữ liệu hàng ngày.
   - *Acceptance Criteria:* Lọc date/site/workspace; hiển thị first_checkin, last_checkout, work_minutes, late, early, OT, status.
   - *DB Entities:* `attendance_summaries, tenant_users, sites, workspaces`
 - [x] **#123 — Báo cáo công tháng** `P0` · 8sp · Nền tảng: Backend, Web Admin
   - *Audit (2026-07-22):* ✅ ĐÃ XONG — bằng chứng: ReportController.getMonthlyAttendanceReport, test_monthly_attendance_report.sh
+  - *Audit (2026-08-18):* 🟡 Audit gốc SAI/lỗi thời trên 2 điểm — (1) thiếu filter `workspace`
+    (như #122); (2) thiếu `violation_count` per-employee dù AC gọi rõ (chỉ có
+    `daysWithRandomCheckFailure`, hẹp hơn nhiều). **Đã vá cả 2** — `violationCount` mới đếm TOÀN
+    BỘ loại vi phạm qua `ViolationRepository.countByEmployeeAndSiteInRange`, merge trong Java (không
+    đụng native aggregate query gốc). Web Admin thêm dropdown workspace + cột "Vi phạm", `tsc
+    --noEmit` sạch. **Đã test live qua Playwright thật**: chọn workspace → stat "Nhân viên" và số
+    dòng bảng giảm đúng từ 2 xuống 1. Xem
+    `docs/manual-tests/sprint-5-feature-123-monthly-attendance-report.md`.
   - *User Story:* Là một HR/Admin, tôi muốn xem tổng công tháng của nhân viên để chuẩn bị tính lương.
   - *Acceptance Criteria:* Tổng attendance_value, total_work_minutes, ot_minutes, late_count, early_count, violation_count; group theo employee/site.
   - *DB Entities:* `attendance_summaries, tenant_users, sites`
-- [ ] **#124 — Export bảng công** `P0` · 5sp · Nền tảng: Backend, Web Admin
+- [x] **#124 — Export bảng công** `P0` · 5sp · Nền tảng: Backend, Web Admin
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: exportMonthlyAttendance (POI xlsx), test_export_attendance.sh; thiếu: không có dòng tổng cuối; không ghi audit EXPORT_ATTENDANCE
+  - *Audit (2026-08-18):* ✅ ĐÃ VÁ cả 2 gap 07-22 + thêm filter `workspace` (như #122/#123). Trong
+    lúc vá phát sinh 2 bug runtime nghiêm trọng, cả 2 đã fix: (1) NPE do `employeeCode` null trong
+    `Collectors.toMap`; (2) **audit log export bị Hibernate âm thầm bỏ qua** do chạy trong
+    `@Transactional(readOnly=true)` của caller — không exception, không log, chỉ lộ ra khi query
+    DB trực tiếp. Fix: `AuditLogService.record()` đổi sang `REQUIRES_NEW` (áp dụng chung cho MỌI
+    caller trong hệ thống). **Đã test live qua Playwright thật**: bấm nút "Xuất Excel" qua UI thật
+    2 lần (có/không chọn workspace), tải file .xlsx thật về và parse bằng openpyxl — file không
+    filter có 2 dòng nhân viên, file có filter workspace chỉ có 1 dòng đúng nhân viên thuộc
+    workspace, xác nhận filter hoạt động xuyên suốt từ UI tới file tải về, không chỉ qua API. Xem
+    `docs/manual-tests/sprint-5-feature-124-export-attendance.md`.
   - *User Story:* Là một HR/Admin, tôi muốn xuất bảng công ra Excel để gửi cho kế toán/quản lý.
   - *Acceptance Criteria:* Xuất theo filter; format dễ đọc; có tổng cuối file; ghi audit EXPORT_ATTENDANCE.
   - *DB Entities:* `attendance_summaries, audit_logs`
@@ -1042,6 +1077,12 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 
 - [x] **#125 — Báo cáo vi phạm theo kỳ** `P1` · 5sp · Nền tảng: Backend, Web Admin
   - *Audit (2026-07-22):* ✅ ĐÃ XONG — bằng chứng: ReportController.getViolationReport, test_violation_report.sh
+  - *Audit (2026-08-18):* 🟡 Audit gốc SAI/lỗi thời — thiếu filter `workspace` (như #122/#123/#124).
+    **Đã vá** — cùng pattern resolve-employeeIds-trước, áp dụng cho cả GET report lẫn export. Web
+    Admin thêm dropdown workspace, `tsc --noEmit` sạch. Gap `resolved` filter trên GET list (khác
+    với export) là quyết định thiết kế có chủ đích từ #106 — không sửa. **Đã test live qua
+    Playwright thật**: chọn workspace → "Tổng vi phạm"/"Chưa xử lý"/"Ảnh hưởng bảng công" đều giảm
+    đúng từ 2 xuống 1. Xem `docs/manual-tests/sprint-5-feature-125-violation-report.md`.
   - *User Story:* Là một HR/Admin, tôi muốn xem thống kê vi phạm theo loại, severity, site, nhân viên để đánh giá tuân thủ.
   - *Acceptance Criteria:* Filter kỳ/site/workspace/type/status; biểu đồ/tổng hợp; drill-down danh sách.
   - *DB Entities:* `violations, sites, tenant_users`
@@ -1324,6 +1365,17 @@ Danh sách bảng/entity được đề cập xuyên suốt backlog (tổng hợ
 - **#12/#13 — Thiếu backup codes cho 2FA** dù acceptance criteria yêu cầu rõ.
 - **#145 — Data masking chưa đủ diện**: chỉ che email/phone, chưa che `national_id`, `totp_secret`, backup codes, `token_hash` như #145 yêu cầu.
 - Nhiều tính năng "ghi audit" (#5,8,9,11,15,17,18,26,27,29,30,43,45,51,66,84,91,92,99,108,111,112,116,117,118,124,132,133,135,136,146...) đều bắt nguồn từ cùng 1 gốc: audit ghi không hoạt động (xem trên) — không cần sửa riêng lẻ từng chỗ, chỉ cần bật `AuditLogService.record()` đúng chỗ trong 1 lượt.
+- **(Phát hiện 2026-08-18, ngoài phạm vi audit gốc 07-22) — JWT chọn role/tenant "chính" theo thứ tự
+  DB trả về, không theo độ ưu tiên nghiệp vụ**: `AuthService`/`RefreshTokenService`/
+  `GoogleLoginService`/`FirebasePhoneLoginService` đều dùng `roles.get(0)`/`findFirst()` trên danh
+  sách active roles để chọn `role` claim đưa vào JWT. Người dùng có 2 role trong cùng 1 tenant (vd:
+  vừa được cấp `SITE_SUPERVISOR` nhưng role `EMPLOYEE` gốc chưa bị thu hồi — luồng HR thực tế hoàn
+  toàn hợp lý, không phải trường hợp hiếm) có thể đăng nhập và thấy sai dashboard/quyền tùy thứ tự
+  ngẫu nhiên DB trả về. **Đã vá (2026-08-18)**: thêm `PrimaryRoleResolver`
+  (`com.fams.modules.rbac.util`) định nghĩa 1 thứ tự ưu tiên role dùng chung, áp dụng cho cả 4
+  luồng đăng nhập + refresh token. Xác nhận qua live test: user có cả `EMPLOYEE` lẫn
+  `SITE_SUPERVISOR` trong cùng tenant, JWT (cả lúc login lẫn sau khi refresh-token) đều chọn đúng
+  `SITE_SUPERVISOR`.
 
 ### Ý nghĩa cho việc lên kế hoạch Sprint 1 trở đi
 
