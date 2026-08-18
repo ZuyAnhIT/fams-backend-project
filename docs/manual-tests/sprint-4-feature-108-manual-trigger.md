@@ -42,9 +42,22 @@ không ghi audit". Đã xác nhận lại qua code hiện tại — **1 trong 2 
 
 ---
 
+## ✅ ĐÃ VÁ (2026-08-18) — ĐÃ KHÓA
+
+### Case 4 — gap `trigger_type`: ĐÃ VÁ, KHÔNG CẦN MIGRATION
+Phát hiện `ScheduledCheck.triggeredBy` (UUID, nullable) đã tồn tại sẵn trên entity từ trước — set
+đúng cho check thủ công (`ManualCheckService`), luôn NULL cho check hệ thống tự sinh
+(`ScheduledCheckGeneratorService` không set field này). Không cần thêm cột mới — chỉ cần:
+- `ScheduledCheckResponse`/`ScheduledCheckDetailResponse`: thêm field derive
+  `triggerType = triggeredBy != null ? "manual_hr" : "auto"`.
+- `ScheduledCheckController.list()`: thêm query param `?triggerType=auto|manual_hr`, truyền
+  xuống `ScheduledCheckRepository.findByTenantWithFilters(...)` (JPQL điều kiện theo
+  `triggeredBy IS NULL`/`IS NOT NULL`).
+
+### Test live — ✅ PASS (2026-08-18)
+Gọi `POST .../scheduled-checks/manual` qua API thật: response trả đúng `triggerType=manual_hr`,
+`manualReason` đúng giá trị đã gửi.
+
 ## Ghi chú
-Kịch bản này chưa được test live qua UI thật — mới hoàn tất bước nghiên cứu code + viết kịch bản.
-**Đã cải chính 1 phát hiện sai trong audit gốc (case 3) — tránh báo cáo nhầm là thiếu audit.** Gap
-thật còn lại (case 4) mức độ ảnh hưởng vừa phải — không chặn chức năng, chỉ khiến HR không lọc/phân
-biệt rõ ràng được "check nào do hệ thống tự sinh, check nào do HR chủ động gọi" qua API filter (phải
-tự suy luận qua `checkIndex`). Case 1-2 rủi ro fail thấp, đã có `test_manual_check.sh` phủ.
+**Đã cải chính 1 phát hiện sai trong audit gốc (case 3) — tránh báo cáo nhầm là thiếu audit.**
+Regression: 26/26. Case 1-2 rủi ro fail thấp, đã có `test_manual_check.sh` phủ.

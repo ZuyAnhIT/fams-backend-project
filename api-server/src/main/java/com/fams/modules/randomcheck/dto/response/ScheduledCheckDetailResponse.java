@@ -65,6 +65,9 @@ public class ScheduledCheckDetailResponse {
     @Schema(description = "Only set for manually (HR-)triggered checks — the user who triggered it")
     private UUID triggeredBy;
 
+    @Schema(description = "'auto' or 'manual_hr' — derived from triggeredBy (#108/#109, 2026-08-18)")
+    private String triggerType;
+
     @Schema(description = "#100 (2026-08-18): when the check was actually dispatched (status "
             + "flipped to 'sent') — null if never sent")
     private OffsetDateTime sentAt;

@@ -95,7 +95,23 @@ public final class NotificationEventTypeCatalog {
                     "Gửi cho HR/quản lý khi một nhân viên có ngày công trước đó chưa check-out.",
                     true,
                     false,
-                    "normal")
+                    "normal"),
+            new NotificationEventTypeInfo(
+                    // Must match com.fams.modules.violation.constant.ViolationEventTypes.RANDOM_CHECK_VIOLATION_EMPLOYEE
+                    "RANDOM_CHECK_VIOLATION_EMPLOYEE",
+                    "Vi phạm kiểm tra ngẫu nhiên",
+                    "Gửi cho bạn khi hệ thống ghi nhận một vi phạm kiểm tra ngẫu nhiên (không phản hồi, sai vị trí, không xác thực được khuôn mặt/người thật).",
+                    true,
+                    true,
+                    "high"),
+            new NotificationEventTypeInfo(
+                    // Must match com.fams.modules.violation.constant.ViolationEventTypes.RANDOM_CHECK_VIOLATION_HR
+                    "RANDOM_CHECK_VIOLATION_HR",
+                    "Nhân viên vi phạm kiểm tra ngẫu nhiên",
+                    "Gửi cho HR/quản lý khi một nhân viên bị ghi nhận vi phạm kiểm tra ngẫu nhiên.",
+                    true,
+                    false,
+                    "high")
     );
 
     private static final Map<String, String> PRIORITY_BY_EVENT_TYPE = ALL.stream()

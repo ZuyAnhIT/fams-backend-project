@@ -41,9 +41,21 @@ tại — **CẦN HẠ TRẠNG THÁI xuống 🟡 LÀM MỘT PHẦN, có 1 gap t
 
 ---
 
+## ✅ ĐÃ VÁ (2026-08-18) — ĐÃ KHÓA
+
+### Case 4 — gap "không lọc được theo trigger_type": ĐÃ VÁ (chung đợt với #108)
+Filter mới `?triggerType=auto|manual_hr` đã thêm vào `GET .../scheduled-checks` (xem chi tiết kỹ
+thuật ở `sprint-4-feature-108-manual-trigger.md`).
+
+### Test live — ✅ PASS (2026-08-18)
+- Backend: seed 1 check tự động (hết hạn) + tạo 1 check thủ công qua API. Lọc
+  `?triggerType=manual_hr` → chỉ trả đúng 1 check thủ công. Lọc `?triggerType=auto` → chỉ trả đúng
+  check tự động. Không lẫn lộn.
+- Web Admin (`ScheduledChecksPage.tsx`): thêm dropdown "Lọc theo loại" (Tự động/Thủ công HR) vào
+  lưới filter (6 cột, trước đó 5). Cột "Loại" trong bảng đổi sang đọc `triggerType` từ backend thay
+  vì suy luận qua `manualReason` (tương đương chức năng nhưng đúng nguồn dữ liệu hơn). Test live
+  qua UI thật (Playwright): dropdown hiển thị đúng, không phá vỡ 4 filter cũ.
+
 ## Ghi chú
-Kịch bản này chưa được test live qua UI thật — mới hoàn tất bước nghiên cứu code + viết kịch bản.
-**Hạ trạng thái từ "✅ đã xong" (audit gốc) xuống "🟡 làm một phần"** do phát hiện gap MỚI không có
-trong audit gốc — nguyên nhân gốc rễ chung với #108 (thiếu field `trigger_type` thật). Nếu quyết
-định vá #108 (thêm field trigger_type rõ ràng), nên vá luôn filter cho #109 trong cùng đợt vì cùng
-1 thay đổi schema. Case 1-3 rủi ro fail thấp, đã có `test_list_scheduled_checks.sh` phủ.
+Regression: 26/26 backend + `tsc --noEmit` sạch phía Web Admin. Case 1-3 rủi ro fail thấp, đã có
+`test_list_scheduled_checks.sh` phủ.
