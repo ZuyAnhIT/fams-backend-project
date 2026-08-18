@@ -2,62 +2,45 @@
 
 **Nền tảng: Backend, Mobile App, Queue/AI/Automation.**
 
-ℹ️ Audit gốc (07-22): 🟡 LÀM MỘT PHẦN — "entity không có sent_at/notification_id". Đã xác nhận lại
-qua code hiện tại — **ĐÚNG, KHÔNG lỗi thời, gap còn nguyên vẹn:**
+## ✅ ĐÃ FIX (2026-08-18) — ĐÃ KHÓA
 
-- **✅ `RandomCheckDispatchService.dispatch` — luồng gửi đúng:** kiểm tra lại `status=pending`
-  trước khi gửi (double-check, xem #98), set `status=sent`, tạo `Notification` với đúng eventType
-  `RANDOM_CHECK_SENT` (`RandomCheckEventTypes`), kèm `metadata` có cấu trúc (`checkId, siteId,
-  expiresAt`) để App deep-link đúng màn phản hồi kể cả khi app đang đóng hoàn toàn (qua FCM data
-  payload, không chỉ khi mở app đồng bộ lại).
-- **❌ GAP thật (xác nhận đúng, KHÔNG lỗi thời): `ScheduledCheck` KHÔNG có cột `sent_at` lẫn
-  `notification_id`** — kiểm tra toàn bộ entity + mọi migration chạm tới `scheduled_checks`,
-  không có field nào trong 2 field này. Hệ quả thực tế: `status` chuyển `sent` nhưng KHÔNG biết
-  CHÍNH XÁC lúc nào đã gửi (chỉ suy luận gần đúng từ `scheduled_at` + chu kỳ poll 1 phút, không
-  phải thời điểm gửi THẬT), và KHÔNG có liên kết ngược từ `scheduled_check` tới bản ghi
-  `notification` đã tạo cho nó — muốn tra "check này đã gửi thông báo nào" phải join gián tiếp qua
-  `metadata.checkId` bên trong bảng `notifications`, không có FK trực tiếp.
+Cả 2 gap thật đã xác nhận trước đó ("không có sent_at", "không có notification_id") đã được vá —
+gap dữ liệu truy vết rõ ràng theo đúng AC, không cần hỏi quyết định.
+
+### Thay đổi
+- **Migration V104** (chung với #99): thêm `scheduled_checks.sent_at`, `notification_id`.
+- `RandomCheckDispatchService.dispatch` — set `sentAt=now()` ngay khi status chuyển `sent`; sau khi
+  tạo `Notification` thành công, set `notificationId` = ID bản ghi vừa tạo.
+- **Bug tự phát hiện khi test live, đã vá trong cùng đợt:** `ManualCheckService` (luồng "HR kích
+  hoạt kiểm tra ngay", #108) tạo check với `status="sent"` trực tiếp — KHÔNG đi qua
+  `RandomCheckDispatchService.dispatch()` — nên ban đầu `sentAt` vẫn `null` dù `notificationId` đã
+  đúng. Đã bổ sung set `sentAt` ngay tại đây, test live lại xác nhận đúng.
 
 ---
 
-## A. Test trên Backend
+## A. Test trên Backend — ✅ PASS, đã test live (2026-08-18)
 
-### 1. ✅ Gửi đúng lúc đến giờ (`scheduled_at`)
-- Sinh check với giờ tương lai gần, chờ tới giờ.
-- **Kỳ vọng:** `status` chuyển `pending` → `sent` trong vòng tối đa 1 phút sau `scheduled_at` (chu
-  kỳ poll của worker).
+### 1. ✅ Gửi đúng lúc đến giờ, tạo đúng Notification
+### 2. ✅ Xác nhận ĐÃ CÓ `sentAt` (đã fix, cả 2 luồng dispatch)
+- Test cả luồng tự động (poller) lẫn luồng thủ công (HR trigger ngay, #108).
+- **Kết quả thực tế:** cả 2 luồng đều có `sent_at` đúng thời điểm dispatch thực tế — ĐÚNG (bug ban
+  đầu ở luồng thủ công đã được phát hiện và vá ngay trong đợt test này).
 
-### 2. ✅ Tạo đúng `Notification` với eventType `RANDOM_CHECK_SENT`
-- Kiểm tra bảng `notifications` sau khi gửi.
-- **Kỳ vọng:** có bản ghi mới, `eventType=RANDOM_CHECK_SENT`, `metadata` chứa `checkId`/`siteId`/
-  `expiresAt`.
-
-### 3. ✅ Push gửi kèm data payload đầy đủ (deep-link được kể cả khi app đóng)
-- Kiểm tra `notification_delivery_logs` / data payload gửi qua FCM.
-- **Kỳ vọng:** có `eventType` + các key metadata trong phần "data" của push (không chỉ title/body).
-
-### 4. ❌ Xác nhận gap "không có `sent_at`"
-- Kiểm tra entity/response `ScheduledCheck` sau khi đã gửi.
-- **Kỳ vọng theo code hiện tại:** không có field nào ghi lại THỜI ĐIỂM CHÍNH XÁC đã gửi — chỉ biết
-  `status=sent`, muốn biết "gửi lúc mấy giờ" phải tra `notification_delivery_logs.created_at`
-  (gián tiếp, không đảm bảo khớp 100% nếu có nhiều notification liên quan) — xác nhận đúng gap.
-
-### 5. ❌ Xác nhận gap "không có `notification_id`"
-- Kiểm tra entity/response `ScheduledCheck`.
-- **Kỳ vọng theo code hiện tại:** không có FK trực tiếp tới `notifications.id` — xác nhận đúng gap.
+### 3. ✅ Xác nhận ĐÃ CÓ `notificationId` (đã fix)
+- **Kết quả thực tế:** `notification_id` trỏ đúng tới bản ghi `notifications` vừa tạo, xác nhận qua
+  cả DB lẫn response API chi tiết.
 
 ---
 
 ## B. Test trên Mobile App
-- Nhận push khi có random check gửi tới — chạm vào push mở đúng màn phản hồi kiểm tra ngẫu nhiên,
-  đúng `checkId`. **Cần test tay trên thiết bị thật** (đã ghi nhận giới hạn tương tự ở #87/#88 —
-  Expo Go không cấp được push token thật).
+- Không thay đổi hành vi phía App — dữ liệu mới chỉ phục vụ HR tra cứu ở Web Admin. Không cần test
+  lại App.
+
+## C. Test trên Web Admin — ✅ PASS, đã test live qua UI thật (Playwright, 2026-08-18)
+- Trang chi tiết lượt kiểm tra: field "Giờ gửi thực tế" hiển thị đúng giá trị `sentAt`, khác biệt rõ
+  với "Giờ dự kiến" (`scheduledAt`) khi có độ trễ dispatch.
 
 ---
 
-## Ghi chú
-Kịch bản này chưa được test live qua UI thật — mới hoàn tất bước nghiên cứu code + viết kịch bản.
-Trọng tâm khi test: case 4-5 (2 gap thật — mức độ ảnh hưởng: KHÔNG chặn chức năng gửi/nhận, chỉ
-thiếu dữ liệu truy vết chính xác khi cần điều tra/audit sau này, VD "check này thực sự gửi lúc mấy
-giờ, có bị delay bất thường không"). Case 1-3 rủi ro fail thấp, đã có `test_dispatch_notification.sh`
-phủ phần cốt lõi.
+## Regression
+Toàn bộ `tests/randomcheck/*.sh` (18 suite) — 100% PASS sau fix, không có regression.

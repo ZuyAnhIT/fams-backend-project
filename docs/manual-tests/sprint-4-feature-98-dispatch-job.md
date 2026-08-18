@@ -45,9 +45,7 @@ tả cũ khác kiến trúc thật, cần làm rõ khi test để không tốn c
 
 ---
 
-## Ghi chú
-Kịch bản này chưa được test live qua UI thật — mới hoàn tất bước nghiên cứu code + viết kịch bản.
-**Không có gap cần vá cho #98** — chỉ cần thống nhất với chủ dự án rằng chi tiết "bull_job_id" trong
-AC gốc là tàn dư từ bản đặc tả dùng công nghệ khác (BullMQ/Node.js), không áp dụng cho kiến trúc
-Java/Spring + Redis ZSET hiện tại, để tránh yêu cầu thêm 1 field vô nghĩa. Case 1-3 rủi ro fail
-thấp, kiến trúc dispatch hiện tại thiết kế hợp lý và có double-check tránh race condition.
+## ✅ PASS — ĐÃ KHÓA (2026-08-18)
+Không có gap cần vá — xác nhận qua `tests/randomcheck/test_dispatch_job.sh` (15/15 pass) và toàn bộ
+regression suite. Đã bổ sung `sentAt` cho đúng thời điểm dispatch thật ở bước #100 (cùng module,
+cùng đợt fix) — không thay đổi cơ chế Redis ZSET + poll đã xác nhận đúng ở đây.
