@@ -35,9 +35,17 @@ xác nhận lại qua code hiện tại — **1 điểm đã SAI/lỗi thời, 1
 
 ---
 
+## ✅ ĐÃ VÁ (2026-08-18) — ĐÃ KHÓA
+
+### Case 3 — gap audit log: ĐÃ VÁ
+`ViolationService` thêm helper `recordViolationAudit()` dùng chung cho cả `confirmViolation`,
+`dismissViolation`, `updateAttendanceImpact` — mỗi method giờ ghi 1 action riêng
+(`violation_confirmed`/`violation_dismissed`/`violation_attendance_impact_updated`) qua
+`AuditLogService`, best-effort (không rollback nếu ghi audit lỗi).
+
+### Test live — ✅ PASS (2026-08-18)
+Xác nhận 1 violation qua API thật: `audit_logs` có đúng 1 bản ghi `violation_confirmed` với
+`resolutionReason` đúng nội dung đã nhập.
+
 ## Ghi chú
-Kịch bản này chưa được test live qua UI thật — mới hoàn tất bước nghiên cứu code + viết kịch bản.
-**Đã cải chính 1 phát hiện sai trong audit gốc (case 2).** Trọng tâm khi test: case 3 (gap audit log
-— cần xử lý ĐỒNG THỜI cho cả 3 method confirm/dismiss/updateAttendanceImpact trong module violation,
-không vá riêng lẻ từng cái, vì cùng 1 nguyên nhân — module này chưa từng tích hợp AuditLogService).
-Case 1-2 rủi ro fail thấp, đã có `test_hr_confirm_violation.sh` phủ.
+Regression: 34/34 (bao gồm `test_hr_confirm_violation.sh`).

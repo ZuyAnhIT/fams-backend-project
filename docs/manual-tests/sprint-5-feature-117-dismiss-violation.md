@@ -46,10 +46,28 @@ nhận lại qua code hiện tại — **CẢ 2 điểm đều ĐÚNG, KHÔNG l�
 
 ---
 
+## ✅ ĐÃ VÁ (2026-08-18) — ĐÃ KHÓA
+
+Đã vá cả 3 gap, ưu tiên case 5 (tác động thực tế lớn nhất) như khuyến nghị:
+
+- **Case 5 (quan trọng nhất) — `dismissViolation` giờ tự động set `affectsAttendance=false` +
+  `attendanceImpactReviewed=true`** ngay khi bỏ qua — bảng công không còn coi vi phạm đã bỏ qua là
+  đang ảnh hưởng nữa, đúng ý định của HR khi bấm "bỏ qua". `attendanceImpactReviewed=true` để
+  quyết định này không bị 1 lần tính lại tự động sau đó ghi đè.
+- **Case 3 — notification nhân viên**: thêm `ViolationNotificationService.notifyViolationDismissed()`
+  — gửi `VIOLATION_DISMISSED_EMPLOYEE` kèm loại vi phạm + lý do bỏ qua.
+- **Case 4 — audit log**: dùng chung `recordViolationAudit()` với #116/#118, action
+  `violation_dismissed`, ghi cả `resolutionReason` và `affectsAttendance=false`.
+- `ViolationActionResponse` thêm field `affectsAttendance` để FE thấy ngay giá trị mới không cần
+  gọi lại API riêng.
+- Web Admin (`ViolationResolutionModal.tsx`): cập nhật mô tả cảnh báo khi bỏ qua, nói rõ bảng công
+  sẽ tự động hết ảnh hưởng và nhân viên sẽ được báo.
+
+### Test live — ✅ PASS (2026-08-18)
+Bỏ qua 1 violation đang `affects_attendance=true` qua API thật: response trả đúng
+`affectsAttendance=false`; DB xác nhận `affects_attendance=f`, `attendance_impact_reviewed=t`;
+nhân viên nhận đúng notification "Vi phạm ... đã được bỏ qua. Lý do: ..."; audit log ghi đúng
+action `violation_dismissed`.
+
 ## Ghi chú
-Kịch bản này chưa được test live qua UI thật — mới hoàn tất bước nghiên cứu code + viết kịch bản.
-**Trọng tâm khi test: case 5 — đây là gap có tác động thực tế lớn nhất trong nhóm #114-118, vì "bỏ
-qua vi phạm" mà bảng công vẫn coi như vi phạm đó có ảnh hưởng là mâu thuẫn trực tiếp với ý định của
-HR khi bấm nút "bỏ qua".** Khuyến nghị ưu tiên vá case 5 nếu chủ dự án đồng ý. Case 3-4 (notification,
-audit) mức độ ảnh hưởng thấp hơn (không sai dữ liệu, chỉ thiếu minh bạch/truy vết). Case 1-2 rủi ro
-fail thấp, đã có `test_hr_dismiss_violation.sh` phủ.
+Regression: 34/34 (bao gồm `test_hr_dismiss_violation.sh`).
