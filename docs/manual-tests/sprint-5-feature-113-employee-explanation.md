@@ -55,10 +55,31 @@ hiện tại — **ĐÚNG, không lỗi thời, VÀ phát hiện thêm 1 gap M�
 
 ---
 
+## ✅ ĐÃ VÁ (2026-08-18) — ĐÃ KHÓA
+
+### Case 5 — gap notification: ĐÃ VÁ
+- `CheckinService.explainCheckin`/`explainCheckinWithPhoto` giờ gọi `notifyExplanationSubmitted(...)`
+  (helper mới, dùng `NotificationService`) — gửi `CHECKIN_EXPLANATION_SUBMITTED_HR` cho mọi user
+  giữ quyền `checkins:list` trong tenant.
+- `ViolationService.explainViolation`/`explainViolationWithPhoto` giờ gọi
+  `violationNotificationService.notifyExplanationSubmitted(...)` — gửi
+  `VIOLATION_EXPLANATION_SUBMITTED_HR` cho mọi user giữ quyền `violations:list`.
+- Đăng ký 2 eventType mới vào `NotificationEventTypeCatalog`.
+
+### Case 6 — gap "không liên kết được với violation": ĐÃ CẢI CHÍNH, KHÔNG PHẢI GAP THẬT
+Khi rà lại code để implement notification, phát hiện **`ViolationService` đã có sẵn 2 method
+`explainViolation`/`explainViolationWithPhoto`, controller đã wire sẵn
+`POST .../violations/{violationId}/explain`** (cả JSON và multipart) — nghĩa là nhân viên ĐÃ CÓ
+THỂ gửi giải trình gắn trực tiếp vào 1 violation cụ thể (kể cả violation từ random check như
+`no_response`/`location_fail`/`face_fail`/`liveness_fail`), tách biệt hoàn toàn với đường giải
+trình gắn vào checkin. Audit "gap MỚI" trước đó là SAI/lỗi thời — endpoint đã tồn tại từ trước, chỉ
+là chưa có notification (đã vá ở case 5 cho cả 2 đường).
+
+### Test live — ✅ PASS (2026-08-18)
+Qua API+DB thật: nhân viên gửi giải trình cho 1 checkin → HR nhận đúng
+`CHECKIN_EXPLANATION_SUBMITTED_HR`; nhân viên gửi giải trình trực tiếp cho 1 violation → HR nhận
+đúng `VIOLATION_EXPLANATION_SUBMITTED_HR`.
+
 ## Ghi chú
-Kịch bản này chưa được test live qua UI thật — mới hoàn tất bước nghiên cứu code + viết kịch bản.
-Trọng tâm khi test: case 5 (gap notification — HR không biết chủ động có giải trình mới, dễ bỏ sót)
-và case 6 (gap mới về liên kết violation — cần quyết định nghiệp vụ có thực sự cần giải trình riêng
-cho violation ngoài check-in hay không, vì phạm vi thực tế đã dùng được cho phần lớn use-case chính:
-giải trình check-in bị đánh dấu lỗi). Case 1-4 rủi ro fail thấp, đã có
+Regression: 31/31 (bao gồm `test_employee_explanation.sh`). Case 1-4 rủi ro fail thấp, đã có
 `test_employee_explanation.sh` phủ phần cốt lõi.
