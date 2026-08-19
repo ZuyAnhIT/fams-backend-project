@@ -916,6 +916,15 @@ Tenant mới ở Trial (#22) → chạm giới hạn nhân viên (#38 TH5) → P
 
 **Bổ sung 2026-08-06** theo đúng yêu cầu story "Là một PO/QA, tôi muốn kiểm thử luồng từ tenant đến chấm công và báo cáo để đảm bảo hệ thống sẵn sàng triển khai" — khác B.1 (giả định site/shift đã có sẵn), luồng này bắt đầu từ **tenant chưa tồn tại**, đúng kịch bản triển khai khách hàng mới thật (dùng cho Go-live Checklist, xem `docs/deployment/go-live-checklist.md`).
 
+**Cập nhật 2026-08-19**: audit lại phát hiện AC gốc của #148 yêu cầu rõ chuỗi
+`tenant->employee->site->assignment->checkin->summary->random check->violation->report` nhưng bản
+2026-08-06 dừng ở báo cáo/export, **thiếu hẳn đoạn kiểm tra ngẫu nhiên → vi phạm** (2 bước 7-8 bên
+dưới, mới thêm). Đồng thời đã viết **script tự động hoá đúng luồng 15 bước này**,
+`tests/e2e_uat_go_live_flow.sh` — không chỉ là tài liệu cho người chạy tay, mà một lệnh
+`BASE_URL=... bash tests/e2e_uat_go_live_flow.sh` chạy được cả chuỗi thật với dữ liệu thật (không
+gồm Face ID/liveness vì AC #148 không yêu cầu — phần đó vẫn giữ ở bước 7 cũ bên dưới cho người
+test tay muốn phủ luôn Face ID). Test live: PASS 16/16, chạy lại 2 lần liên tiếp đều pass.
+
 | Bước | Hành động | Endpoint | Kết quả mong đợi |
 |---|---|---|---|
 | 1 | Platform Admin tạo tenant mới | `POST /api/v1/tenants` — **bắt buộc** `ownerEmail` (thiếu field này là lỗi kịch bản test phổ biến nhất gặp trong session, không phải lỗi hệ thống) | 201, có `tenantId`; chủ sở hữu nhận được tài khoản Owner |

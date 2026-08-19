@@ -1478,8 +1478,32 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 
 #### UAT Flow
 
-- [ ] **#148 — Kịch bản kiểm thử end-to-end** `P0` · 8sp · Nền tảng: Backend, Web Admin, Mobile App, Queue/AI/Automation
+- [x] **#148 — Kịch bản kiểm thử end-to-end** `P0` · 8sp · Nền tảng: Backend, Web Admin, Mobile App, Queue/AI/Automation
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: tests/run_all.sh; thiếu: chạy tuần tự tất cả test suite, không phải 1 kịch bản UAT nối liền tenant→...→report như AC yêu cầu
+  - *Audit (2026-08-06, phát hiện muộn 2026-08-19):* Một đợt audit trước đó (2026-08-06, nhánh
+    `feature/security-health-uat-golive-backend`, đã merge vào develop) đã bổ sung mục **B.8** vào
+    `docs/testing/manual-test-scenarios.md` — luồng 15 bước nối liền từ `POST /tenants` (tenant
+    hoàn toàn mới) tới export báo cáo, đúng tinh thần AC. **BACKLOG.md chưa từng được cập nhật
+    checkbox cho việc này** — cùng dạng lỗi "audit gốc lỗi thời" gặp nhiều lần trong dự án, lần
+    này lỗi nằm ở phía ngược lại (việc đã xong nhưng backlog không phản ánh).
+  - *Audit (2026-08-19):* Rà lại kỹ AC ("...checkin->summary->**random check->violation**->report")
+    so với B.8 hiện có — phát hiện **gap thật còn sót**: B.8 dừng ở export báo cáo, hoàn toàn
+    THIẾU đoạn kiểm tra ngẫu nhiên → vi phạm dù đây là 2 bước AC liệt kê rõ ràng (có 1 luồng random
+    check → violation riêng ở mục B.3 nhưng KHÔNG nối vào B.8, dùng tenant/employee khác). **Đã vá**:
+    thêm 2 bước (kiểm tra ngẫu nhiên → không phản hồi → tự sinh vi phạm → HR xử lý) vào giữa B.8,
+    dùng đúng tenant/site/employee/assignment đã tạo từ các bước trước, không tạo mới.
+    **Đồng thời viết mới**: `tests/e2e_uat_go_live_flow.sh` — biến B.8 từ tài liệu thuần cho người
+    chạy tay thành 1 script tự động hoá thật, chạy được bằng `BASE_URL=... bash
+    tests/e2e_uat_go_live_flow.sh`, nối đúng 1 tenant/employee/site xuyên suốt toàn bộ chuỗi AC
+    (không có Face ID/liveness vì AC không yêu cầu — B.8 dạng tài liệu vẫn giữ bước đó cho ai muốn
+    test tay đầy đủ hơn). **Phát hiện phụ có giá trị**: script phát hiện đúng payroll-readiness
+    guard (từ đợt audit #124) tự động chặn export (409) khi nhân viên có bản ghi random-check
+    thất bại trong tháng — chứng minh 2 tính năng độc lập (random check và export bảng công) thực
+    sự liên kết đúng nghiệp vụ với nhau, không phải chỉ hoạt động riêng lẻ. **Test live qua API
+    thật, chạy 2 lần liên tiếp**: PASS 16/16 cả 2 lần — tenant→site→shift→invite/accept→
+    assignment→checkin/checkout→recompute bảng công→cấu hình random check→vi phạm không phản hồi→
+    HR xác nhận→báo cáo tháng→export (có test cả trường hợp bị chặn 409 lẫn export thành công sau
+    khi xác nhận bỏ qua cảnh báo).
   - *User Story:* Là một PO/QA, tôi muốn kiểm thử luồng từ tenant đến chấm công và báo cáo để đảm bảo hệ thống sẵn sàng triển khai.
   - *Acceptance Criteria:* Chuẩn bị data mẫu; test tenant->employee->site->assignment->checkin->summary->random check->violation->report.
   - *DB Entities:* `all core entities`
@@ -1488,8 +1512,19 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 
 #### Tài liệu sử dụng
 
-- [ ] **#149 — Hướng dẫn Admin/HR/Employee** `P2` · 3sp · Nền tảng: Web Admin, Mobile App
+- [x] **#149 — Hướng dẫn Admin/HR/Employee** `P2` · 3sp · Nền tảng: Web Admin, Mobile App
   - *Audit (2026-07-22):* ❌ CHƯA LÀM — thiếu: docs/api, docs/architecture, docs/security, docs/database, docs/deployment đều là file rỗng — chưa có hướng dẫn sử dụng nào
+  - *Audit (2026-08-06, phát hiện muộn 2026-08-19):* Cùng đợt audit với #148/#150 (nhánh đã merge)
+    đã viết mới `docs/user-guides/huong-dan-su-dung-theo-vai-tro.md` — 163 dòng, chia đúng theo vai
+    trò Platform Admin / Company Admin-HR / Employee + mục FAQ, mô tả nghiệp vụ (không mô tả UI cụ
+    thể vì đây là tài liệu phía backend). BACKLOG.md chưa từng cập nhật checkbox — sửa lại đợt này.
+  - *Audit (2026-08-19):* Đối chiếu nội dung với các tính năng đã sửa SAU ngày 2026-08-06 trong
+    cùng phiên làm việc (mandatory notification #141, data retention theo tenant #144, audit khi
+    bị từ chối quyền #146) — phát hiện tài liệu đã cũ, chưa phản ánh 3 quy tắc nghiệp vụ mới này.
+    **Đã cập nhật**: mục 3.5 (nhân viên) thêm ghi chú thông báo "Kiểm tra ngẫu nhiên" không thể
+    tắt; mục 1.5 (Platform Admin) thêm ghi chú retention riêng theo từng công ty; mục 1.3 thêm ghi
+    chú audit ghi lại cả lần bị từ chối quyền. Không viết lại toàn bộ tài liệu — chỉ vá đúng phần
+    đã lỗi thời.
   - *User Story:* Là một người dùng, tôi muốn đọc hướng dẫn sử dụng theo vai trò để giảm chi phí hỗ trợ.
   - *Acceptance Criteria:* Có hướng dẫn login, tạo site, phân công, check-in, random check, xử lý violation, export report.
   - *DB Entities:* `N/A`
@@ -1498,8 +1533,18 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 
 #### Go-live Checklist
 
-- [ ] **#150 — Checklist triển khai tenant đầu tiên** `P0` · 5sp · Nền tảng: Backend, Web Admin, Mobile App, Queue/AI/Automation
+- [x] **#150 — Checklist triển khai tenant đầu tiên** `P0` · 5sp · Nền tảng: Backend, Web Admin, Mobile App, Queue/AI/Automation
   - *Audit (2026-07-22):* ❌ CHƯA LÀM — thiếu: không tìm thấy checklist hay script go-live nào trong repo
+  - *Audit (2026-08-06, phát hiện muộn 2026-08-19):* Cùng đợt audit với #148/#149 (nhánh đã merge)
+    đã viết mới `docs/deployment/go-live-checklist.md` — 8 mục (biến môi trường, database/migration,
+    tạo tenant đúng quy trình, health check, bảo mật/phân quyền, thông báo, theo dõi tuần đầu,
+    rollback), mỗi mục dẫn nguồn từ 1 sự cố/gap thật đã gặp trong chính dự án. BACKLOG.md chưa từng
+    cập nhật checkbox — sửa lại đợt này.
+  - *Audit (2026-08-19):* Tương tự #149, tài liệu chưa phản ánh 2 quy tắc mới sau ngày viết. **Đã
+    cập nhật**: mục 6 (thông báo) thêm ghi chú field `mandatory` mới trên `notification-event-types`
+    (loại bắt buộc sẽ bị backend từ chối nếu khách hàng cố tắt); mục 3 (tạo tenant) thêm ghi chú
+    `dataRetentionDays` riêng theo tenant nếu khách hàng yêu cầu; đồng thời cập nhật câu dẫn tới B.8
+    ở mục 3 để phản ánh đúng luồng B.8 mới đã có thêm bước random check → violation (#148).
   - *User Story:* Là một đội triển khai, tôi muốn kiểm tra đầy đủ cấu hình trước go-live để giảm lỗi khi vận hành thật.
   - *Acceptance Criteria:* Checklist plan, tenant settings, roles, employees, sites, geofences, shifts, assignments, notification, cron jobs.
   - *DB Entities:* `all core entities`
