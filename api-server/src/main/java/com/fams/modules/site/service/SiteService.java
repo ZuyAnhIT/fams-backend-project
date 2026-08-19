@@ -160,6 +160,7 @@ public class SiteService {
                 .timezone(timezone)
                 .status("active")
                 .checkinPolicy(checkinPolicy)
+                .hidePolygonFromEmployee(request.isHidePolygonFromEmployee())
                 .createdBy(callerUserId)
                 .build();
 
@@ -270,6 +271,9 @@ public class SiteService {
             validateCheckinPolicy(newPolicy);
             site.setCheckinPolicy(newPolicy);
         }
+        if (request.getHidePolygonFromEmployee() != null) {
+            site.setHidePolygonFromEmployee(request.getHidePolygonFromEmployee());
+        }
 
         siteRepository.save(site);
         log.info("Site updated: id={} tenantId={} by={}", siteId, tenantId, callerUserId);
@@ -333,6 +337,7 @@ public class SiteService {
                 .timezone(site.getTimezone())
                 .status(site.getStatus())
                 .checkinPolicy(site.getCheckinPolicy())
+                .hidePolygonFromEmployee(site.isHidePolygonFromEmployee())
                 .createdBy(site.getCreatedBy())
                 .geofence(geofenceService.findActiveGeofenceForSite(site.getId()).orElse(null))
                 .shifts(shiftService.findActiveShiftsForSite(site.getId()))
@@ -403,6 +408,7 @@ public class SiteService {
                 .timezone(s.getTimezone())
                 .status(s.getStatus())
                 .checkinPolicy(s.getCheckinPolicy())
+                .hidePolygonFromEmployee(s.isHidePolygonFromEmployee())
                 .createdBy(s.getCreatedBy())
                 .createdAt(s.getCreatedAt())
                 .updatedAt(s.getUpdatedAt())

@@ -49,6 +49,10 @@ public class SiteDetailResponse {
             example = "gps_only")
     private String checkinPolicy;
 
+    @Schema(description = "When true, the employee-facing check-in map omits the geofence "
+            + "polygon shape (#130, 2026-08-18)", example = "false")
+    private boolean hidePolygonFromEmployee;
+
     @Schema(description = "UUID of the user who created the site")
     private UUID createdBy;
 

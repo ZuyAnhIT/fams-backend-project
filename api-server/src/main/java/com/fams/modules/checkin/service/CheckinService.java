@@ -1115,7 +1115,7 @@ public class CheckinService {
 
         AvailableSiteResponse.GeofenceInfo geofenceInfo = geofenceRepository
                 .findBySiteIdAndStatusAndDeletedAtIsNull(site.getId(), "active")
-                .map(this::toGeofenceInfo)
+                .map(g -> toGeofenceInfo(g, site.isHidePolygonFromEmployee()))
                 .orElse(null);
 
         ZoneId zone = availability.siteZone();
@@ -1268,10 +1268,14 @@ public class CheckinService {
                 .build();
     }
 
-    private AvailableSiteResponse.GeofenceInfo toGeofenceInfo(Geofence geofence) {
+    /** @param hidePolygon (#130, 2026-08-18) — the AC-required "hide polygon per site policy":
+     *  omits the exact boundary shape from the employee-facing map while still returning
+     *  bufferMeters, so the client can show an approximate radius/accuracy-style circle instead
+     *  of the precise polygon. */
+    private AvailableSiteResponse.GeofenceInfo toGeofenceInfo(Geofence geofence, boolean hidePolygon) {
         return AvailableSiteResponse.GeofenceInfo.builder()
                 .id(geofence.getId())
-                .coordinates(geofence.getCoordinates())
+                .coordinates(hidePolygon ? null : geofence.getCoordinates())
                 .bufferMeters(geofence.getBufferMeters())
                 .build();
     }

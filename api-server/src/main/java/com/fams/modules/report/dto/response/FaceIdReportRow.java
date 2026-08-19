@@ -53,4 +53,8 @@ public class FaceIdReportRow {
 
     @Schema(description = "Why the last submission was rejected, null unless reviewStatus=rejected", example = "null")
     private String rejectionReason;
+
+    @Schema(description = "Anti-spoof confidence of the active enrollment (0-1, worst photo in "
+            + "the batch) — null if never enrolled (#127, 2026-08-18)", example = "0.87")
+    private Double qualityScore;
 }

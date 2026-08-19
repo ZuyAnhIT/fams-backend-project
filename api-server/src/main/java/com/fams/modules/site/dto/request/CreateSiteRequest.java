@@ -44,4 +44,10 @@ public class CreateSiteRequest {
             + "specifically). A Shift can override this per-shift. Default gps_only.",
             defaultValue = "gps_only", allowableValues = {"gps_only", "gps_face", "gps_face_liveness"})
     private String checkinPolicy;
+
+    @Schema(description = "When true, the employee-facing check-in map omits the geofence "
+            + "polygon shape (current location + site center marker still shown) — for "
+            + "security-sensitive sites where HR doesn't want the exact boundary visible to "
+            + "employees. Default false (#130, 2026-08-18).", defaultValue = "false")
+    private boolean hidePolygonFromEmployee;
 }

@@ -31,6 +31,9 @@ public class FaceIdReportResponse {
     @Schema(description = "Department filter applied (null = all departments) — added 2026-08-05")
     private java.util.UUID departmentId;
 
+    @Schema(description = "Site filter applied (null = all sites) — added 2026-08-18 (#127)")
+    private java.util.UUID siteId;
+
     @Schema(description = "Server-side name/email/code search term applied (null = none) — added 2026-08-05")
     private String search;
 
