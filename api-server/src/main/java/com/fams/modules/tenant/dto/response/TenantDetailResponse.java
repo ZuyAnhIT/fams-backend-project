@@ -94,4 +94,11 @@ public class TenantDetailResponse {
 
     @Schema(description = "Scheduled random checks issued this calendar month", example = "78")
     private long currentMonthRandomChecks;
+
+    @Schema(description = "Best-effort current storage usage in GB (#134, 2026-08-19) — covers "
+            + "avatars + violation-explanation evidence files only (S3/MinIO). Does NOT include "
+            + "Face ID enrollment/check-in photos, which live in a separate system (ai-service) "
+            + "not reachable from here — treat this as a floor, not the true total.",
+            example = "1.4")
+    private double currentStorageGb;
 }

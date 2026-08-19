@@ -399,9 +399,14 @@ role tùy chỉnh thật, mở modal, xem đúng request gọi API) xác nhận 
      DB, chỉ ẩn khỏi picker — an toàn, đảo ngược được). `GET /permissions` (nguồn dữ liệu form
      Tạo Role) giờ chỉ trả 55/78 permission thật sự có tác dụng. Đã test qua API: `tenants:update`
      không còn xuất hiện, `employees:create` (permission thật) vẫn còn.
-  2. **`tenants:update` — đã thêm miễn trừ Platform Admin**, nhất quán với IP whitelist/tenant
-     settings. Đã test: Platform Admin (không phải owner) sửa được hồ sơ tenant (200); user
-     thường không phải owner vẫn bị chặn (403) — không nới lỏng nhầm.
+  2. **`tenants:update` — đã thêm miễn trừ Platform Admin**, nhất quán với IP whitelist. Đã test:
+     Platform Admin (không phải owner) sửa được hồ sơ tenant (200); user thường không phải owner
+     vẫn bị chặn (403) — không nới lỏng nhầm. **Đính chính (2026-08-19):** `tenant settings`
+     (`TenantSettingsService.updateSettings`) KHÔNG được đổi theo — vẫn cố ý owner-only kể cả
+     Platform Admin (xem comment tại đó), khác với `tenants:update`. Xác nhận lại: đây là quyết
+     định có chủ đích, không phải thiếu sót — settings (branding, định dạng ngày giờ, tiền tố mã
+     nhân viên) được xem là nhạy cảm hơn hồ sơ tenant cơ bản (tên/domain/timezone), nên giữ phạm
+     vi hẹp hơn dù cùng lý do hỗ trợ owner mất quyền truy cập.
   3. **Chặn leo thang đặc quyền** khi tạo/sửa/clone role: caller không phải Platform Admin chỉ
      được cấp permission mà chính họ đang có trong tenant đó (`RoleService.assertNoPrivilegeEscalation`,
      áp dụng cả 3 đường: `createRole`, `updateRole` — chỉ tính permission MỚI thêm, không tính

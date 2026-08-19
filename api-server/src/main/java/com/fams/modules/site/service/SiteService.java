@@ -126,7 +126,7 @@ public class SiteService {
             }
         }
 
-        planLimitEnforcementService.assertSiteLimit(tenantId);
+        planLimitEnforcementService.assertSiteLimit(tenantId, callerUserId);
 
         if (siteRepository.existsByTenantIdAndNameIgnoreCaseAndDeletedAtIsNull(
                 tenantId, request.getName().trim())) {

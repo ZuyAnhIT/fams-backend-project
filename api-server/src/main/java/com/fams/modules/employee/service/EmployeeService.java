@@ -157,7 +157,7 @@ public class EmployeeService {
             }
         }
 
-        planLimitEnforcementService.assertEmployeeLimit(tenantId);
+        planLimitEnforcementService.assertEmployeeLimit(tenantId, callerUserId);
 
         // Auto-generate employee code if not provided and prefix is configured
         String resolvedCode = request.getEmployeeCode();

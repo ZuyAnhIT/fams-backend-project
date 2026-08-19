@@ -1170,8 +1170,14 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 
 #### Bộ lọc dùng chung
 
-- [ ] **#131 — Lưu bộ lọc thường dùng** `P2` · 3sp · Nền tảng: Web Admin
+- [x] **#131 — Lưu bộ lọc thường dùng** `P2` · 3sp · Nền tảng: Web Admin
   - *Audit (2026-07-22):* ❌ CHƯA LÀM — thiếu: xác nhận: không có bảng/code SavedFilter nào
+  - *Audit (2026-08-19):* 🟡 Audit gốc HOÀN TOÀN LỖI THỜI — tính năng đã xây đầy đủ từ 2026-08-06
+    (SAU ngày audit gốc): module backend `savedfilter` riêng + component FE `SavedFilterToolbar`
+    generic theo `resourceType`. Gap thật duy nhất: mới tích hợp ở 1 màn (Vi phạm). **Đã wiring
+    thêm** vào trang Nhân viên + Công trình. **Đã test live qua Playwright thật**: lưu/áp dụng/xóa
+    bộ lọc trên cả 2 trang đều hoạt động đúng. Xem
+    `docs/manual-tests/sprint-5-feature-131-saved-filters.md`.
   - *User Story:* Là một HR/Admin, tôi muốn lưu filter cho danh sách lớn để làm việc nhanh hơn.
   - *Acceptance Criteria:* Lưu filter trong local/user setting; áp dụng lại; reset filter; không ảnh hưởng người khác.
   - *DB Entities:* `tenant_settings`
@@ -1180,8 +1186,12 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 
 #### Xuất dữ liệu
 
-- [ ] **#132 — Export danh sách vi phạm** `P1` · 3sp · Nền tảng: Backend, Web Admin
+- [x] **#132 — Export danh sách vi phạm** `P1` · 3sp · Nền tảng: Backend, Web Admin
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: ReportController.exportViolations, test_export_violations.sh; thiếu: không ghi audit
+  - *Audit (2026-08-19):* ✅ ĐÃ VÁ — gap đúng và vẫn còn tới trước lần vá này (khác #124, đây là
+    thiếu HOÀN TOÀN chứ không phải bug transaction âm thầm). Thêm audit `EXPORT_VIOLATIONS`, test
+    live xác nhận đúng. Photo-reference AC xác nhận không phải gap. Xem
+    `docs/manual-tests/sprint-5-feature-132-export-violations-audit.md`.
   - *User Story:* Là một HR/Admin, tôi muốn xuất danh sách vi phạm theo bộ lọc để phục vụ báo cáo nội bộ.
   - *Acceptance Criteria:* Xuất CSV/XLSX; tôn trọng filter; ghi audit; không xuất ảnh trực tiếp, chỉ reference nếu có quyền.
   - *DB Entities:* `violations, audit_logs`
@@ -1194,21 +1204,49 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 
 #### Tenant Operations
 
-- [ ] **#133 — Khóa/mở tenant** `P0` · 5sp · Nền tảng: Backend, Web Admin
+- [x] **#133 — Khóa/mở tenant** `P0` · 5sp · Nền tảng: Backend, Web Admin
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: TenantService.suspendTenant/reactivateTenant, test_tenant_status.sh; thiếu: không gửi notification; không ghi audit
+  - *Audit (2026-08-19):* 🟡 Audit gốc SAI 1/2 điểm — audit đã có đúng từ trước (dùng
+    `AuditLogService.record()` REQUIRES_NEW, an toàn). Chỉ notification là gap thật. **Đã vá**:
+    `TENANT_SUSPENDED_OWNER`/`TENANT_REACTIVATED_OWNER` gửi cho chủ tenant. Phát hiện + vá thêm:
+    `FirebasePhoneLoginService` là luồng đăng nhập duy nhất thiếu check tenant suspended (dù tác
+    động bị giới hạn vì `JwtAuthFilter` vẫn chặn request tiếp theo). Xem
+    `docs/manual-tests/sprint-6-feature-133-tenant-suspend-reactivate.md`.
   - *User Story:* Là một Platform Admin, tôi muốn suspend hoặc reactivate tenant để quản lý rủi ro vận hành và thanh toán.
   - *Acceptance Criteria:* Set status suspended/active; chặn login/action theo policy; gửi notification; ghi audit.
   - *DB Entities:* `tenants, notifications, audit_logs`
-- [ ] **#134 — Xem chi tiết tenant vận hành** `P0` · 5sp · Nền tảng: Backend, Web Admin
+- [x] **#134 — Xem chi tiết tenant vận hành** `P0` · 5sp · Nền tảng: Backend, Web Admin
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: TenantDetailService/TenantDetailResponse, test_tenant_detail.sh; thiếu: không có cảnh báo gần vượt limit; chưa track storage usage
+  - *Audit (2026-08-19):* 🟡 "Cảnh báo gần vượt limit" xác nhận đã thỏa mãn ý định AC qua FE
+    (progress bar 80%/100%) — không phải gap cần vá thêm. Storage usage là gap thật (không có hạ
+    tầng theo dõi ở đâu cả). **Đã hỏi người dùng, chọn xây nhẹ** (thay vì hoãn hoàn toàn):
+    `TenantStorageUsageService` tính on-demand qua S3/MinIO (avatar + bằng chứng vi phạm), CỐ Ý
+    không gồm ảnh Face ID (hệ thống AI riêng) — số liệu là mức tối thiểu, ghi rõ trong UI. Test
+    live: upload 28+26 byte test → API trả đúng byte-for-byte. **Đã test live qua Playwright
+    thật**: trang chi tiết tenant hiện đúng "0 / 6" thay vì placeholder cũ. Xem
+    `docs/manual-tests/sprint-6-feature-134-tenant-operational-detail.md`.
   - *User Story:* Là một Platform Admin, tôi muốn xem tenant, subscription, usage và giới hạn để hỗ trợ khách hàng và vận hành SaaS.
   - *Acceptance Criteria:* Hiển thị plan/subscription/status; số employees/sites/storage/random checks; cảnh báo gần vượt limit.
   - *DB Entities:* `tenants, tenant_subscriptions, plan_limits, tenant_users, sites`
 
 #### Usage Limits
 
-- [ ] **#135 — Enforce giới hạn gói** `P0` · 5sp · Nền tảng: Backend, Web Admin, Mobile App
+- [x] **#135 — Enforce giới hạn gói** `P0` · 5sp · Nền tảng: Backend, Web Admin, Mobile App
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: PlanLimitEnforcementService, test_plan_limits.sh; thiếu: export chưa được kiểm tra limit; không ghi audit denied
+  - *Audit (2026-08-19):* **Phát hiện quan trọng**: nghi ngờ ban đầu core enforcement có bug hóa
+    ra là dữ liệu gói `trial` bị lệch do 1 lần `kill -9` khẩn cấp ở đợt trước (xem mục "Phát hiện
+    2026-08-19" phía dưới) — KHÔNG phải bug, đã restore dữ liệu. ✅ ĐÃ VÁ gap thật còn lại: thêm
+    audit `PLAN_LIMIT_DENIED` khi từ chối employee/site/random-check vượt hạn mức.
+  - *Audit (2026-08-19, đợt 2):* ✅ ĐÃ VÁ nốt gap "export chưa kiểm tra limit" — thêm field mới
+    `plan_limits.max_exports_per_month` (migration V107, seed theo tỷ lệ có sẵn của
+    max_random_checks_per_month: trial=10/basic=100/pro=1000/enterprise=unlimited), đếm usage
+    bằng cách tái sử dụng audit log `EXPORT_*` đã ghi sẵn (không cần bảng đếm riêng), thêm
+    `PlanLimitEnforcementService.assertExportLimit()` gọi ở cả 3 export endpoint (attendance,
+    violations, Face ID not-enrolled) — trả `422 PLAN_LIMIT_EXCEEDED` + ghi audit
+    `PLAN_LIMIT_DENIED` khi vượt, đúng pattern các limit khác. **Đã test live qua API thật**: set
+    tạm `maxExportsPerMonth=1` trên gói trial → export lần 1 = 200, lần 2 = 422 đúng message, có
+    dòng `PLAN_LIMIT_DENIED` trong `audit_logs`; đã restore lại giá trị gốc (10) sau test. Xem
+    `docs/manual-tests/sprint-6-feature-135-enforce-plan-limits.md`.
   - *User Story:* Là một hệ thống, tôi muốn kiểm tra limit trước khi tạo tài nguyên để ngăn tenant vượt gói.
   - *Acceptance Criteria:* Tạo employee/site/random check/export kiểm tra plan_limits; trả lời rõ ràng; audit denied nếu vượt limit.
   - *DB Entities:* `plan_limits, tenant_subscriptions, tenants, audit_logs`
@@ -1478,19 +1516,51 @@ Danh sách bảng/entity được đề cập xuyên suốt backlog (tổng hợ
   `SITE_SUPERVISOR`.
 - **(Phát hiện 2026-08-19, qua chạy lại toàn bộ 155 test script sau đợt #126-130 — 3 test fail,
   KHÔNG liên quan gì tới thay đổi đợt này, xác nhận bằng `git status` không file nào bị đụng tới)
-  — 2 gap sản phẩm thật + 1 lỗi trong chính test script:**
-  - `test_plan_limits.sh`: **giới hạn gói (max_employees, max_sites) KHÔNG được enforce** — tạo
-    nhân viên/site thứ 6/thứ 2 vượt hạn mức gói trial vẫn trả HTTP 201 thay vì 422 bị chặn. Gap
-    sản phẩm thật, chưa sửa trong đợt này — cần audit riêng module `PlanLimitsService`.
-  - `test_update_tenant.sh`: platform admin (kể cả người đã tạo ra tenant đó) **KHÔNG bị chặn**
-    sửa thông tin tenant qua `PUT /tenants/{id}` — test kỳ vọng chỉ chủ tenant (owner) mới được
-    sửa, platform admin phải bị 403, nhưng thực tế trả 200. Gap sản phẩm thật hoặc chủ đích thiết
-    kế cần xác nhận lại — chưa sửa trong đợt này.
+  — cả 3 đã điều tra kỹ và ĐÃ XỬ LÝ XONG cùng ngày, KHÔNG cái nào là gap sản phẩm thật:**
+  - `test_plan_limits.sh`: **KHÔNG phải gap sản phẩm** — `PlanLimitEnforcementService` +
+    `assertEmployeeLimit`/`assertSiteLimit` đã implement đầy đủ, gọi đúng chỗ
+    (`EmployeeService.createEmployee`, `SiteService.createSite`,
+    `EmployeeInvitationService` cả lúc gửi lẫn lúc accept), map đúng HTTP 422. Nguyên nhân thật:
+    **dữ liệu gói `trial` trong DB bị lệch** (max_employees/max_sites = 8/3 thay vì 5/1 theo
+    migration seed) — do 1 lần `kill -9` khẩn cấp trong lúc khôi phục môi trường (process bị treo
+    sau khi container restart ngoài ý muốn) cắt ngang `tests/subscription/test_plan_limits.sh`
+    giữa chừng, khiến `trap restore_trial_limits EXIT` của chính test đó (đã có sẵn, comment ghi
+    rõ "Found via cross-test pollution 2026-08-12") không kịp chạy để khôi phục lại gói `trial`
+    dùng chung. **Đã vá**: restore lại đúng giá trị seed (`UPDATE plan_limits SET
+    max_employees=5, max_sites=1 WHERE ...`), chạy lại `test_plan_limits.sh` (cả 2 file trùng tên
+    ở `tests/tenant/` và `tests/subscription/`) — PASS toàn bộ.
+  - `test_update_tenant.sh`: **KHÔNG phải gap sản phẩm — test sai, đã sửa test.** Code hiện tại
+    (`TenantService.updateTenant`) cố ý cho phép Platform Admin sửa tenant (kể cả tenant không
+    phải do họ tạo), có javadoc trích dẫn rõ quyết định 2026-08-14
+    (`docs/reviews/backend/rbac-role-permission-audit-2026-08-13.md` mục 6) cho case hỗ trợ khi
+    owner mất quyền truy cập tài khoản — nhất quán với IP whitelist/tenant settings. Test 7 của
+    script vẫn mang comment/kỳ vọng cũ từ 24/07/2026 (trước khi có ngoại lệ này), chưa được cập
+    nhật theo quyết định 08-14. **Đã vá**: sửa Test 7 kỳ vọng HTTP 200 (platform admin được phép),
+    cập nhật comment trích dẫn đúng quyết định 08-14 — PASS toàn bộ 8/8.
   - `test_face_id_verify.sh`: **lỗi trong chính test script**, không phải gap sản phẩm — dùng
     token platform admin để gọi `POST .../face-id/consent`, trong khi `FaceIdService.giveConsent`
     cố ý chỉ cho phép chính nhân viên tự cho consent (trích javadoc: biometric consent theo Nghị
     định 13/2023/NĐ-CP phải đến từ chính chủ thể dữ liệu, HR/Admin không được thay mặt) — hành vi
-    backend ĐÚNG, test cần sửa lại dùng token của chính nhân viên.
+    backend ĐÚNG. **Đã vá (2026-08-19, đợt 2):** nguyên nhân gốc sâu hơn cả token sai — nhân viên
+    dùng để test được tạo qua `POST /employees` trực tiếp (admin tạo), không có `user_id` nên
+    KHÔNG token nào (kể cả token của chính nhân viên đó) có thể consent được. Sửa lại phần setup
+    dùng luồng mời-nhân-viên chuẩn (`POST /invitations` → accept) để nhân viên có tài khoản đăng
+    nhập thật, đổi lời gọi consent sang dùng token của chính nhân viên thay vì token admin. Nhân
+    tiện sửa 1 lỗi phụ: `base64 -d` giải mã JWT bị thiếu padding làm script chết ngang không rõ lý
+    do dưới `set -euo pipefail` — thêm `|| true` bảo vệ như các dòng chị em khác trong cùng file.
+    Kết quả: PASS 5/5, exit 0.
+  - **Phát hiện phụ — ĐÃ XỬ LÝ (2026-08-19):** phát hiện `TenantSettingsService.updateSettings` có
+    comment mâu thuẫn với 1 dòng trong tài liệu audit RBAC — comment tại code (dòng ~52-55) nói rõ
+    branding/settings **cố ý giữ owner-only, kể cả Platform Admin cũng không được sửa** ("even for
+    a tenant they provisioned"), trong khi audit RBAC (mục "đợt 2") lại ghi thay đổi ở
+    `tenants:update` "nhất quán với... tenant settings" — ngụ ý tenant settings cũng nên có ngoại
+    lệ Platform Admin. Đã hỏi người dùng, **quyết định: giữ nguyên owner-only cho settings, KHÔNG
+    mở rộng ngoại lệ** — lý do: comment code tường minh, có chủ đích, đáng tin hơn 1 dòng tài liệu
+    audit không khớp thực tế triển khai; settings (branding, định dạng, tiền tố mã nhân viên) được
+    xem nhạy cảm hơn hồ sơ tenant cơ bản nên giữ phạm vi hẹp hơn dù cùng lý do hỗ trợ. Không sửa
+    code — chỉ đính chính lại dòng sai trong
+    `docs/reviews/backend/rbac-role-permission-audit-2026-08-13.md` mục "đợt 2" cho khớp hành vi
+    thật.
 
 ### Ý nghĩa cho việc lên kế hoạch Sprint 1 trở đi
 

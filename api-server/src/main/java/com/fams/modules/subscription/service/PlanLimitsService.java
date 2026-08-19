@@ -54,6 +54,7 @@ public class PlanLimitsService {
         m.put("maxSites", l.getMaxSites());
         m.put("maxStorageGb", l.getMaxStorageGb());
         m.put("maxRandomChecksPerMonth", l.getMaxRandomChecksPerMonth());
+        m.put("maxExportsPerMonth", l.getMaxExportsPerMonth());
         return m;
     }
 
@@ -97,6 +98,12 @@ public class PlanLimitsService {
             limits.setMaxRandomChecksPerMonth(request.getMaxRandomChecksPerMonth());
         }
 
+        if (request.isClearMaxExportsPerMonth()) {
+            limits.setMaxExportsPerMonth(null);
+        } else if (request.getMaxExportsPerMonth() != null) {
+            limits.setMaxExportsPerMonth(request.getMaxExportsPerMonth());
+        }
+
         planLimitsRepository.save(limits);
         log.info("Plan limits updated: planId={}", planId);
         recordLimitsAudit(callerUserId, planId, before, limitsAuditSnapshot(limits));
@@ -121,6 +128,7 @@ public class PlanLimitsService {
                 .maxSites(l.getMaxSites())
                 .maxStorageGb(l.getMaxStorageGb())
                 .maxRandomChecksPerMonth(l.getMaxRandomChecksPerMonth())
+                .maxExportsPerMonth(l.getMaxExportsPerMonth())
                 .updatedAt(l.getUpdatedAt())
                 .build();
     }
