@@ -31,6 +31,12 @@ public class UserNotificationSettingResponse {
     @Schema(description = "Whether push notifications are enabled for this event type", example = "true")
     private boolean pushEnabled;
 
+    @Schema(description = "#141 (2026-08-19): true if this eventType is priority=critical — the "
+            + "user cannot disable inAppEnabled/pushEnabled for it (backend rejects with 422 "
+            + "MANDATORY_NOTIFICATION if attempted). FE should disable the toggle rather than let "
+            + "the user hit the error.", example = "false")
+    private boolean mandatory;
+
     @Schema(description = "False if the user has never explicitly saved a setting for this event "
             + "type — inAppEnabled/pushEnabled above are then the system default, not a user choice "
             + "(added 2026-08-05, see GET /me/notification-settings now always returning every known "

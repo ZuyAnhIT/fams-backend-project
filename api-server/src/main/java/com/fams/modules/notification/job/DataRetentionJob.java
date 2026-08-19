@@ -4,6 +4,10 @@ import com.fams.modules.employee.entity.FaceProfile;
 import com.fams.modules.employee.repository.FaceProfileRepository;
 import com.fams.modules.notification.repository.NotificationDeliveryLogRepository;
 import com.fams.modules.notification.repository.NotificationRepository;
+import com.fams.modules.tenant.entity.Tenant;
+import com.fams.modules.tenant.entity.TenantSettings;
+import com.fams.modules.tenant.repository.TenantRepository;
+import com.fams.modules.tenant.repository.TenantSettingsRepository;
 import com.fams.shared.ai.AiServiceClient;
 import com.fams.shared.monitoring.ScheduledJobMonitor;
 import lombok.extern.slf4j.Slf4j;
@@ -26,6 +30,8 @@ public class DataRetentionJob {
     private final FaceProfileRepository faceProfileRepository;
     private final AiServiceClient aiServiceClient;
     private final ScheduledJobMonitor jobMonitor;
+    private final TenantRepository tenantRepository;
+    private final TenantSettingsRepository tenantSettingsRepository;
 
     @Value("${app.data-retention.delivery-log-days:30}")
     private int deliveryLogDays;
@@ -47,12 +53,16 @@ public class DataRetentionJob {
             NotificationRepository notificationRepository,
             FaceProfileRepository faceProfileRepository,
             AiServiceClient aiServiceClient,
-            ScheduledJobMonitor jobMonitor) {
+            ScheduledJobMonitor jobMonitor,
+            TenantRepository tenantRepository,
+            TenantSettingsRepository tenantSettingsRepository) {
         this.deliveryLogRepository = deliveryLogRepository;
         this.notificationRepository = notificationRepository;
         this.faceProfileRepository = faceProfileRepository;
         this.aiServiceClient = aiServiceClient;
         this.jobMonitor = jobMonitor;
+        this.tenantRepository = tenantRepository;
+        this.tenantSettingsRepository = tenantSettingsRepository;
     }
 
     @Scheduled(cron = "0 0 3 * * SUN")
@@ -62,9 +72,8 @@ public class DataRetentionJob {
         log.info("DataRetentionJob starting");
         try {
             purgeDeliveryLogs();
-            purgeReadNotifications();
+            purgePerTenant();
             purgeRevokedFaceEmbeddings();
-            purgeOldBiometricPhotos();
             jobMonitor.recordSuccess(JOB_NAME, System.currentTimeMillis() - startedAt);
             log.info("DataRetentionJob completed");
         } catch (Exception e) {
@@ -73,16 +82,55 @@ public class DataRetentionJob {
         }
     }
 
+    /** #144 (2026-08-19): delivery logs carry no tenant_id (see NotificationDeliveryLog — linked
+     *  only via a nullable notificationId FK, and many rows, e.g. push-only paths, have no
+     *  notification row to join through at all), so a true per-tenant sweep isn't possible
+     *  without a schema change. Kept as the one global-config-only sweep in this job; every other
+     *  purge below now honors each tenant's own data_retention_days override. */
     private void purgeDeliveryLogs() {
         OffsetDateTime cutoff = OffsetDateTime.now().minusDays(deliveryLogDays);
         int deleted = deliveryLogRepository.deleteByCreatedAtBefore(cutoff);
-        log.info("DataRetentionJob — deleted {} delivery log(s) older than {} days", deleted, deliveryLogDays);
+        log.info("DataRetentionJob — deleted {} delivery log(s) older than {} days (global default)",
+                deleted, deliveryLogDays);
     }
 
-    private void purgeReadNotifications() {
-        OffsetDateTime cutoff = OffsetDateTime.now().minusDays(notificationDays);
-        int deleted = notificationRepository.deleteReadNotificationsOlderThan(cutoff);
-        log.info("DataRetentionJob — deleted {} read notification(s) older than {} days", deleted, notificationDays);
+    /** #144 (2026-08-19): loops every active tenant, resolving each one's effective retention
+     *  window (tenant_settings.data_retention_days override, falling back to the platform
+     *  defaults) — previously this whole job applied one hardcoded global cutoff to every
+     *  tenant's notifications and biometric photos alike, ignoring the per-tenant column added
+     *  by this same fix. Read notifications and checkin/liveness-challenge photos ARE tenant-
+     *  scoped in storage (see AiServiceClient#cleanupOldCheckinPhotos javadoc), so both can
+     *  honor a tenant-specific override; delivery logs cannot (see purgeDeliveryLogs). */
+    private void purgePerTenant() {
+        List<Tenant> tenants = tenantRepository.findAllByDeletedAtIsNull();
+        int totalNotificationsDeleted = 0;
+        int tenantsWithOverride = 0;
+        for (Tenant tenant : tenants) {
+            Integer override = tenantSettingsRepository.findByTenantId(tenant.getId())
+                    .map(TenantSettings::getDataRetentionDays)
+                    .orElse(null);
+            if (override != null) {
+                tenantsWithOverride++;
+            }
+            int effectiveNotificationDays = override != null ? override : notificationDays;
+            int effectivePhotoDays = override != null ? override : biometricPhotoDays;
+
+            OffsetDateTime notificationCutoff = OffsetDateTime.now().minusDays(effectiveNotificationDays);
+            totalNotificationsDeleted += notificationRepository
+                    .deleteReadNotificationsOlderThan(tenant.getId(), notificationCutoff);
+
+            try {
+                var result = aiServiceClient.cleanupOldCheckinPhotos(effectivePhotoDays, tenant.getId());
+                log.debug("DataRetentionJob — biometric photo sweep tenantId={} olderThanDays={}: {}",
+                        tenant.getId(), effectivePhotoDays, result);
+            } catch (Exception e) {
+                log.error("DataRetentionJob — biometric photo sweep failed tenantId={}: {}",
+                        tenant.getId(), e.getMessage());
+            }
+        }
+        log.info("DataRetentionJob — swept {} tenant(s) ({} with a data_retention_days override), "
+                        + "deleted {} read notification(s) total",
+                tenants.size(), tenantsWithOverride, totalNotificationsDeleted);
     }
 
     private void purgeRevokedFaceEmbeddings() {
@@ -100,18 +148,5 @@ public class DataRetentionJob {
             }
         }
         log.info("DataRetentionJob — deleted {}/{} face embedding(s)", success, profiles.size());
-    }
-
-    /** Checkin/random-check selfies + liveness challenge frames only — deliberately excludes
-     *  enrollment photos, which need DB-aware handling (skip anything still referenced by a
-     *  pending review) rather than a pure age sweep. See ai-service's POST /checkins/cleanup. */
-    private void purgeOldBiometricPhotos() {
-        try {
-            var result = aiServiceClient.cleanupOldCheckinPhotos(biometricPhotoDays);
-            log.info("DataRetentionJob — biometric photo sweep (older than {} days): {}",
-                    biometricPhotoDays, result);
-        } catch (Exception e) {
-            log.error("DataRetentionJob — biometric photo sweep failed: {}", e.getMessage());
-        }
     }
 }

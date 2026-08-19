@@ -39,6 +39,10 @@ public class TenantSettingsResponse {
     @Schema(description = "Zero-padding width for the auto-generated sequence number", example = "4")
     private int employeeCodePadding;
 
+    @Schema(description = "Override for how long DataRetentionJob keeps this tenant's notifications "
+            + "and biometric photos, in days (null = using the platform-wide default)", example = "60")
+    private Integer dataRetentionDays;
+
     @Schema(description = "Last update timestamp (UTC)")
     private OffsetDateTime updatedAt;
 }

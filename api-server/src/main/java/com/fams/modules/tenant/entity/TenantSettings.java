@@ -46,6 +46,11 @@ public class TenantSettings {
     @Column(name = "employee_code_seq", nullable = false)
     private long employeeCodeSeq;
 
+    /** #144 (2026-08-19): null means "use the global default" (DataRetentionJob's @Value
+     *  config) — a tenant can override how long their notifications/biometric photos are kept. */
+    @Column(name = "data_retention_days")
+    private Integer dataRetentionDays;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
 

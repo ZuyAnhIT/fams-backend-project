@@ -42,4 +42,16 @@ public class UpdateTenantSettingsRequest {
     @Schema(description = "Number of zero-padded digits in the auto-generated sequence (1–8)", example = "4")
     @Min(1) @Max(8)
     private Integer employeeCodePadding;
+
+    @Schema(description = "#144 (2026-08-19): override how long (in days) DataRetentionJob keeps "
+            + "this tenant's notifications and biometric photos before purging. Null/omitted = use "
+            + "the platform-wide default. Pass clearDataRetentionDays=true to explicitly revert to "
+            + "the platform default.", example = "60")
+    @Min(value = 7, message = "dataRetentionDays must be at least 7")
+    @Max(value = 3650, message = "dataRetentionDays must be at most 3650 (10 years)")
+    private Integer dataRetentionDays;
+
+    @Schema(description = "When true, clears dataRetentionDays back to the platform-wide default "
+            + "regardless of the dataRetentionDays field value")
+    private boolean clearDataRetentionDays;
 }

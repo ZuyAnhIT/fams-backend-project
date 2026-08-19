@@ -1353,8 +1353,20 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 
 #### Settings
 
-- [ ] **#141 — Cấu hình nhận thông báo cá nhân** `P2` · 3sp · Nền tảng: Backend, Web Admin, Mobile App
+- [x] **#141 — Cấu hình nhận thông báo cá nhân** `P2` · 3sp · Nền tảng: Backend, Web Admin, Mobile App
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: UserNotificationSettingController/Service, test_notification_settings.sh; thiếu: không chặn việc tắt random_check_request (thông báo bắt buộc)
+  - *Audit (2026-08-19):* ✅ **ĐÃ VÁ đúng gap thật** — audit gốc chính xác, gap có thật. Thêm
+    `assertNotDisablingMandatoryNotification()` trong `UserNotificationSettingService.upsertSetting`:
+    chặn tắt cả `inAppEnabled` lẫn `pushEnabled` cho bất kỳ eventType nào có priority="critical"
+    (không hardcode `RANDOM_CHECK_SENT` — gate theo priority nên eventType "bắt buộc" tương lai
+    tự động được bảo vệ mà không cần sửa code lần nữa), trả 422 `MANDATORY_NOTIFICATION`. Thêm
+    field `mandatory` vào `UserNotificationSettingResponse` để FE biết khóa switch mà không cần tự
+    hardcode danh sách eventType — đã wire vào cả Web Admin (`NotificationSettingsForm.tsx`, khóa
+    Switch + icon khóa) và Mobile App (`NotificationSettings.tsx`, khóa Switch + icon). **Test live
+    qua API thật**: PUT tắt `RANDOM_CHECK_SENT` → 422; PUT tắt `EMPLOYEE_INVITED` (không critical)
+    → 200 vẫn cho phép; `GET /me/notification-settings` trả đúng `mandatory:true` cho cả
+    `RANDOM_CHECK_SENT` và `TENANT_SUSPENDED_OWNER` (2 eventType critical hiện có).
+    `test_notification_settings.sh` cập nhật thêm Test 9, PASS 29/29 (toàn bộ file).
   - *User Story:* Là một người dùng, tôi muốn bật/tắt một số loại thông báo phù hợp để giảm làm phiền không cần thiết.
   - *Acceptance Criteria:* User chọn event/channel; không cho tắt thông báo bắt buộc như random_check_request; lưu vào settings.
   - *DB Entities:* `tenant_settings, notifications, users`
@@ -1379,8 +1391,34 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 
 #### Data Retention
 
-- [ ] **#144 — Dọn dữ liệu ảnh và notification cũ** `P2` · 5sp · Nền tảng: Backend, Queue/AI/Automation
+- [x] **#144 — Dọn dữ liệu ảnh và notification cũ** `P2` · 5sp · Nền tảng: Backend, Queue/AI/Automation
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: DataRetentionJob (weekly); thiếu: dùng config toàn cục, không theo data_retention_days riêng từng tenant; không xóa ảnh selfie cũ
+  - *Audit (2026-08-19):* ✅ **ĐÃ VÁ phần "không per-tenant" đúng như audit gốc.** Phần "không
+    xóa ảnh selfie cũ" hóa ra SAI — job đã xóa ảnh selfie thật từ trước (gọi fams-ai's
+    `POST /checkins/cleanup`, xóa file thật trên đĩa cho cả checkin/random-check selfie lẫn
+    liveness challenge frame) — chỉ là chưa theo tenant.
+    **Thêm mới**: cột `tenant_settings.data_retention_days` (migration V108, nullable = dùng mặc
+    định toàn nền tảng). `DataRetentionJob` viết lại: loop qua từng tenant active
+    (`TenantRepository.findAllByDeletedAtIsNull`), lấy `effectiveDays` = override riêng của tenant
+    hoặc mặc định toàn cục, áp dụng cho cả xóa notification đã đọc (`NotificationRepository
+    #deleteReadNotificationsOlderThan(tenantId, cutoff)` — query mới, tenant-scoped) LẪN xóa ảnh
+    selfie (`AiServiceClient#cleanupOldCheckinPhotos(days, tenantId)` — overload mới).
+    **Sửa cả ai-service (Python)**: `POST /checkins/cleanup` nhận thêm `tenant_id` optional —
+    ảnh vốn đã lưu theo cấu trúc `checkins/{tenant_id}/...` và `liveness_challenges/{tenant_id}/...`
+    trên đĩa nên chỉ cần scope thư mục quét, không cần đổi cách lưu. `delivery_logs` (bảng
+    `notification_delivery_logs`) **giữ nguyên global-only** — bảng này không có cột tenant_id
+    (chỉ có FK `notification_id` nullable, nhiều dòng như push-only-fallback không join được về
+    notification/tenant nào) nên không per-tenant hoá được nếu không đổi schema — ghi rõ lý do
+    trong code, không tự ý mở rộng schema thêm.
+    **Test live qua API + ai-service + DB thật** (không có endpoint trigger job thủ công — job
+    chạy cron Chủ nhật 3h sáng — nên test từng thành phần trực tiếp): set `dataRetentionDays=45`
+    cho 1 tenant qua API → tạo file ảnh giả 60 ngày tuổi cho tenant đó VÀ 1 tenant khác → gọi thẳng
+    `POST /checkins/cleanup?tenant_id=...` trên fams-ai → chỉ xóa đúng file của tenant target, file
+    tenant kia còn nguyên. Tương tự với notification: insert 1 dòng notification đã đọc 60 ngày
+    tuổi cho 2 tenant, chạy đúng predicate SQL mà JPQL sinh ra → chỉ xóa đúng dòng của tenant
+    target. `tests/notification/test_data_retention.sh` (mới) PASS 7/7;
+    `tests/tenant/test_tenant_settings.sh` thêm Test 9 cho set/clear `dataRetentionDays`, PASS
+    16/16 (toàn bộ file); regression `test_checkin_face.sh` 5/5 sau khi rebuild fams-ai — không lỗi.
   - *User Story:* Là một hệ thống, tôi muốn xóa/archival dữ liệu quá hạn theo policy để tối ưu storage và tuân thủ bảo mật.
   - *Acceptance Criteria:* Dựa data_retention_days; xóa signed URL/temp, ảnh selfie cũ theo policy; không xóa audit; log job.
   - *DB Entities:* `checkins, random_check_responses, notifications, plan_limits, audit_logs`
@@ -1389,16 +1427,39 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 
 #### Data Masking
 
-- [ ] **#145 — Mask dữ liệu nhạy cảm trong audit và API** `P0` · 5sp · Nền tảng: Backend, Web Admin, Mobile App
+- [x] **#145 — Mask dữ liệu nhạy cảm trong audit và API** `P0` · 5sp · Nền tảng: Backend, Web Admin, Mobile App
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: @Masked/MaskedSerializer, MaskingUtils, test_data_masking.sh; thiếu: chỉ che email/phone; chưa che national_id/totp_secret/backup codes/token_hash
+  - *Audit (2026-08-19):* ✅ **THỰC RA ĐÃ XONG — audit 07-22 đã lỗi thời, rộng hơn cả những gì
+    audit cũ ghi nhận.** `@Masked`/`MaskedSerializer` đã áp dụng trực tiếp trên DTO response thật
+    (không chỉ trong audit log) — `EmployeeResponse`/`EmployeeDetailResponse` đã mask cả
+    `email`/`phone`/`nationalId` từ trước. RBAC exception cho phép xem PII đầy đủ đã có sẵn qua
+    `PiiAccess.currentCallerCanViewUnmaskedPii()` (permission `employees:pii:read` hoặc
+    PLATFORM_ADMIN), dùng chung bởi cả serializer lẫn metadata `piiMasked` trả về cho FE.
+    `password_hash`/`totp_secret`/`backup_codes` không hề xuất hiện trong bất kỳ response DTO nào
+    (trừ `TotpEnableResponse.backupCodes` — cố ý reveal 1 lần lúc bật 2FA, không phải lỗi). Không
+    sửa code — chỉ vá 1 gap phụ: `test_data_masking.sh` trước đó chỉ test email/phone, chưa test
+    `nationalId` dù nó đã `@Masked` từ trước — thêm 3 case mới (HR thấy masked, TENANT_ADMIN/
+    PLATFORM_ADMIN thấy unmasked). **Test live qua API thật**: tạo employee có nationalId thật,
+    HR role thấy `nationalId:"***"`, TENANT_ADMIN thấy đầy đủ — PASS 6/6.
   - *User Story:* Là một hệ thống, tôi muốn ẩn dữ liệu nhạy cảm khi trả về hoặc ghi log để bảo vệ thông tin cá nhân.
   - *Acceptance Criteria:* Mask password_hash, token_hash, national_id, totp_secret, backup codes; chỉ role đủ quyền xem thông tin nhạy cảm.
   - *DB Entities:* `audit_logs, users, tenant_users, tokens`
 
 #### Permission Guard
 
-- [ ] **#146 — Guard quyền API theo RBAC** `P0` · 8sp · Nền tảng: Backend, Web Admin, Mobile App
+- [x] **#146 — Guard quyền API theo RBAC** `P0` · 8sp · Nền tảng: Backend, Web Admin, Mobile App
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: 90 chỗ dùng @PreAuthorize + check tầng service, test_permission_guards.sh; thiếu: denied request không được ghi audit
+  - *Audit (2026-08-19):* ✅ **ĐÃ VÁ đúng gap thật** — audit gốc chính xác. `GlobalExceptionHandler
+    .handleAccessDenied` (chốt chặn duy nhất cho mọi `AccessDeniedException`, 116 chỗ dùng
+    `@PreAuthorize` toàn hệ thống đều đi qua đây) trước đó chỉ trả 403, không ghi gì. Thêm
+    `recordAccessDenied()` — best-effort (không chặn response 403 thật nếu ghi audit lỗi), theo
+    đúng khuôn mẫu `PLAN_LIMIT_DENIED` cùng ngày (#135): action `ACCESS_DENIED`, entityType
+    `AccessControl`, lấy actor từ `SecurityContextHolder`, lấy `tenantId` best-effort từ path
+    request (regex khớp `/tenants/{uuid}/...`, null nếu endpoint không tenant-scoped — không phải
+    lỗi, chỉ là platform-level giống các audit khác). **Test live qua API thật**: tạo user không
+    có role nào trên 1 tenant, PATCH profile tenant đó → 403 đúng, query `audit_logs` thấy đúng
+    dòng `action='ACCESS_DENIED'`, `tenant_id` đúng tenant, `new_value` chứa path + lý do bị từ
+    chối. `test_permission_guards.sh` thêm case tự-setup (không cần env var), PASS 16/16.
   - *User Story:* Là một hệ thống, tôi muốn kiểm tra permission trước các API quan trọng để đảm bảo người dùng chỉ thao tác trong quyền.
   - *Acceptance Criteria:* Mọi API khai báo permission; kiểm tra tenant/site scope; denied ghi audit result=denied; test các role chính.
   - *DB Entities:* `roles, permissions, user_roles, audit_logs`

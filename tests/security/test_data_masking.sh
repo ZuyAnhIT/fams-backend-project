@@ -87,26 +87,31 @@ if [ -z "$HR_TOKEN" ]; then
 else
     check_masked "HR caller sees masked email" "email" "$HR_TOKEN" "$EMPLOYEE_URL"
     check_masked "HR caller sees masked phone" "phone" "$HR_TOKEN" "$EMPLOYEE_URL"
+    # #145 (2026-08-19): nationalId is @Masked in EmployeeResponse/EmployeeDetailResponse just
+    # like email/phone, but had no test assertion until now — added for coverage parity.
+    check_masked "HR caller sees masked nationalId" "nationalId" "$HR_TOKEN" "$EMPLOYEE_URL"
 fi
 
 echo ""
-echo "=== Email + phone unmasked for TENANT_ADMIN callers ==="
+echo "=== Email + phone + nationalId unmasked for TENANT_ADMIN callers ==="
 
 if [ -z "$ADMIN_TOKEN" ]; then
     echo "SKIP: ADMIN_TOKEN not set"
 else
     check_unmasked "TENANT_ADMIN sees plain email" "email" "$ADMIN_TOKEN" "$EMPLOYEE_URL"
     check_unmasked "TENANT_ADMIN sees plain phone" "phone" "$ADMIN_TOKEN" "$EMPLOYEE_URL"
+    check_unmasked "TENANT_ADMIN sees plain nationalId" "nationalId" "$ADMIN_TOKEN" "$EMPLOYEE_URL"
 fi
 
 echo ""
-echo "=== Email + phone unmasked for PLATFORM_ADMIN callers ==="
+echo "=== Email + phone + nationalId unmasked for PLATFORM_ADMIN callers ==="
 
 if [ -z "$PLATFORM_ADMIN_TOKEN" ]; then
     echo "SKIP: PLATFORM_ADMIN_TOKEN not set"
 else
     check_unmasked "PLATFORM_ADMIN sees plain email" "email" "$PLATFORM_ADMIN_TOKEN" "$EMPLOYEE_URL"
     check_unmasked "PLATFORM_ADMIN sees plain phone" "phone" "$PLATFORM_ADMIN_TOKEN" "$EMPLOYEE_URL"
+    check_unmasked "PLATFORM_ADMIN sees plain nationalId" "nationalId" "$PLATFORM_ADMIN_TOKEN" "$EMPLOYEE_URL"
 fi
 
 echo ""

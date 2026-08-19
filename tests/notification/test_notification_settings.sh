@@ -273,6 +273,35 @@ run_test "Bulk PUT /me/notification-settings without token returns 401" 401 \
     -d '{"settings":[{"eventType":"X","inAppEnabled":true}]}'
 echo ""
 
+# ── Test 9: #141 (2026-08-19) — mandatory (priority=critical) notifications cannot be disabled ──
+echo "--- Test 9: Cannot disable mandatory notification (RANDOM_CHECK_SENT) ---"
+mandatory_resp=$(curl -s -w "\n%{http_code}" \
+    -X PUT "$BASE_URL/api/v1/me/notification-settings/RANDOM_CHECK_SENT" \
+    -H "Authorization: Bearer $ACCESS_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d '{"inAppEnabled":false,"pushEnabled":false}')
+mandatory_status=$(echo "$mandatory_resp" | tail -n 1)
+mandatory_body=$(echo "$mandatory_resp" | head -n -1)
+check_val "Disabling RANDOM_CHECK_SENT returns 422" "$mandatory_status" "422"
+check_contains "Error code is MANDATORY_NOTIFICATION" "$mandatory_body" '"errorCode":"MANDATORY_NOTIFICATION"'
+
+run_test "Disabling only inAppEnabled for RANDOM_CHECK_SENT also rejected (422)" 422 \
+    -X PUT "$BASE_URL/api/v1/me/notification-settings/RANDOM_CHECK_SENT" \
+    -H "Authorization: Bearer $ACCESS_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d '{"inAppEnabled":false,"pushEnabled":true}'
+
+run_test "Enabling both channels for RANDOM_CHECK_SENT still allowed (200)" 200 \
+    -X PUT "$BASE_URL/api/v1/me/notification-settings/RANDOM_CHECK_SENT" \
+    -H "Authorization: Bearer $ACCESS_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d '{"inAppEnabled":true,"pushEnabled":true}'
+
+get4_resp=$(curl -s "$BASE_URL/api/v1/me/notification-settings" -H "Authorization: Bearer $ACCESS_TOKEN")
+check_contains "GET marks RANDOM_CHECK_SENT as mandatory:true" "$get4_resp" \
+    '"eventType":"RANDOM_CHECK_SENT","label":"Kiểm tra ngẫu nhiên","inAppEnabled":true,"pushEnabled":true,"mandatory":true'
+echo ""
+
 # ── Summary ───────────────────────────────────────────────────────────────────
 echo "========================================="
 echo "Results: $PASS passed, $FAIL failed"

@@ -32,20 +32,24 @@ def get_checkin_photo(source_id: str, tenant_id: str = Query(...)):
 
 
 @router.post("/checkins/cleanup")
-def cleanup_old_checkin_photos(older_than_days: int = Query(..., ge=1)):
+def cleanup_old_checkin_photos(older_than_days: int = Query(..., ge=1), tenant_id: str | None = Query(None)):
     """Age-based retention sweep, called weekly by Java's DataRetentionJob (see
-    docs/api/random-check-config-review.md for the retention-period decision/rationale — no
-    tenant scoping needed, this is a system-wide housekeeping sweep, same pattern as the existing
-    embedding-deletion step in that job). Sweeps checkins/ (checkin/checkout AND random-check
-    selfies — both saved there, see save_checkin_photo) and liveness_challenges/ (challenge
-    center frames). Deliberately does NOT touch enrollments/ — an enrollment's representative
-    photo may still be needed for a review that's been sitting in the HR queue longer than the
-    retention window, and deleting it out from under a pending review would silently break
-    GET /enroll/{employee_id}/pending-photo with no warning to HR. Enrollment photo retention
-    needs a DB-aware sweep (skip anything still referenced by a pending face_profiles row) —
-    tracked as follow-up work, not implemented here."""
-    checkins_deleted = storage_service.delete_files_older_than("checkins", older_than_days)
-    challenges_deleted = storage_service.delete_files_older_than("liveness_challenges", older_than_days)
-    logger.info("Biometric photo retention sweep: checkins=%d liveness_challenges=%d older_than_days=%d",
-                checkins_deleted, challenges_deleted, older_than_days)
+    docs/api/random-check-config-review.md for the retention-period decision/rationale). Sweeps
+    checkins/ (checkin/checkout AND random-check selfies — both saved there, see
+    save_checkin_photo) and liveness_challenges/ (challenge center frames). Deliberately does NOT
+    touch enrollments/ — an enrollment's representative photo may still be needed for a review
+    that's been sitting in the HR queue longer than the retention window, and deleting it out
+    from under a pending review would silently break GET /enroll/{employee_id}/pending-photo with
+    no warning to HR. Enrollment photo retention needs a DB-aware sweep (skip anything still
+    referenced by a pending face_profiles row) — tracked as follow-up work, not implemented here.
+
+    #144 (2026-08-19): tenant_id is now optional — when provided, scopes the sweep to that
+    tenant's own subdirectory (checkins/{tenant_id}/, liveness_challenges/{tenant_id}/, both
+    already the on-disk layout per save_checkin_photo/save_challenge_frame) so
+    DataRetentionJob can honor a tenant's own data_retention_days override without touching any
+    other tenant's files. Omitted (None) keeps the original system-wide sweep."""
+    checkins_deleted = storage_service.delete_files_older_than("checkins", older_than_days, tenant_id)
+    challenges_deleted = storage_service.delete_files_older_than("liveness_challenges", older_than_days, tenant_id)
+    logger.info("Biometric photo retention sweep: checkins=%d liveness_challenges=%d older_than_days=%d tenant_id=%s",
+                checkins_deleted, challenges_deleted, older_than_days, tenant_id or "ALL")
     return {"checkinsDeleted": checkins_deleted, "livenessChallengesDeleted": challenges_deleted}

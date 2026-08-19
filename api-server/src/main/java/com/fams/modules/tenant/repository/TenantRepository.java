@@ -13,6 +13,11 @@ public interface TenantRepository extends JpaRepository<Tenant, UUID>, JpaSpecif
 
     Optional<Tenant> findByIdAndDeletedAtIsNull(UUID id);
 
+    /** #144 (2026-08-19): DataRetentionJob loops every active tenant to apply each one's own
+     *  data_retention_days override — a weekly batch job, not a hot path, so loading the full
+     *  list (no pagination) is fine at current/foreseeable tenant counts. */
+    List<Tenant> findAllByDeletedAtIsNull();
+
     Optional<Tenant> findBySlugAndDeletedAtIsNull(String slug);
 
     Optional<Tenant> findByDomainAndDeletedAtIsNull(String domain);
