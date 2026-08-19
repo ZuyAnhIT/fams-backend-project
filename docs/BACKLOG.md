@@ -1255,18 +1255,45 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 
 #### Audit Viewer
 
-- [ ] **#136 — Xem danh sách audit log** `P0` · 5sp · Nền tảng: Backend, Web Admin
+- [x] **#136 — Xem danh sách audit log** `P0` · 5sp · Nền tảng: Backend, Web Admin
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: AuditLogController.listAuditLogs, test_audit_logs.sh; thiếu: AuditLogService.record() không được gọi ở đâu — không có dòng nào thực sự được ghi
+  - *Audit (2026-08-19):* ✅ **THỰC RA ĐÃ XONG — audit 07-22 đã lỗi thời.** `.record()` hiện được
+    gọi ~48 lần trên 25+ service (auth/rbac/tenant/subscription/employee/checkin/attendance/
+    geofence/randomcheck/report/shift/site/violation/workspace) — không còn là CRUD rỗng. List
+    endpoint filter đủ tenant/actor/entityType/entityId/action/from/to, phân trang (max 200),
+    sort `createdAt DESC`, RBAC scope-lock theo tenant cho non-platform-admin (403 nếu truy cập
+    tenant khác, fail-closed nếu caller không có role nào). **Test live qua API thật**: tạo
+    tenant/nhân viên → nhiều audit action → list/filter/phân trang trả đúng dữ liệu thật.
+    `tests/audit/test_audit_logs.sh` PASS 14/14. Xem `docs/manual-tests/sprint-6-feature-136-138-audit-viewer.md`.
   - *User Story:* Là một Platform Admin/Company Admin, tôi muốn xem audit log có filter mạnh để truy vết thao tác hệ thống.
   - *Acceptance Criteria:* Filter tenant, actor, action, resource_type, result, date; sort occurred_at; phân trang; RBAC theo scope.
   - *DB Entities:* `audit_logs, users`
-- [ ] **#137 — Xem diff old/new value** `P0` · 5sp · Nền tảng: Backend, Web Admin
+- [x] **#137 — Xem diff old/new value** `P0` · 5sp · Nền tảng: Backend, Web Admin
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: AuditLogController.getAuditLog (diff JSONB), MaskingUtils; thiếu: đường ghi không được dùng; mask thiếu national_id/totp_secret/backup codes
+  - *Audit (2026-08-19):* ✅ **THỰC RA ĐÃ XONG — audit 07-22 đã lỗi thời.** `GET
+    /audit-logs/{id}` trả `oldValue`/`newValue` JSONB đầy đủ (raw, không tính diff phía backend —
+    highlight thay đổi được làm ở FE qua `JsonDiffViewer.tsx`, hợp lý vì đây thuần là trình bày).
+    `MaskingUtils.PII_KEYS` đã có sẵn `totpSecret`, `backupCodes`, `nationalId`, `identityNumber`,
+    `idNumber` — không thiếu như audit cũ ghi nhận; `maskAuditMap()` được gọi trong mọi
+    `record()`. Link về resource: `entityType`+`entityId` có sẵn trong response, FE tự dựng link
+    (không cần backend trả URL cứng, vì mỗi entity type có route khác nhau). **Test live qua API
+    thật**: PATCH 1 tenant → GET audit-log detail → oldValue/newValue đúng, field national_id
+    trong test khác được mask đúng `***`.
   - *User Story:* Là một Admin, tôi muốn xem dữ liệu trước/sau của thay đổi để hiểu chính xác ai đã sửa gì.
   - *Acceptance Criteria:* Hiển thị diff JSON dễ đọc; mask dữ liệu nhạy cảm; link về resource nếu còn tồn tại.
   - *DB Entities:* `audit_logs`
-- [ ] **#138 — Trace theo request_id** `P1` · 3sp · Nền tảng: Backend, Web Admin
+- [x] **#138 — Trace theo request_id** `P1` · 3sp · Nền tảng: Backend, Web Admin
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: AuditLogController requestId branch; thiếu: endpoint hoạt động nhưng không có dữ liệu nào để trace
+  - *Audit (2026-08-19):* ✅ **THỰC RA ĐÃ XONG — audit 07-22 đã lỗi thời.** `requestId` filter
+    tái dùng chính endpoint list (không phải route riêng `/trace`, nhưng đáp ứng đủ chức năng),
+    `AuditLogService.findByRequestId` trả timeline đầy đủ theo `requestId`, có tenant-scope. Test
+    live: 1 request thật (VD: tạo employee) sinh nhiều dòng audit cùng `requestId` → trace trả
+    đúng toàn bộ timeline. **🟡 Gap nhỏ còn lại, KHÔNG vá đợt này**: AC có nhắc "show metadata
+    endpoint/status nếu có" — `AuditLog` entity hiện KHÔNG có cột `endpoint`/`httpStatus` (chỉ có
+    `requestId`/`ipAddress`/`userAgent`). Chữ "nếu có" trong AC gốc đọc là điều kiện tùy chọn, và
+    thêm 2 cột mới sẽ cần migration + populate lại ở toàn bộ ~48 call site `record()` — quy mô lớn
+    hơn 1 gap nhỏ, không tự quyết định thêm. Ghi nhận làm follow-up nếu team vận hành thực sự cần
+    endpoint/status trong trace view.
   - *User Story:* Là một kỹ thuật viên vận hành, tôi muốn xem toàn bộ hành động trong cùng request để debug sự cố nhanh.
   - *Acceptance Criteria:* Click request_id; hiển thị timeline audit cùng request; show metadata endpoint/status nếu có.
   - *DB Entities:* `audit_logs`
@@ -1275,16 +1302,51 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 
 #### Template
 
-- [ ] **#139 — Quản lý template thông báo** `P1` · 5sp · Nền tảng: Backend, Web Admin
+- [x] **#139 — Quản lý template thông báo** `P1` · 5sp · Nền tảng: Backend, Web Admin
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: NotificationTemplateController/Service, test_notification_templates.sh; thiếu: renderTemplate() không được gọi bởi luồng gửi thật — CRUD thuần túy không có tác dụng
+  - *Audit (2026-08-19):* ✅ **THỰC RA ĐÃ XONG — audit 07-22 đã lỗi thời.**
+    `NotificationService.createNotification` (chốt chặn duy nhất mọi notification đi qua) gọi
+    `notificationTemplateService.renderTemplateIfExists(...)` TRƯỚC khi tạo/gửi — nếu tenant có
+    cấu hình template cho eventType+locale đó thì override title/body của caller, không thì dùng
+    default hardcode. Có sẵn code comment giải thích 1 bug trước đây (dùng `renderTemplate()` gây
+    throw làm rollback transaction) đã được fix bằng `renderTemplateIfExists()` không throw.
+    Preview biến trên Web Admin (`NotificationTemplateManagementPage.tsx`) đã có sẵn, hoạt động
+    tốt. **Test live qua API thật**: tạo template custom cho `EMPLOYEE_INVITED` → gửi lời mời →
+    notification thực nhận đúng title/body theo template, không phải default. `tests/notification/
+    test_notification_templates.sh` PASS 29/29.
   - *User Story:* Là một Admin, tôi muốn cấu hình title/body theo event_type và ngôn ngữ để nội dung thông báo nhất quán.
   - *Acceptance Criteria:* Tạo template_code; preview biến; dùng khi gửi notification; fallback nếu thiếu template.
   - *DB Entities:* `notifications, tenant_settings`
 
 #### Delivery
 
-- [ ] **#140 — Retry và fallback notification** `P1` · 5sp · Nền tảng: Backend, Queue/AI/Automation
+- [x] **#140 — Retry và fallback notification** `P1` · 5sp · Nền tảng: Backend, Queue/AI/Automation
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: FcmClient retry+backoff, NotificationDeliveryLog, test_fcm_retry_fallback.sh; thiếu: fallback chỉ qua email, áp dụng cho mọi loại chứ không riêng critical
+  - *Audit (2026-08-19):* Retry+backoff (3 lần, 1s/2s exponential, bỏ qua early nếu token dead
+    hẳn — `UNREGISTERED`) đã hoạt động đúng từ trước, không cần sửa. **✅ ĐÃ VÁ đúng gap thật**:
+    fallback trước đây chạy cho MỌI eventType khi push thất bại toàn bộ device, không phân biệt
+    priority — sai AC ("fallback... cho priority critical"). Thêm tham số `fallbackEligible` vào
+    `UserDeviceService.sendPush`, `NotificationService.createNotification` chỉ bật fallback khi
+    `NotificationEventTypeCatalog.defaultPriorityFor(eventType) == "critical"`.
+    **Phát hiện phụ trong lúc vá**: hệ thống trước đó KHÔNG có eventType nào ở mức "critical" cả
+    (cao nhất là "high") — nếu áp đúng theo AC sẽ vô tình tắt hẳn fallback cho mọi loại (regression
+    so với trước). Đã hỏi người dùng, **quyết định: nâng `RANDOM_CHECK_SENT` từ "high" lên
+    "critical"** — đây là thông báo bắt buộc, nhạy cảm thời gian nhất hệ thống (nhân viên phải
+    phản hồi trong cửa sổ ngắn, không được tắt theo #141), hợp lý nhất để có fallback email khi
+    push thất bại. Không đổi priority của 3 eventType "high" còn lại (ROLE_REVOKED,
+    RANDOM_CHECK_VIOLATION_EMPLOYEE/HR). FE (Web Admin + Mobile) đã sẵn xử lý giá trị "critical"
+    từ trước (badge đỏ "Khẩn cấp"), không cần đổi gì thêm.
+    **SMS fallback**: KHÔNG có trong hệ thống (không có SMS provider client nào tồn tại) — nằm
+    ngoài phạm vi vá lần này vì cần thêm hạ tầng mới (nhà cung cấp SMS + tích hợp), không phải 1
+    gap logic nhỏ. Ghi nhận là hạng mục riêng nếu cần.
+    **Test live qua API thật**: gửi `RANDOM_CHECK_SENT` tới device giả (push luôn fail) → có dòng
+    `EMAIL_FALLBACK`/`FALLBACK_EMAIL_SENT` trong `notification_delivery_logs`. Gửi
+    `EMPLOYEE_INVITED` (priority=normal) tới cùng kiểu device giả → push fail nhưng KHÔNG có dòng
+    fallback nào — đúng theo thiết kế mới. `test_fcm_retry_fallback.sh` cập nhật dùng
+    `RANDOM_CHECK_SENT` thay vì eventType giả `TEST_RETRY` (không nằm trong catalog → priority
+    "normal" → sẽ không còn test được đường fallback) — PASS 11/11. Regression toàn bộ
+    notification suite (templates 29/29, settings 24/24, inbox 16/16, mark-read 13/13, devices
+    13/13, dispatch 9/9) + audit 14/14 — không lỗi.
   - *User Story:* Là một hệ thống, tôi muốn retry khi gửi thông báo thất bại để tăng tỷ lệ nhận thông báo.
   - *Acceptance Criteria:* Retry tối đa theo policy; cập nhật retry_count/failure_reason; fallback email/SMS cho priority critical.
   - *DB Entities:* `notifications, tokens`

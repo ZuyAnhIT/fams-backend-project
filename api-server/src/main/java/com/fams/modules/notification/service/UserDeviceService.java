@@ -79,13 +79,15 @@ public class UserDeviceService {
 
   /**
    * Sends a push notification to all active devices of a user with retry + delivery logging.
-   * Falls back to email if all FCM attempts fail for every device.
+   * Falls back to email if all FCM attempts fail for every device. No eventType here, so
+   * fallback always fires regardless of priority — matches the only caller of this overload
+   * (ScheduledJobMonitor's platform-admin job-failure alert), which is inherently ops-critical.
    *
    * @param notificationId in-app notification UUID (may be null for push-only paths)
    * @return number of devices that received a successful push
    */
   public int sendPush(UUID notificationId, UUID userId, String title, String body) {
-    return sendPush(notificationId, userId, title, body, null);
+    return sendPush(notificationId, userId, title, body, null, true);
   }
 
   /**
@@ -94,8 +96,27 @@ public class UserDeviceService {
    * expiresAt straight to the device even while the app is fully closed, instead of only being
    * retrievable once the app opens and syncs GET /notifications (which already carries this same
    * data in Notification.metadata, but only reachable from inside a running app).
+   *
+   * @deprecated fallback-eligibility must be explicit — use the 6-arg overload with
+   *     {@code fallbackEligible} so a caller can't accidentally get (or accidentally not get)
+   *     an email fallback for a non-critical eventType. Kept only for the ScheduledJobMonitor
+   *     3-arg overload's internal delegation.
    */
   public int sendPush(UUID notificationId, UUID userId, String title, String body, Map<String, String> data) {
+    return sendPush(notificationId, userId, title, body, data, true);
+  }
+
+  /**
+   * #140 (2026-08-19): email fallback previously fired for EVERY notification whose push failed
+   * on all devices, regardless of priority — Acceptance Criteria calls for fallback scoped to
+   * {@code critical} priority only (non-critical notifications are fine to simply miss if push
+   * fails; a low-priority "your report is ready" email is more annoying than useful). Callers
+   * that know their eventType's priority pass it explicitly via {@code fallbackEligible} rather
+   * than this method re-deriving it, since NotificationService already resolves priority once
+   * via NotificationEventTypeCatalog and re-deriving here would duplicate that lookup.
+   */
+  public int sendPush(UUID notificationId, UUID userId, String title, String body, Map<String, String> data,
+                       boolean fallbackEligible) {
     List<UserDevice> devices = userDeviceRepository.findActiveByUserId(userId);
     if (devices.isEmpty()) {
       log.debug("No active devices for userId={} — skipping FCM push", userId);
@@ -131,7 +152,7 @@ public class UserDeviceService {
 
     log.info("FCM push: {}/{} devices succeeded for userId={}", sent, devices.size(), userId);
 
-    if (sent == 0 && !devices.isEmpty()) {
+    if (sent == 0 && !devices.isEmpty() && fallbackEligible) {
       sendEmailFallback(notificationId, userId, title, body);
     }
 

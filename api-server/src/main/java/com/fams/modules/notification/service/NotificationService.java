@@ -183,7 +183,12 @@ public class NotificationService {
       Map<String, String> pushData = toPushDataPayload(eventType, metadata);
       // notificationId may be null here (in-app disabled, push-only path) — the delivery log
       // FK already tolerates that, see UserDeviceService.sendPush's Javadoc.
-      userDeviceService.sendPush(saved != null ? saved.getId() : null, userId, resolvedTitle, resolvedBody, pushData);
+      // #140 (2026-08-19): email fallback is scoped to critical priority only — AC requires it,
+      // previously every eventType fell back regardless.
+      boolean fallbackEligible = "critical".equals(
+              com.fams.modules.notification.constant.NotificationEventTypeCatalog.defaultPriorityFor(eventType));
+      userDeviceService.sendPush(saved != null ? saved.getId() : null, userId, resolvedTitle, resolvedBody,
+              pushData, fallbackEligible);
     }
 
     return saved != null ? toResponse(saved) : null;
