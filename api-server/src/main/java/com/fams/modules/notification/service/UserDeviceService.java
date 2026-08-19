@@ -87,7 +87,7 @@ public class UserDeviceService {
    * @return number of devices that received a successful push
    */
   public int sendPush(UUID notificationId, UUID userId, String title, String body) {
-    return sendPush(notificationId, userId, title, body, null, true);
+    return sendPush(notificationId, null, userId, title, body, null, true);
   }
 
   /**
@@ -103,7 +103,7 @@ public class UserDeviceService {
    *     3-arg overload's internal delegation.
    */
   public int sendPush(UUID notificationId, UUID userId, String title, String body, Map<String, String> data) {
-    return sendPush(notificationId, userId, title, body, data, true);
+    return sendPush(notificationId, null, userId, title, body, data, true);
   }
 
   /**
@@ -114,9 +114,13 @@ public class UserDeviceService {
    * that know their eventType's priority pass it explicitly via {@code fallbackEligible} rather
    * than this method re-deriving it, since NotificationService already resolves priority once
    * via NotificationEventTypeCatalog and re-deriving here would duplicate that lookup.
+   *
+   * @param tenantId #144 (2026-08-19 follow-up): threaded through to every
+   *     NotificationDeliveryLog row so per-tenant queries/retention become possible — null for
+   *     callers with no tenant context (e.g. ScheduledJobMonitor's platform-admin ops alerts).
    */
-  public int sendPush(UUID notificationId, UUID userId, String title, String body, Map<String, String> data,
-                       boolean fallbackEligible) {
+  public int sendPush(UUID notificationId, UUID tenantId, UUID userId, String title, String body,
+                       Map<String, String> data, boolean fallbackEligible) {
     List<UserDevice> devices = userDeviceRepository.findActiveByUserId(userId);
     if (devices.isEmpty()) {
       log.debug("No active devices for userId={} — skipping FCM push", userId);
@@ -130,6 +134,7 @@ public class UserDeviceService {
       String status = result.success() ? "SUCCESS" : "FAILED";
       deliveryLogRepository.save(NotificationDeliveryLog.builder()
           .notificationId(notificationId)
+          .tenantId(tenantId)
           .deviceToken(device.getDeviceToken())
           .channel("FCM")
           .attemptNumber(result.attempts())
@@ -153,7 +158,7 @@ public class UserDeviceService {
     log.info("FCM push: {}/{} devices succeeded for userId={}", sent, devices.size(), userId);
 
     if (sent == 0 && !devices.isEmpty() && fallbackEligible) {
-      sendEmailFallback(notificationId, userId, title, body);
+      sendEmailFallback(notificationId, tenantId, userId, title, body);
     }
 
     return sent;
@@ -164,7 +169,7 @@ public class UserDeviceService {
     return sendPush(null, userId, title, body);
   }
 
-  private void sendEmailFallback(UUID notificationId, UUID userId, String title, String body) {
+  private void sendEmailFallback(UUID notificationId, UUID tenantId, UUID userId, String title, String body) {
     try {
       String email = userRepository.findByIdAndDeletedAtIsNull(userId)
           .map(u -> u.getEmail())
@@ -176,6 +181,7 @@ public class UserDeviceService {
       emailService.sendNotificationFallback(email, title, body);
       deliveryLogRepository.save(NotificationDeliveryLog.builder()
           .notificationId(notificationId)
+          .tenantId(tenantId)
           .deviceToken(null)
           .channel("EMAIL_FALLBACK")
           .attemptNumber(1)
@@ -187,6 +193,7 @@ public class UserDeviceService {
       log.error("Email fallback failed for userId={}: {}", userId, e.getMessage(), e);
       deliveryLogRepository.save(NotificationDeliveryLog.builder()
           .notificationId(notificationId)
+          .tenantId(tenantId)
           .deviceToken(null)
           .channel("EMAIL_FALLBACK")
           .attemptNumber(1)

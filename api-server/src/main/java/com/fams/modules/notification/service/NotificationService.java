@@ -187,7 +187,7 @@ public class NotificationService {
       // previously every eventType fell back regardless.
       boolean fallbackEligible = "critical".equals(
               com.fams.modules.notification.constant.NotificationEventTypeCatalog.defaultPriorityFor(eventType));
-      userDeviceService.sendPush(saved != null ? saved.getId() : null, userId, resolvedTitle, resolvedBody,
+      userDeviceService.sendPush(saved != null ? saved.getId() : null, tenantId, userId, resolvedTitle, resolvedBody,
               pushData, fallbackEligible);
     }
 

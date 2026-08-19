@@ -57,6 +57,17 @@ public class AuditLog {
   @Column(name = "user_agent")
   private String userAgent;
 
+  /** #138 (2026-08-19 follow-up): captured synchronously in AuditLogService#record — the
+   *  request path is known at record time, unlike httpStatus below. */
+  @Column(name = "endpoint", length = 500)
+  private String endpoint;
+
+  /** #138 (2026-08-19 follow-up): NOT known when record() runs (the controller hasn't returned
+   *  yet) — backfilled best-effort by RequestIdFilter after the response completes, correlated
+   *  by requestId. Null if the backfill never ran or failed; never blocks the real response. */
+  @Column(name = "http_status")
+  private Integer httpStatus;
+
   @Column(name = "created_at", nullable = false, updatable = false)
   private OffsetDateTime createdAt;
 

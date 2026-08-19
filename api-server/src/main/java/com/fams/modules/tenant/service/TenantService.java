@@ -374,7 +374,22 @@ public class TenantService {
         Map<UUID, User> userMap = userRepository.findAllById(ownerIds).stream()
                 .collect(Collectors.toMap(User::getId, u -> u));
 
-        Page<TenantResponse> resultPage = tenantPage.map(t -> toResponse(t, userMap.get(t.getOwnerId())));
+        // #16 (2026-08-19): plan/subscription was entirely missing from the list response — batch
+        // fetch (2 extra queries total, not N+1) rather than a per-tenant lookup like
+        // TenantDetailService does for a single tenant.
+        List<UUID> tenantIds = tenantPage.getContent().stream().map(Tenant::getId).collect(Collectors.toList());
+        Map<UUID, TenantSubscription> subByTenantId = subscriptionRepository.findAllByTenantIdIn(tenantIds).stream()
+                .collect(Collectors.toMap(TenantSubscription::getTenantId, s -> s, (a, b) -> a));
+        List<UUID> planIds = subByTenantId.values().stream()
+                .map(TenantSubscription::getPlanId).filter(id -> id != null).distinct().collect(Collectors.toList());
+        Map<UUID, Plan> planById = planRepository.findAllById(planIds).stream()
+                .collect(Collectors.toMap(Plan::getId, p -> p));
+
+        Page<TenantResponse> resultPage = tenantPage.map(t -> {
+            TenantSubscription sub = subByTenantId.get(t.getId());
+            Plan plan = sub != null ? planById.get(sub.getPlanId()) : null;
+            return toResponse(t, userMap.get(t.getOwnerId()), sub, plan);
+        });
 
         return PageResponse.from(resultPage);
     }
@@ -469,6 +484,10 @@ public class TenantService {
     }
 
     private TenantResponse toResponse(Tenant tenant, User owner) {
+        return toResponse(tenant, owner, null, null);
+    }
+
+    private TenantResponse toResponse(Tenant tenant, User owner, TenantSubscription subscription, Plan plan) {
         return TenantResponse.builder()
                 .id(tenant.getId())
                 .name(tenant.getName())
@@ -484,6 +503,10 @@ public class TenantService {
                 .ownerId(tenant.getOwnerId())
                 .ownerName(owner != null ? owner.getDisplayName() : null)
                 .ownerEmail(owner != null ? owner.getEmail() : null)
+                .planName(plan != null ? plan.getName() : null)
+                .planId(plan != null ? plan.getId() : null)
+                .subscriptionStatus(subscription != null && subscription.getStatus() != null
+                        ? subscription.getStatus().name() : null)
                 .createdAt(tenant.getCreatedAt())
                 .updatedAt(tenant.getUpdatedAt())
                 .build();

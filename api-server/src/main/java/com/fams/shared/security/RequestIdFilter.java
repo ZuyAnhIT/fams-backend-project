@@ -1,9 +1,11 @@
 package com.fams.shared.security;
 
+import com.fams.modules.audit.service.AuditLogService;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
@@ -26,12 +28,19 @@ import java.util.UUID;
  * the same HTTP request. Runs at the very front of the filter chain (highest precedence) so the
  * ID is available to every filter/service that runs after it, including JwtAuthFilter.
  */
+@Slf4j
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE)
 public class RequestIdFilter extends OncePerRequestFilter {
 
     public static final String HEADER = "X-Request-Id";
     public static final String ATTRIBUTE = "fams.requestId";
+
+    private final AuditLogService auditLogService;
+
+    public RequestIdFilter(AuditLogService auditLogService) {
+        this.auditLogService = auditLogService;
+    }
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
@@ -42,6 +51,23 @@ public class RequestIdFilter extends OncePerRequestFilter {
         }
         request.setAttribute(ATTRIBUTE, requestId);
         response.setHeader(HEADER, requestId);
-        filterChain.doFilter(request, response);
+        try {
+            filterChain.doFilter(request, response);
+        } finally {
+            // #138 (2026-08-19 follow-up): httpStatus is only known now, after the response has
+            // completed — backfill it onto whatever audit_logs rows this same request wrote
+            // (correlated by requestId). Skipped entirely unless AuditLogService#record actually
+            // ran during this request (the vast majority of requests, e.g. plain GETs, never
+            // call it) so this doesn't add a DB round-trip to every single request. Best-effort:
+            // never lets a failure here surface to the client — the real response is already
+            // being sent by the time this runs.
+            if (HttpRequestUtils.wasAuditWritten(request)) {
+                try {
+                    auditLogService.backfillHttpStatus(requestId, response.getStatus());
+                } catch (Exception e) {
+                    log.warn("Failed to backfill httpStatus for requestId={}: {}", requestId, e.getMessage());
+                }
+            }
+        }
     }
 }

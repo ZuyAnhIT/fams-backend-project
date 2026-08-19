@@ -4,6 +4,7 @@ import com.fams.modules.audit.service.AuditLogService;
 import com.fams.modules.auth.entity.User;
 import com.fams.modules.auth.repository.UserRepository;
 import com.fams.modules.rbac.repository.UserRoleRepository;
+import com.fams.modules.tenant.repository.TenantRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -26,6 +27,7 @@ class UserProfileServiceTest {
     @Mock private EmailService emailService;
     @Mock private PhoneOtpService phoneOtpService;
     @Mock private UserRoleRepository userRoleRepository;
+    @Mock private TenantRepository tenantRepository;
     @Mock private AuditLogService auditLogService;
 
     @Test
@@ -49,6 +51,7 @@ class UserProfileServiceTest {
                 emailService,
                 phoneOtpService,
                 userRoleRepository,
+                tenantRepository,
                 auditLogService,
                 "http://192.168.1.145:3000");
 

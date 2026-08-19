@@ -9,6 +9,8 @@ import com.fams.modules.auth.specification.UserSpecification;
 import com.fams.modules.auth.util.PhoneNumbers;
 import com.fams.modules.rbac.entity.UserRole;
 import com.fams.modules.rbac.repository.UserRoleRepository;
+import com.fams.modules.rbac.util.PrimaryRoleResolver;
+import com.fams.modules.tenant.repository.TenantRepository;
 import com.fams.shared.exception.DuplicateResourceException;
 import com.fams.shared.exception.InvalidCredentialsException;
 import com.fams.shared.pagination.PageResponse;
@@ -40,6 +42,7 @@ public class UserProfileService {
     private final EmailService emailService;
     private final PhoneOtpService phoneOtpService;
     private final UserRoleRepository userRoleRepository;
+    private final TenantRepository tenantRepository;
     private final AuditLogService auditLogService;
     private final String frontendUrl;
 
@@ -49,6 +52,7 @@ public class UserProfileService {
                               EmailService emailService,
                               PhoneOtpService phoneOtpService,
                               UserRoleRepository userRoleRepository,
+                              TenantRepository tenantRepository,
                               AuditLogService auditLogService,
                               @Value("${app.frontend-url}") String frontendUrl) {
         this.userRepository = userRepository;
@@ -57,6 +61,7 @@ public class UserProfileService {
         this.emailService = emailService;
         this.phoneOtpService = phoneOtpService;
         this.userRoleRepository = userRoleRepository;
+        this.tenantRepository = tenantRepository;
         this.auditLogService = auditLogService;
         this.frontendUrl = frontendUrl;
     }
@@ -286,6 +291,19 @@ public class UserProfileService {
     }
 
     private UserProfileResponse toResponse(User user) {
+        // #10 (2026-08-19): totpEnabled + current tenant were missing — AC gap. Primary tenant
+        // resolved via the exact same PrimaryRoleResolver used by AuthService.login to pick the
+        // JWT's tenant claim, so "current tenant" here matches what a fresh login would land the
+        // user on (no separate per-session tenant concept exists yet — see JwtAuthFilter/
+        // FamsUserDetails, neither carries a tenantId today).
+        List<UserRole> roles = userRoleRepository.findAllActiveByUserId(user.getId());
+        UserRole primary = PrimaryRoleResolver.pickPrimary(roles);
+        UUID currentTenantId = primary != null ? primary.getTenantId() : null;
+        String currentTenantName = currentTenantId != null
+                ? tenantRepository.findByIdAndDeletedAtIsNull(currentTenantId).map(t -> t.getName()).orElse(null)
+                : null;
+        String currentRoleName = primary != null ? primary.getRole().getName() : null;
+
         return UserProfileResponse.builder()
                 .id(user.getId())
                 .email(user.getEmail())
@@ -301,6 +319,10 @@ public class UserProfileService {
                 .googleLinked(user.getGoogleId() != null)
                 .isActive(user.isActive())
                 .isPlatformAdmin(user.isPlatformAdmin())
+                .totpEnabled(user.isTotpEnabled())
+                .currentTenantId(currentTenantId)
+                .currentTenantName(currentTenantName)
+                .currentTenantRole(currentRoleName)
                 .lastLoginAt(user.getLastLoginAt())
                 .createdAt(user.getCreatedAt())
                 .updatedAt(user.getUpdatedAt())

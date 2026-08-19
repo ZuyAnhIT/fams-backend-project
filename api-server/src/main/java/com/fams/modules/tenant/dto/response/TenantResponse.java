@@ -54,6 +54,15 @@ public class TenantResponse {
     @Schema(description = "Email of the tenant owner", example = "nguyenvana@example.com")
     private String ownerEmail;
 
+    @Schema(description = "Subscribed plan name, null if the tenant has no subscription row yet (#16, 2026-08-19)", example = "pro")
+    private String planName;
+
+    @Schema(description = "Subscribed plan UUID, null if no subscription (#16, 2026-08-19)")
+    private UUID planId;
+
+    @Schema(description = "Subscription status: active, trial, expired, cancelled — null if no subscription (#16, 2026-08-19)", example = "active")
+    private String subscriptionStatus;
+
     @Schema(description = "Creation timestamp (UTC)")
     private OffsetDateTime createdAt;
 

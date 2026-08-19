@@ -56,6 +56,32 @@ public final class HttpRequestUtils {
         return truncate(request.getRemoteAddr());
     }
 
+    /** #138 (2026-08-19 follow-up): request path, used by AuditLogService#record to auto-populate
+     *  AuditLog.endpoint without touching any of its ~50 call sites — same "current*() reads from
+     *  RequestContextHolder" pattern as every other method here. Null outside a request context
+     *  (e.g. a scheduled job), same as the others. */
+    public static String currentRequestPath() {
+        HttpServletRequest request = currentRequest();
+        return request == null ? null : truncate(request.getRequestURI());
+    }
+
+    /** #138 (2026-08-19 follow-up): marks the current request as having written at least one
+     *  audit row, so RequestIdFilter's post-response httpStatus backfill can skip the (indexed
+     *  but still non-free) UPDATE for the vast majority of requests — plain GETs and any other
+     *  call that never reaches AuditLogService#record — instead of firing on every request. */
+    public static void markAuditWritten() {
+        HttpServletRequest request = currentRequest();
+        if (request != null) {
+            request.setAttribute(AUDIT_WRITTEN_ATTRIBUTE, Boolean.TRUE);
+        }
+    }
+
+    public static boolean wasAuditWritten(HttpServletRequest request) {
+        return Boolean.TRUE.equals(request.getAttribute(AUDIT_WRITTEN_ATTRIBUTE));
+    }
+
+    private static final String AUDIT_WRITTEN_ATTRIBUTE = "fams.auditWritten";
+
     private static HttpServletRequest currentRequest() {
         var attrs = RequestContextHolder.getRequestAttributes();
         if (attrs instanceof ServletRequestAttributes servletAttrs) {
