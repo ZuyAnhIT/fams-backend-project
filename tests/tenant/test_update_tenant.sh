@@ -2,9 +2,13 @@
 # Tests for PATCH /api/v1/tenants/{id} (update tenant profile)
 # Usage: BASE_URL=http://localhost:8080 bash test_update_tenant.sh
 #
-# Owner-only by product decision (24/07/2026): whoever provisions a tenant — including
-# Platform Admin/Staff — does NOT retain edit rights afterward. Only the assigned owner
-# can PATCH the tenant's profile. See TenantService.updateTenant.
+# Owner-only by product decision (24/07/2026), EXCEPT Platform Admin (exemption added
+# 2026-08-14, docs/reviews/backend/rbac-role-permission-audit-2026-08-13.md muc 6): whoever
+# provisions a tenant does NOT retain edit rights afterward unless they are a Platform Admin —
+# regular non-owner users are still forbidden, but Platform Admin can always update a tenant's
+# profile (support cases where the owner lost account access entirely). Matches how every
+# other sensitive tenant resource already treats Platform Admin (IP whitelist, tenant
+# settings). See TenantService.updateTenant.
 
 set -euo pipefail
 
@@ -176,17 +180,17 @@ run_test "Non-owner forbidden" 403 \
     -H "Authorization: Bearer $REGULAR_TOKEN" \
     -d '{"name":"Hacked Corp"}'
 
-# Test 7: Platform Admin — including the admin who PROVISIONED this very tenant — is now
-# ALSO forbidden from editing it. This is the core behavior change: provisioning rights
-# (create + assign owner/plan) are separate from ongoing edit rights, which belong solely
-# to the assigned owner.
+# Test 7: Platform Admin — including the admin who PROVISIONED this very tenant — IS allowed
+# to edit it (exemption added 2026-08-14 for support cases where the owner lost account
+# access entirely). Provisioning rights and ongoing edit rights both extend to Platform Admin,
+# on top of the assigned owner — unlike a regular non-owner user (Test 6), which stays 403.
 echo ""
-echo "--- Test 7: Forbidden (platform admin, even the one who provisioned it) ---"
-run_test "Platform admin forbidden" 403 \
+echo "--- Test 7: Platform admin allowed (support-access exemption, 2026-08-14) ---"
+run_test "Platform admin allowed" 200 \
     -X PATCH "$BASE_URL/api/v1/tenants/$TENANT_ID" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d '{"name":"Admin Overreach Corp"}'
+    -d '{"name":"Admin Support Edit Corp"}'
 
 # Test 8: Duplicate domain conflict → 409 (as owner)
 echo ""

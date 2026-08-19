@@ -104,7 +104,7 @@ public class ManualCheckService {
                         "No random check config found for tenant " + tenantId));
 
         // Enforce monthly random check quota
-        planLimitEnforcementService.assertRandomCheckLimit(tenantId);
+        planLimitEnforcementService.assertRandomCheckLimit(tenantId, triggeredBy);
 
         // Validate and apply checkMode override
         String checkMode = resolveCheckMode(request.getCheckMode(), config.getCheckMode());

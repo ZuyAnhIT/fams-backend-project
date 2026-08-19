@@ -38,6 +38,10 @@ public class PlanLimits {
     @Column(name = "max_random_checks_per_month")
     private Integer maxRandomChecksPerMonth;
 
+    /** null means unlimited (#135, 2026-08-19) */
+    @Column(name = "max_exports_per_month")
+    private Integer maxExportsPerMonth;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
 

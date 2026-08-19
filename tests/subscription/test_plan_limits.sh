@@ -66,13 +66,15 @@ ORIG_MAX_EMPLOYEES=$(echo "$orig_limits_body" | grep -o '"maxEmployees":[0-9]*' 
 ORIG_MAX_SITES=$(echo "$orig_limits_body" | grep -o '"maxSites":[0-9]*' | cut -d: -f2 || true)
 ORIG_MAX_STORAGE=$(echo "$orig_limits_body" | grep -o '"maxStorageGb":[0-9]*' | cut -d: -f2 || true)
 ORIG_MAX_RANDOM_CHECKS=$(echo "$orig_limits_body" | grep -o '"maxRandomChecksPerMonth":[0-9]*' | cut -d: -f2 || true)
+ORIG_MAX_EXPORTS=$(echo "$orig_limits_body" | grep -o '"maxExportsPerMonth":[0-9]*' | cut -d: -f2 || true)
 
 restore_trial_limits() {
     local body="{"
     if [ -n "$ORIG_MAX_EMPLOYEES" ]; then body="${body}\"maxEmployees\":$ORIG_MAX_EMPLOYEES,"; else body="${body}\"clearMaxEmployees\":true,"; fi
     if [ -n "$ORIG_MAX_SITES" ]; then body="${body}\"maxSites\":$ORIG_MAX_SITES,"; else body="${body}\"clearMaxSites\":true,"; fi
     if [ -n "$ORIG_MAX_STORAGE" ]; then body="${body}\"maxStorageGb\":$ORIG_MAX_STORAGE,"; else body="${body}\"clearMaxStorageGb\":true,"; fi
-    if [ -n "$ORIG_MAX_RANDOM_CHECKS" ]; then body="${body}\"maxRandomChecksPerMonth\":$ORIG_MAX_RANDOM_CHECKS"; else body="${body}\"clearMaxRandomChecksPerMonth\":true"; fi
+    if [ -n "$ORIG_MAX_RANDOM_CHECKS" ]; then body="${body}\"maxRandomChecksPerMonth\":$ORIG_MAX_RANDOM_CHECKS,"; else body="${body}\"clearMaxRandomChecksPerMonth\":true,"; fi
+    if [ -n "$ORIG_MAX_EXPORTS" ]; then body="${body}\"maxExportsPerMonth\":$ORIG_MAX_EXPORTS"; else body="${body}\"clearMaxExportsPerMonth\":true"; fi
     body="${body}}"
     curl -s -o /dev/null -X PATCH "$BASE_URL/api/v1/plans/$TRIAL_PLAN_ID/limits" \
         -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" \

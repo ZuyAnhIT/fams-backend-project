@@ -32,6 +32,7 @@ public class TenantDetailService {
     private final EmployeeRepository employeeRepository;
     private final SiteRepository siteRepository;
     private final ScheduledCheckRepository scheduledCheckRepository;
+    private final TenantStorageUsageService tenantStorageUsageService;
 
     public TenantDetailService(TenantRepository tenantRepository,
                                TenantSubscriptionRepository subscriptionRepository,
@@ -39,7 +40,8 @@ public class TenantDetailService {
                                PlanLimitsRepository planLimitsRepository,
                                EmployeeRepository employeeRepository,
                                SiteRepository siteRepository,
-                               ScheduledCheckRepository scheduledCheckRepository) {
+                               ScheduledCheckRepository scheduledCheckRepository,
+                               TenantStorageUsageService tenantStorageUsageService) {
         this.tenantRepository = tenantRepository;
         this.subscriptionRepository = subscriptionRepository;
         this.planRepository = planRepository;
@@ -47,6 +49,7 @@ public class TenantDetailService {
         this.employeeRepository = employeeRepository;
         this.siteRepository = siteRepository;
         this.scheduledCheckRepository = scheduledCheckRepository;
+        this.tenantStorageUsageService = tenantStorageUsageService;
     }
 
     /**
@@ -83,6 +86,7 @@ public class TenantDetailService {
         LocalDate monthStart = today.withDayOfMonth(1);
         LocalDate monthEnd = today.withDayOfMonth(today.lengthOfMonth());
         long monthlyChecks = scheduledCheckRepository.countByTenantAndMonth(tenantId, monthStart, monthEnd);
+        double storageGb = tenantStorageUsageService.computeUsedBytes(tenantId) / 1_073_741_824.0;
 
         log.info("Tenant detail fetched: id={}", tenantId);
 
@@ -115,6 +119,7 @@ public class TenantDetailService {
                 .currentEmployeeCount(employeeCount)
                 .currentSiteCount(siteCount)
                 .currentMonthRandomChecks(monthlyChecks)
+                .currentStorageGb(storageGb)
                 .build();
     }
 }

@@ -220,7 +220,7 @@ public class EmployeeInvitationService {
         // closes at accept-time below). A pending invite doesn't reserve a seat, so this can
         // still race with other invites/direct creates between now and acceptance; that's fine,
         // it just means HR occasionally finds out at accept-time instead of at send-time.
-        planLimitEnforcementService.assertEmployeeLimit(tenantId);
+        planLimitEnforcementService.assertEmployeeLimit(tenantId, callerUserId);
 
         String normalizedEmail = request.getEmail().trim().toLowerCase();
         String normalizedPhone = (request.getPhone() != null) ? request.getPhone().trim() : null;
@@ -467,7 +467,7 @@ public class EmployeeInvitationService {
                 // invites were already sent) its maxEmployees limit could still onboard
                 // unlimited staff simply by accepting pending invitations — the direct-create
                 // API path was gated, this one silently wasn't.
-                planLimitEnforcementService.assertEmployeeLimit(invitation.getTenantId());
+                planLimitEnforcementService.assertEmployeeLimit(invitation.getTenantId(), user.getId());
 
                 String firstName;
                 String lastName;

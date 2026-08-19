@@ -43,14 +43,37 @@ t_body=$(echo "$t_resp" | head -n -1); t_status=$(echo "$t_resp" | tail -n 1)
 TENANT_ID=$(echo "$t_body" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 echo "Tenant: $TENANT_ID"
 
-echo "--- Setup: Create employee ---"
-emp_resp=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/tenants/$TENANT_ID/employees" \
+# Found via audit (2026-08-19): the employee here must have a real login of their own —
+# FaceIdService.giveConsent deliberately only allows the data subject themselves to consent
+# (Nghị định 13/2023/NĐ-CP), not HR/Admin on their behalf, even for an employee they just
+# created. A direct POST /employees record has no user_id at all, so consent could never
+# succeed for it no matter which token is used — must go through invite+accept to get a real
+# employee-owned token, same pattern as tests/face-id/test_consent.sh Test 2.
+echo "--- Setup: Invite + accept employee (needs a real login for self-service consent) ---"
+INV_EMAIL="jverify.$TS@example.com"
+inv_resp=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/tenants/$TENANT_ID/invitations" \
     -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" \
-    -d "{\"firstName\":\"Jane\",\"lastName\":\"Verify\",\"email\":\"jverify.$TS@example.com\"}")
-emp_body=$(echo "$emp_resp" | head -n -1); emp_status=$(echo "$emp_resp" | tail -n 1)
-[ "$emp_status" -eq 201 ] || { echo "SETUP FAILED: create employee HTTP $emp_status — $emp_body"; exit 1; }
-EMP_ID=$(echo "$emp_body" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
-echo "Employee: $EMP_ID"
+    -d "{\"email\":\"$INV_EMAIL\",\"firstName\":\"Jane\",\"lastName\":\"Verify\"}")
+inv_status=$(echo "$inv_resp" | tail -n 1)
+[ "$inv_status" -eq 201 ] || { echo "SETUP FAILED: create invitation HTTP $inv_status"; exit 1; }
+
+INV_TOKEN=$(docker exec fams-postgres psql -U "${DB_USER:-fams_user}" -d "${DB_NAME:-fams_db}" -t -c \
+    "SELECT token FROM employee_invitations WHERE email='$INV_EMAIL' AND status='pending' LIMIT 1;" \
+    2>/dev/null | grep -oE '[0-9a-f-]{36}' | head -1 || true)
+[ -n "$INV_TOKEN" ] || { echo "SETUP FAILED: could not retrieve invitation token"; exit 1; }
+
+accept_resp=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/invitations/accept" \
+    -H "Content-Type: application/json" \
+    -d "{\"token\":\"$INV_TOKEN\",\"password\":\"Verify@Pass1\"}")
+accept_body=$(echo "$accept_resp" | head -n -1); accept_status=$(echo "$accept_resp" | tail -n 1)
+[ "$accept_status" -eq 200 ] || { echo "SETUP FAILED: accept invitation HTTP $accept_status — $accept_body"; exit 1; }
+EMP_TOKEN=$(echo "$accept_body" | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4)
+EMP_USER_ID=$(echo "$EMP_TOKEN" | cut -d'.' -f2 | base64 -d 2>/dev/null | grep -o '"sub":"[^"]*"' | cut -d'"' -f4 || true)
+EMP_ID=$(docker exec fams-postgres psql -U "${DB_USER:-fams_user}" -d "${DB_NAME:-fams_db}" -t -c \
+    "SELECT id FROM employees WHERE user_id='$EMP_USER_ID' AND tenant_id='$TENANT_ID' LIMIT 1;" \
+    2>/dev/null | grep -oE '[0-9a-f-]{36}' | head -1 || true)
+[ -n "$EMP_ID" ] || { echo "SETUP FAILED: could not resolve employee id for accepted invitation"; exit 1; }
+echo "Employee: $EMP_ID (own token obtained for self-service consent)"
 
 FACE_BASE="$BASE_URL/api/v1/tenants/$TENANT_ID/employees/$EMP_ID/face-id"
 
@@ -94,7 +117,7 @@ echo ""
 # ── Enroll the employee so verify can proceed ──────────────────────────────────
 echo "--- Setup: Give consent then enroll face via ai-service ---"
 c_status=$(http_status -X POST "$FACE_BASE/consent" \
-    -H "Authorization: Bearer $TOKEN")
+    -H "Authorization: Bearer $EMP_TOKEN")
 [ "$c_status" -eq 200 ] || { echo "SETUP FAILED: consent HTTP $c_status"; exit 1; }
 echo "Consent given."
 

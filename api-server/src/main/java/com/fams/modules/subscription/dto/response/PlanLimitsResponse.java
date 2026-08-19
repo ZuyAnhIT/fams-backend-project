@@ -30,6 +30,9 @@ public class PlanLimitsResponse {
     @Schema(description = "Maximum random checks per month (null = unlimited)", example = "50")
     private Integer maxRandomChecksPerMonth;
 
+    @Schema(description = "Maximum report exports per month (null = unlimited) — #135, 2026-08-19", example = "100")
+    private Integer maxExportsPerMonth;
+
     @Schema(description = "Last update timestamp (UTC)")
     private OffsetDateTime updatedAt;
 }

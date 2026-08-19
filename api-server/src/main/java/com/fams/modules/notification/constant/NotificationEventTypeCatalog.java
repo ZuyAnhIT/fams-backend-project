@@ -135,7 +135,23 @@ public final class NotificationEventTypeCatalog {
                     "Gửi cho bạn khi HR/quản lý bỏ qua (không tính) một vi phạm đã ghi nhận trước đó.",
                     true,
                     false,
-                    "normal")
+                    "normal"),
+            new NotificationEventTypeInfo(
+                    // Must match com.fams.modules.tenant.constant.TenantEventTypes.TENANT_SUSPENDED_OWNER
+                    "TENANT_SUSPENDED_OWNER",
+                    "Công ty bị tạm khóa",
+                    "Gửi cho chủ công ty khi Platform Admin tạm khóa (suspend) công ty của bạn.",
+                    true,
+                    true,
+                    "critical"),
+            new NotificationEventTypeInfo(
+                    // Must match com.fams.modules.tenant.constant.TenantEventTypes.TENANT_REACTIVATED_OWNER
+                    "TENANT_REACTIVATED_OWNER",
+                    "Công ty đã được mở lại",
+                    "Gửi cho chủ công ty khi Platform Admin mở lại (reactivate) công ty của bạn.",
+                    true,
+                    true,
+                    "high")
     );
 
     private static final Map<String, String> PRIORITY_BY_EVENT_TYPE = ALL.stream()
