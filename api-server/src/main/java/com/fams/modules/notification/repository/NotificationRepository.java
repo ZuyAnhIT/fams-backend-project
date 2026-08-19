@@ -60,6 +60,13 @@ public interface NotificationRepository extends JpaRepository<Notification, UUID
   @Query("DELETE FROM Notification n WHERE n.createdAt < :cutoff AND n.isRead = true")
   int deleteReadNotificationsOlderThan(@Param("cutoff") OffsetDateTime cutoff);
 
+  /** #144 (2026-08-19): tenant-scoped variant — DataRetentionJob now resolves each tenant's own
+   *  effective retention window (tenant_settings.data_retention_days override, or the platform
+   *  default) rather than sweeping every tenant with one global cutoff. */
+  @Modifying
+  @Query("DELETE FROM Notification n WHERE n.tenantId = :tenantId AND n.createdAt < :cutoff AND n.isRead = true")
+  int deleteReadNotificationsOlderThan(@Param("tenantId") UUID tenantId, @Param("cutoff") OffsetDateTime cutoff);
+
   /** Bulk-mark a specific set of notifications as read (audit 2026-08-05 — previously the only
    *  choices were exactly one, via markAsRead, or literally all via markAllAsRead; nothing for a
    *  user multi-selecting a subset of their inbox, the common case in Gmail/Slack-style UIs).

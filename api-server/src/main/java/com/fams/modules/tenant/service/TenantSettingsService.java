@@ -73,6 +73,11 @@ public class TenantSettingsService {
             settings.setEmployeeCodePrefix(request.getEmployeeCodePrefix().isBlank() ? null : request.getEmployeeCodePrefix().trim().toUpperCase());
         if (request.getEmployeeCodePadding() != null)
             settings.setEmployeeCodePadding(request.getEmployeeCodePadding().shortValue());
+        if (request.isClearDataRetentionDays()) {
+            settings.setDataRetentionDays(null);
+        } else if (request.getDataRetentionDays() != null) {
+            settings.setDataRetentionDays(request.getDataRetentionDays());
+        }
 
         settingsRepository.save(settings);
         log.info("Tenant settings updated: tenantId={} by userId={}", tenantId, userId);
@@ -101,6 +106,7 @@ public class TenantSettingsService {
         snapshot.put("brandAccentColor", settings.getBrandAccentColor());
         snapshot.put("employeeCodePrefix", settings.getEmployeeCodePrefix());
         snapshot.put("employeeCodePadding", settings.getEmployeeCodePadding());
+        snapshot.put("dataRetentionDays", settings.getDataRetentionDays());
         return snapshot;
     }
 
@@ -170,6 +176,7 @@ public class TenantSettingsService {
                 .brandAccentColor(s.getBrandAccentColor())
                 .employeeCodePrefix(s.getEmployeeCodePrefix())
                 .employeeCodePadding(s.getEmployeeCodePadding())
+                .dataRetentionDays(s.getDataRetentionDays())
                 .updatedAt(s.getUpdatedAt())
                 .build();
     }

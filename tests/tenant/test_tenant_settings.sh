@@ -225,6 +225,50 @@ run_test "Platform admin forbidden PATCH" 403 \
     -H "Authorization: Bearer $ADMIN_TOKEN" \
     -d '{"dateFormat":"YYYY-MM-DD"}'
 
+# Test 9: #144 (2026-08-19) — dataRetentionDays override, set/clear round-trip
+echo ""
+echo "--- Test 9: dataRetentionDays override (set, GET reflects, clear) ---"
+set_resp=$(curl -s -w "\n%{http_code}" \
+    -X PATCH "$BASE_URL/api/v1/tenants/$TENANT_ID/settings" \
+    -H "Content-Type: application/json" -H "Authorization: Bearer $OWNER_TOKEN" \
+    -d '{"dataRetentionDays":45}')
+set_body=$(echo "$set_resp" | head -n -1)
+set_status=$(echo "$set_resp" | tail -n 1)
+if [ "$set_status" -eq 200 ]; then
+    retention=$(echo "$set_body" | grep -o '"dataRetentionDays":[0-9]*' | cut -d: -f2)
+    if [ "$retention" = "45" ]; then
+        echo "PASS: PATCH sets dataRetentionDays=45 (HTTP 200)"
+        PASS=$((PASS + 1))
+    else
+        echo "FAIL: PATCH dataRetentionDays — got '$retention'"
+        FAIL=$((FAIL + 1))
+    fi
+else
+    echo "FAIL: PATCH dataRetentionDays — expected HTTP 200, got HTTP $set_status"
+    FAIL=$((FAIL + 1))
+fi
+
+get_ret_body=$(curl -s "$BASE_URL/api/v1/tenants/$TENANT_ID/settings" -H "Authorization: Bearer $OWNER_TOKEN")
+check_contains() {
+    local name="$1" haystack="$2" needle="$3"
+    if echo "$haystack" | grep -q "$needle"; then
+        echo "PASS: $name"; PASS=$((PASS + 1))
+    else
+        echo "FAIL: $name — response did not contain '$needle'"; FAIL=$((FAIL + 1))
+    fi
+}
+check_contains "GET reflects dataRetentionDays=45" "$get_ret_body" '"dataRetentionDays":45'
+
+run_test "dataRetentionDays below minimum (6) rejected — 400" 400 \
+    -X PATCH "$BASE_URL/api/v1/tenants/$TENANT_ID/settings" \
+    -H "Content-Type: application/json" -H "Authorization: Bearer $OWNER_TOKEN" \
+    -d '{"dataRetentionDays":6}'
+
+clear_resp=$(curl -s -X PATCH "$BASE_URL/api/v1/tenants/$TENANT_ID/settings" \
+    -H "Content-Type: application/json" -H "Authorization: Bearer $OWNER_TOKEN" \
+    -d '{"clearDataRetentionDays":true}')
+check_contains "clearDataRetentionDays reverts to null (platform default)" "$clear_resp" '"dataRetentionDays":null'
+
 echo ""
 echo "=== Results ==="
 echo "PASSED: $PASS"

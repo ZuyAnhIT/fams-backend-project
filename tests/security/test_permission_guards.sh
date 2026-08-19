@@ -147,6 +147,57 @@ else
 fi
 
 echo ""
+echo "=== #146 (2026-08-19): denied requests are now audited (self-contained, no env vars needed) ==="
+
+ADMIN_TOKEN=$(curl -s -X POST "$BASE_URL/api/v1/auth/login" \
+    -H "Content-Type: application/json" \
+    -d '{"identifier":"admin@fams.com","password":"Admin@1234"}' \
+    | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4)
+
+if [ -z "$ADMIN_TOKEN" ]; then
+    echo "SKIP: could not log in as admin@fams.com — skipping audit-on-denial check"
+else
+    TS=$(date +%s)
+    t_resp=$(curl -s -X POST "$BASE_URL/api/v1/tenants" \
+        -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" \
+        -d "{\"name\":\"PermGuardAudit ${TS}\",\"slug\":\"permguard-${TS}\",\"ownerEmail\":\"admin@fams.com\"}")
+    NEW_TENANT_ID=$(echo "$t_resp" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+
+    reg_email="permguard_${TS}@example.com"
+    curl -s -o /dev/null -X POST "$BASE_URL/api/v1/auth/register" \
+        -H "Content-Type: application/json" \
+        -d "{\"email\":\"$reg_email\",\"password\":\"TestPass1\",\"displayName\":\"Perm Guard Test\"}"
+    docker exec fams-postgres psql -U fams_user -d fams_db -q -c \
+        "UPDATE users SET email_verified = true WHERE email = '$reg_email';" > /dev/null 2>&1 || true
+    NON_MEMBER_TOKEN=$(curl -s -X POST "$BASE_URL/api/v1/auth/login" \
+        -H "Content-Type: application/json" \
+        -d "{\"identifier\":\"$reg_email\",\"password\":\"TestPass1\"}" \
+        | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4)
+
+    if [ -z "$NEW_TENANT_ID" ] || [ -z "$NON_MEMBER_TOKEN" ]; then
+        echo "SKIP: could not set up tenant/non-member user for audit-on-denial check"
+    else
+        # A user with no role on this tenant PATCHing its profile should be denied (403) — not
+        # PLAN_LIMIT/business logic, purely an RBAC/tenant-scope denial.
+        run_test "Non-member PATCH tenant — 403" 403 \
+            -X PATCH "$BASE_URL/api/v1/tenants/$NEW_TENANT_ID" \
+            -H "Authorization: Bearer $NON_MEMBER_TOKEN" \
+            -H "Content-Type: application/json" -d '{"name":"Should not be allowed"}'
+
+        sleep 1
+        audit_body=$(curl -s "$BASE_URL/api/v1/audit-logs?tenantId=$NEW_TENANT_ID&action=ACCESS_DENIED" \
+            -H "Authorization: Bearer $ADMIN_TOKEN")
+        if echo "$audit_body" | grep -q "\"action\":\"ACCESS_DENIED\""; then
+            echo "PASS: audit_logs has an ACCESS_DENIED row for the denied PATCH"
+            PASS=$((PASS + 1))
+        else
+            echo "FAIL: no ACCESS_DENIED row found in audit_logs for tenant $NEW_TENANT_ID"
+            FAIL=$((FAIL + 1))
+        fi
+    fi
+fi
+
+echo ""
 echo "=== Results ==="
 echo "PASS: $PASS  FAIL: $FAIL"
 [ "$FAIL" -eq 0 ]

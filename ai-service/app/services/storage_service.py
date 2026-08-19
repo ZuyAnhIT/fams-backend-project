@@ -47,15 +47,18 @@ def read_photo(path: str) -> bytes:
     return Path(path).read_bytes()
 
 
-def delete_files_older_than(root_dirname: str, older_than_days: int) -> int:
+def delete_files_older_than(root_dirname: str, older_than_days: int, tenant_id: str | None = None) -> int:
     """Age-based retention sweep for one top-level storage directory (e.g. "checkins" or
     "liveness_challenges") — walks every file under STORAGE_BASE_PATH/{root_dirname}/**
-    recursively and deletes any whose mtime is older than older_than_days. Returns the count
+    recursively (or just STORAGE_BASE_PATH/{root_dirname}/{tenant_id}/ when tenant_id is given,
+    #144 2026-08-19) and deletes any whose mtime is older than older_than_days. Returns the count
     deleted. Pure filesystem-mtime based, no DB lookup — safe for checkins/ and
     liveness_challenges/ since neither has a "pending, still needed" lifecycle state once
     written (unlike enrollments/, deliberately NOT swept here — see DataRetentionJob's Java-side
     comment for why enrollment photos need DB-aware handling instead)."""
     root = Path(STORAGE_BASE_PATH) / root_dirname
+    if tenant_id:
+        root = root / tenant_id
     if not root.exists():
         return 0
 

@@ -147,6 +147,8 @@ public class AiServiceClient {
      *  exactly what's swept (and, just as importantly, what's deliberately NOT swept). System-wide,
      *  no tenant scoping — called weekly by DataRetentionJob. */
     @SuppressWarnings("unchecked")
+    /** System-wide sweep, no tenant scoping — kept for callers that intentionally want the
+     *  platform-wide default window applied to every tenant's photos in one call. */
     public Map<String, Object> cleanupOldCheckinPhotos(int olderThanDays) {
         try {
             return restClient.post()
@@ -156,6 +158,23 @@ public class AiServiceClient {
                     .body(Map.class);
         } catch (HttpClientErrorException e) {
             log.warn("fams-ai checkin photo cleanup failed status={}", e.getStatusCode());
+            throw new AiServiceException(e.getResponseBodyAsString(), e.getStatusCode().value());
+        }
+    }
+
+    /** #144 (2026-08-19): tenant-scoped sweep — checkin/liveness-challenge photos are stored on
+     *  disk under {@code checkins/{tenantId}/} and {@code liveness_challenges/{tenantId}/}
+     *  (confirmed in fams-ai's storage_service.py), so a per-tenant retention override can be
+     *  honored without touching other tenants' files. */
+    public Map<String, Object> cleanupOldCheckinPhotos(int olderThanDays, UUID tenantId) {
+        try {
+            return restClient.post()
+                    .uri("/checkins/cleanup?older_than_days={days}&tenant_id={tenantId}", olderThanDays, tenantId)
+                    .header(HEADER_SECRET, secret)
+                    .retrieve()
+                    .body(Map.class);
+        } catch (HttpClientErrorException e) {
+            log.warn("fams-ai checkin photo cleanup failed tenantId={} status={}", tenantId, e.getStatusCode());
             throw new AiServiceException(e.getResponseBodyAsString(), e.getStatusCode().value());
         }
     }

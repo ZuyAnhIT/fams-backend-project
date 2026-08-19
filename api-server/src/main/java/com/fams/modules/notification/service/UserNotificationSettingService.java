@@ -85,6 +85,8 @@ public class UserNotificationSettingService {
         log.info("Upserting notification setting userId={} eventType={} inApp={} push={}",
                 userId, eventType, inAppEnabled, pushEnabled);
 
+        assertNotDisablingMandatoryNotification(eventType, inAppEnabled, pushEnabled);
+
         UserNotificationSetting setting = settingRepository
                 .findByUserIdAndEventType(userId, eventType)
                 .orElseGet(() -> UserNotificationSetting.builder()
@@ -98,6 +100,26 @@ public class UserNotificationSettingService {
         UserNotificationSetting saved = settingRepository.save(setting);
         log.debug("Notification setting saved id={}", saved.getId());
         return toResponse(saved);
+    }
+
+    /**
+     * #141 (2026-08-19): AC requires "không cho tắt thông báo bắt buộc như random_check_request"
+     * — genuinely missing before, a user could freely disable in-app/push for ANY eventType
+     * including RANDOM_CHECK_SENT (now the system's only "critical" priority eventType, see
+     * NotificationEventTypeCatalog — bumped from "high" as part of #140 the same day, specifically
+     * because it's the one mandatory, time-boxed notification: an employee must respond within a
+     * short window or it becomes a violation). Gating on priority=="critical" rather than
+     * hardcoding "RANDOM_CHECK_SENT" so any future mandatory eventType is covered automatically
+     * without another code change here.
+     */
+    private void assertNotDisablingMandatoryNotification(String eventType, boolean inAppEnabled, boolean pushEnabled) {
+        if (inAppEnabled && pushEnabled) return;
+        if (!"critical".equals(NotificationEventTypeCatalog.defaultPriorityFor(eventType))) return;
+        throw new com.fams.shared.exception.BusinessException(
+                "MANDATORY_NOTIFICATION",
+                "Thông báo này là bắt buộc và không thể tắt.",
+                org.springframework.http.HttpStatus.UNPROCESSABLE_ENTITY,
+                "Cannot disable mandatory notification eventType=" + eventType);
     }
 
     /**
@@ -169,6 +191,7 @@ public class UserNotificationSettingService {
                 .inAppEnabled(s.isInAppEnabled())
                 .pushEnabled(s.isPushEnabled())
                 .customized(true)
+                .mandatory("critical".equals(NotificationEventTypeCatalog.defaultPriorityFor(s.getEventType())))
                 .updatedAt(s.getUpdatedAt())
                 .build();
     }
@@ -185,6 +208,7 @@ public class UserNotificationSettingService {
                 .inAppEnabled(info.defaultInAppEnabled())
                 .pushEnabled(info.defaultPushEnabled())
                 .customized(false)
+                .mandatory("critical".equals(info.defaultPriority()))
                 .updatedAt(null)
                 .build();
     }

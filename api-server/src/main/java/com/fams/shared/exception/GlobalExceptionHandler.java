@@ -1,12 +1,17 @@
 package com.fams.shared.exception;
 
+import com.fams.modules.audit.service.AuditLogService;
 import com.fams.modules.randomcheck.service.CheckExpiredException;
 import com.fams.shared.ai.AiServiceException;
 import com.fams.shared.response.ApiResponse;
+import com.fams.shared.security.FamsUserDetails;
+import com.fams.shared.security.HttpRequestUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.validation.FieldError;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -14,16 +19,30 @@ import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    private static final Pattern TENANT_ID_IN_PATH =
+            Pattern.compile("/tenants/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})");
+
+    private final AuditLogService auditLogService;
+
+    public GlobalExceptionHandler(AuditLogService auditLogService) {
+        this.auditLogService = auditLogService;
+    }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ApiResponse<Map<String, String>>> handleValidationException(
@@ -220,13 +239,59 @@ public class GlobalExceptionHandler {
                         "Lời mời không hợp lệ hoặc đã hết hạn. Vui lòng liên hệ quản trị viên để được cấp lại."));
     }
 
+    /** #146 (2026-08-19): every @PreAuthorize / service-layer AccessDeniedException in the
+     *  system funnels through this single handler — previously it only ever returned 403, no
+     *  audit trail of who was denied what. Mirrors PlanLimitEnforcementService#recordDenied's
+     *  "PLAN_LIMIT_DENIED" pattern (same day, sibling subsystem): best-effort, never blocks the
+     *  real 403 response if the audit write itself fails. tenantId is recovered from the request
+     *  path (best-effort — many endpoints are tenant-scoped via /tenants/{tenantId}/..., some
+     *  aren't, in which case it's simply null like every other platform-level audit row). */
     @ExceptionHandler(AccessDeniedException.class)
     public ResponseEntity<ApiResponse<Void>> handleAccessDenied(AccessDeniedException ex) {
+        recordAccessDenied(ex);
         return ResponseEntity.status(HttpStatus.FORBIDDEN)
                 .body(ApiResponse.error(
                         "Access denied",
                         "ACCESS_DENIED",
                         "Bạn không có quyền thực hiện thao tác này."));
+    }
+
+    private void recordAccessDenied(AccessDeniedException ex) {
+        try {
+            UUID actorId = null;
+            String actorEmail = null;
+            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+            if (auth != null && auth.getPrincipal() instanceof FamsUserDetails user) {
+                actorId = user.getUserId();
+                actorEmail = user.getEmail();
+            }
+
+            UUID tenantId = null;
+            String path = null;
+            var attrs = RequestContextHolder.getRequestAttributes();
+            if (attrs instanceof ServletRequestAttributes servletAttrs) {
+                path = servletAttrs.getRequest().getRequestURI();
+                Matcher m = TENANT_ID_IN_PATH.matcher(path);
+                if (m.find()) {
+                    try {
+                        tenantId = UUID.fromString(m.group(1));
+                    } catch (IllegalArgumentException ignored) {
+                        // not a real UUID in that path position — leave tenantId null
+                    }
+                }
+            }
+
+            auditLogService.record(
+                    tenantId, actorId, actorEmail,
+                    "AccessControl", path, "ACCESS_DENIED",
+                    null, Map.of("path", path != null ? path : "", "reason",
+                            ex.getMessage() != null ? ex.getMessage() : ""),
+                    HttpRequestUtils.currentRequestId(),
+                    HttpRequestUtils.currentIpAddress(),
+                    HttpRequestUtils.currentUserAgent());
+        } catch (Exception e) {
+            log.warn("Failed to record audit log for ACCESS_DENIED: {}", e.getMessage());
+        }
     }
 
     @ExceptionHandler(ResponseStatusException.class)
