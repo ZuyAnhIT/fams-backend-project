@@ -56,6 +56,7 @@ public class TenantService {
     private final UserRoleRepository userRoleRepository;
     private final StringRedisTemplate redis;
     private final AuditLogService auditLogService;
+    private final com.fams.modules.notification.service.NotificationService notificationService;
 
     public TenantService(TenantRepository tenantRepository, UserRepository userRepository,
                          PlanRepository planRepository,
@@ -63,7 +64,9 @@ public class TenantService {
                          RoleRepository roleRepository,
                          UserRoleRepository userRoleRepository,
                          StringRedisTemplate redis,
-                         AuditLogService auditLogService) {
+                         AuditLogService auditLogService,
+                         @org.springframework.context.annotation.Lazy
+                         com.fams.modules.notification.service.NotificationService notificationService) {
         this.tenantRepository = tenantRepository;
         this.userRepository = userRepository;
         this.planRepository = planRepository;
@@ -72,6 +75,7 @@ public class TenantService {
         this.userRoleRepository = userRoleRepository;
         this.redis = redis;
         this.auditLogService = auditLogService;
+        this.notificationService = notificationService;
     }
 
     /** #31 (docs/api/backend-feature-audit-2026-08-07.md): tenant lifecycle actions are
@@ -415,6 +419,9 @@ public class TenantService {
         log.info("Tenant suspended: id={} previousStatus={}", tenantId, tenant.getPreSuspensionStatus());
         recordTenantAudit(tenantId, callerUserId, "tenant_suspended",
                 Map.of("status", previousStatus), Map.of("status", "suspended"));
+        notifyOwner(tenant, com.fams.modules.tenant.constant.TenantEventTypes.TENANT_SUSPENDED_OWNER,
+                "Công ty bị tạm khóa",
+                "Công ty \"" + tenant.getName() + "\" của bạn đã bị tạm khóa. Vui lòng liên hệ hỗ trợ để biết thêm chi tiết.");
         return toResponse(tenant);
     }
 
@@ -436,7 +443,25 @@ public class TenantService {
         log.info("Tenant reactivated: id={} restoredStatus={}", tenantId, restoreStatus);
         recordTenantAudit(tenantId, callerUserId, "tenant_reactivated",
                 Map.of("status", "suspended"), Map.of("status", restoreStatus));
+        notifyOwner(tenant, com.fams.modules.tenant.constant.TenantEventTypes.TENANT_REACTIVATED_OWNER,
+                "Công ty đã được mở lại",
+                "Công ty \"" + tenant.getName() + "\" của bạn đã được mở lại và có thể hoạt động bình thường.");
         return toResponse(tenant);
+    }
+
+    /** #133 (2026-08-19): AC calls for a notification on suspend/reactivate — entirely absent
+     *  before. Best-effort, matching every other notification call site in this codebase (e.g.
+     *  ViolationNotificationService): a notification failure must never roll back the real
+     *  status change. Only the tenant owner is notified (not every tenant user) since they're
+     *  the one accountable for resolving the suspension with support. */
+    private void notifyOwner(Tenant tenant, String eventType, String title, String body) {
+        if (tenant.getOwnerId() == null) return;
+        try {
+            notificationService.createNotification(tenant.getId(), tenant.getOwnerId(), eventType, title, body);
+        } catch (Exception e) {
+            log.warn("Failed to notify tenant owner: tenantId={} eventType={} error={}",
+                    tenant.getId(), eventType, e.getMessage());
+        }
     }
 
     private TenantResponse toResponse(Tenant tenant) {

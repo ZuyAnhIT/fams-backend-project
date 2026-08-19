@@ -43,6 +43,7 @@ public class FirebasePhoneLoginService {
     private final UserRepository userRepository;
     private final RefreshTokenRepository refreshTokenRepository;
     private final UserRoleRepository userRoleRepository;
+    private final com.fams.modules.tenant.repository.TenantRepository tenantRepository;
     private final JwtProvider jwtProvider;
     private final FirebasePhoneTokenVerifier tokenVerifier;
     private final StringRedisTemplate redis;
@@ -54,6 +55,7 @@ public class FirebasePhoneLoginService {
             UserRepository userRepository,
             RefreshTokenRepository refreshTokenRepository,
             UserRoleRepository userRoleRepository,
+            com.fams.modules.tenant.repository.TenantRepository tenantRepository,
             JwtProvider jwtProvider,
             FirebasePhoneTokenVerifier tokenVerifier,
             StringRedisTemplate redis,
@@ -63,6 +65,7 @@ public class FirebasePhoneLoginService {
         this.userRepository = userRepository;
         this.refreshTokenRepository = refreshTokenRepository;
         this.userRoleRepository = userRoleRepository;
+        this.tenantRepository = tenantRepository;
         this.jwtProvider = jwtProvider;
         this.tokenVerifier = tokenVerifier;
         this.redis = redis;
@@ -98,6 +101,18 @@ public class FirebasePhoneLoginService {
         UserRole primary = com.fams.modules.rbac.util.PrimaryRoleResolver.pickPrimary(roles);
         UUID primaryTenantId = primary == null ? null : primary.getTenantId();
         String primaryRole = primary == null ? null : primary.getRole().getName();
+
+        // #133 (2026-08-19): the only one of the 4 login paths without this check — a suspended
+        // tenant's user could still get a token here (though JwtAuthFilter blocks the very next
+        // API call regardless; this closes the gap for consistency with AuthService.login /
+        // GoogleLoginService / RefreshTokenService).
+        if (!user.isPlatformAdmin() && primaryTenantId != null) {
+            tenantRepository.findByIdAndDeletedAtIsNull(primaryTenantId).ifPresent(tenant -> {
+                if ("suspended".equals(tenant.getStatus())) {
+                    throw new com.fams.shared.exception.TenantSuspendedException();
+                }
+            });
+        }
 
         // Same 2FA gate as AuthService.login() — phone login must not let a user with
         // TOTP enabled bypass it entirely. Reuses the exact pending-token format/prefix

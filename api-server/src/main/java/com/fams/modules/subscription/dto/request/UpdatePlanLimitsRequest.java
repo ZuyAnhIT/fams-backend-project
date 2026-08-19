@@ -24,6 +24,10 @@ public class UpdatePlanLimitsRequest {
     @Min(value = 1, message = "maxRandomChecksPerMonth must be at least 1")
     private Integer maxRandomChecksPerMonth;
 
+    @Schema(description = "Maximum report exports per month (null = unlimited, min 1) — #135, 2026-08-19", example = "100")
+    @Min(value = 1, message = "maxExportsPerMonth must be at least 1")
+    private Integer maxExportsPerMonth;
+
     @Schema(description = "When true, sets maxEmployees to unlimited regardless of the maxEmployees field value")
     private boolean clearMaxEmployees;
 
@@ -35,4 +39,7 @@ public class UpdatePlanLimitsRequest {
 
     @Schema(description = "When true, sets maxRandomChecksPerMonth to unlimited regardless of the maxRandomChecksPerMonth field value")
     private boolean clearMaxRandomChecksPerMonth;
+
+    @Schema(description = "When true, sets maxExportsPerMonth to unlimited regardless of the maxExportsPerMonth field value")
+    private boolean clearMaxExportsPerMonth;
 }

@@ -72,6 +72,7 @@ public class ReportService {
     private final com.fams.modules.randomcheck.repository.RandomCheckConfigRepository randomCheckConfigRepository;
     private final com.fams.modules.audit.service.AuditLogService auditLogService;
     private final com.fams.modules.workspace.repository.WorkspaceMemberRepository workspaceMemberRepository;
+    private final com.fams.modules.subscription.service.PlanLimitEnforcementService planLimitEnforcementService;
 
     public ReportService(AttendanceSummaryRepository summaryRepository,
                          AssignmentRepository assignmentRepository,
@@ -84,7 +85,8 @@ public class ReportService {
                          com.fams.modules.rbac.service.SiteScopeService siteScopeService,
                          com.fams.modules.randomcheck.repository.RandomCheckConfigRepository randomCheckConfigRepository,
                          com.fams.modules.audit.service.AuditLogService auditLogService,
-                         com.fams.modules.workspace.repository.WorkspaceMemberRepository workspaceMemberRepository) {
+                         com.fams.modules.workspace.repository.WorkspaceMemberRepository workspaceMemberRepository,
+                         com.fams.modules.subscription.service.PlanLimitEnforcementService planLimitEnforcementService) {
         this.summaryRepository = summaryRepository;
         this.assignmentRepository = assignmentRepository;
         this.violationRepository = violationRepository;
@@ -97,6 +99,7 @@ public class ReportService {
         this.randomCheckConfigRepository = randomCheckConfigRepository;
         this.auditLogService = auditLogService;
         this.workspaceMemberRepository = workspaceMemberRepository;
+        this.planLimitEnforcementService = planLimitEnforcementService;
     }
 
     /** #122-#125 (2026-08-18): shared workspace-filter resolution for every report endpoint — a
@@ -295,6 +298,9 @@ public class ReportService {
                 throw new AccessDeniedException("attendance:export permission required to export attendance data");
             }
         }
+
+        // #135 (2026-08-19): export-limit enforcement, entirely absent before.
+        planLimitEnforcementService.assertExportLimit(tenantId, callerUserId);
 
         UUID effectiveSiteId;
         try {
@@ -794,6 +800,9 @@ public class ReportService {
             }
         }
 
+        // #135 (2026-08-19): export-limit enforcement, entirely absent before.
+        planLimitEnforcementService.assertExportLimit(tenantId, callerUserId);
+
         // #125 (2026-08-18): workspace filter, same resolution as getViolationReport.
         Set<UUID> workspaceEmployeeIds = resolveWorkspaceEmployeeIds(tenantId, workspaceId);
 
@@ -852,6 +861,30 @@ public class ReportService {
             workbook.write(out);
             log.info("Violation export: tenantId={} from={} to={} siteId={} employeeId={} resolved={} rows={}",
                     tenantId, from, to, siteId, employeeId, resolved, all.size());
+
+            // #132 (2026-08-19): AC calls for an audit trail on this export, entirely absent
+            // before — same rationale as every other export in this file. REQUIRES_NEW on
+            // AuditLogService.record() (fixed for #124) means this is safe to call from within
+            // this method's @Transactional(readOnly = true) without being silently dropped.
+            try {
+                auditLogService.record(
+                        tenantId, callerUserId, null,
+                        "ViolationExport", from + ".." + to, "EXPORT_VIOLATIONS",
+                        null, java.util.Map.of(
+                                "from", from != null ? from.toString() : "",
+                                "to", to != null ? to.toString() : "",
+                                "siteId", siteId != null ? siteId.toString() : "",
+                                "employeeId", employeeId != null ? employeeId.toString() : "",
+                                "violationType", violationType != null ? violationType : "",
+                                "rows", all.size()),
+                        com.fams.shared.security.HttpRequestUtils.currentRequestId(),
+                        com.fams.shared.security.HttpRequestUtils.currentIpAddress(),
+                        com.fams.shared.security.HttpRequestUtils.currentUserAgent());
+            } catch (Exception e) {
+                log.warn("Failed to record audit log for EXPORT_VIOLATIONS tenantId={}: {}",
+                        tenantId, e.getMessage());
+            }
+
             return out.toByteArray();
         } catch (IOException e) {
             throw new RuntimeException("Failed to generate violations Excel export", e);
@@ -1008,6 +1041,9 @@ public class ReportService {
     @Transactional(readOnly = true)
     public byte[] exportFaceIdNotEnrolled(UUID tenantId, UUID departmentId, UUID siteId,
                                           UUID callerUserId, boolean callerIsPlatformAdmin) {
+        // #135 (2026-08-19): export-limit enforcement, entirely absent before.
+        planLimitEnforcementService.assertExportLimit(tenantId, callerUserId);
+
         FaceIdReportResponse report = getFaceIdEnrollmentReport(
                 tenantId, "not_enrolled", departmentId, siteId, null, 0, Integer.MAX_VALUE,
                 callerUserId, callerIsPlatformAdmin);
