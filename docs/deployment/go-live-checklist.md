@@ -40,7 +40,8 @@
 
 - [ ] `POST /api/v1/tenants` **phải có `ownerEmail`** — thiếu field này là nguyên nhân lỗi phổ biến nhất gặp trong toàn bộ quá trình test dự án (không phải lỗi hệ thống, là lỗi thao tác).
 - [ ] Gán đúng gói dịch vụ (subscription plan) đã thoả thuận với khách hàng — xác nhận giới hạn gói (`maxEmployees`/`maxSites`/`maxRandomChecksPerMonth`) đúng với hợp đồng trước khi khách hàng bắt đầu mời nhân viên hàng loạt.
-- [ ] Chạy thử **toàn bộ luồng B.8** (`docs/testing/manual-test-scenarios.md`) trên chính tenant thật này trước khi bàn giao: tạo site → geofence → ca → mời nhân viên → Face ID → chấm công → báo cáo → export.
+- [ ] Chạy thử **toàn bộ luồng B.8** (`docs/testing/manual-test-scenarios.md`) trên chính tenant thật này trước khi bàn giao: tạo site → geofence → ca → mời nhân viên → Face ID → chấm công → kiểm tra ngẫu nhiên → vi phạm → báo cáo → export.
+- [ ] Nếu khách hàng yêu cầu thời gian lưu trữ dữ liệu (thông báo, ảnh sinh trắc học) khác mặc định nền tảng (bổ sung 2026-08-19): cấu hình `dataRetentionDays` riêng cho tenant này qua cài đặt công ty — mặc định là `null` (dùng chung mốc toàn nền tảng), chỉ cần đặt nếu khách hàng có yêu cầu cụ thể.
 
 ---
 
@@ -70,7 +71,7 @@ Nếu bất kỳ mục nào `DOWN`, **không bàn giao cho khách hàng** cho t�
 ## 6. Thông báo và nội dung gửi khách hàng
 
 - [ ] Nếu khách hàng yêu cầu tuỳ chỉnh nội dung thông báo (ví dụ đổi văn phong lời nhắc kiểm tra ngẫu nhiên), cấu hình template trước ngày go-live — xác nhận template mới thực sự áp dụng bằng cách kích hoạt thử 1 kiểm tra ngẫu nhiên thật và xem nội dung nhận được đúng như đã cấu hình chưa.
-- [ ] Xác nhận `GET /notification-event-types` trả đúng danh mục sự kiện hệ thống hỗ trợ — dùng làm căn cứ khi khách hàng hỏi "có thể tắt loại thông báo nào".
+- [ ] Xác nhận `GET /notification-event-types` trả đúng danh mục sự kiện hệ thống hỗ trợ — dùng làm căn cứ khi khách hàng hỏi "có thể tắt loại thông báo nào". **Lưu ý (bổ sung 2026-08-19)**: response có field `mandatory` — loại nào `mandatory=true` (hiện là "Kiểm tra ngẫu nhiên" và "Công ty bị tạm khóa") backend sẽ từ chối nếu khách hàng cố tắt qua API (422), không phải giới hạn của FE — nên báo trước cho khách hàng để tránh thắc mắc "sao tắt không được".
 
 ---
 

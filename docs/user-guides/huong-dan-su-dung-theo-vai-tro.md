@@ -41,6 +41,7 @@ Platform Admin quản lý toàn bộ hệ thống SaaS — không tham gia vận
 - Lọc theo người thực hiện, loại hành động, khoảng thời gian.
 - **Trace theo request_id**: khi cần điều tra sự cố "1 lần bấm nút gây ra chuỗi hành động nào", tra theo mã request duy nhất đó để xem toàn bộ log liên quan trong cùng 1 lần gọi.
 - Xem diff dữ liệu trước/sau thay đổi (old value/new value) để biết chính xác ai đã sửa cái gì.
+- **Cả những lần bị TỪ CHỐI thao tác (bổ sung 2026-08-19)** cũng được ghi lại — hữu ích khi điều tra "ai đó cố làm gì mà không được phép", không chỉ những thao tác thành công.
 
 ### 1.4 Giám sát vận hành hệ thống
 
@@ -53,6 +54,7 @@ Màn "Trạng thái hệ thống" (`system-status`) cho biết ngay lập tức:
 ### 1.5 Dọn dẹp dữ liệu quá hạn (tự động)
 
 Không cần thao tác tay — hệ thống tự động mỗi tuần: xoá log gửi thông báo cũ, xoá thông báo đã đọc cũ, xoá ảnh chấm công/kiểm tra ngẫu nhiên cũ theo đúng chính sách lưu trữ. Ảnh đăng ký khuôn mặt gốc bị xoá **ngay lập tức** khi hồ sơ Face ID của 1 nhân viên bị thu hồi, không cần chờ job hàng tuần.
+- **Số ngày lưu trữ riêng theo từng công ty (bổ sung 2026-08-19)**: mặc định dùng chung 1 mốc cho toàn nền tảng, nhưng có thể đặt riêng cho 1 công ty cụ thể (ví dụ khách hàng yêu cầu giữ dữ liệu lâu hơn vì lý do nội bộ) qua cài đặt công ty — áp dụng cho cả thông báo lẫn ảnh sinh trắc học của đúng công ty đó, không ảnh hưởng công ty khác.
 
 ---
 
@@ -146,6 +148,7 @@ Xem `docs/deployment/go-live-checklist.md` — checklist đầy đủ cấu hìn
 ### 3.5 Cài đặt cá nhân
 
 - Bật/tắt từng loại thông báo (trong app và/hoặc đẩy) theo nhu cầu — ví dụ tắt thông báo trong app nhưng vẫn muốn nhận đẩy, hoặc ngược lại. Mỗi loại thông báo có 2 công tắc độc lập.
+- **Ngoại lệ (bổ sung 2026-08-19)**: thông báo "Kiểm tra ngẫu nhiên" (và tương tự, thông báo "Công ty bị tạm khóa" gửi cho chủ công ty) là **bắt buộc, không thể tắt** — cả 2 công tắc đều bị khoá trên giao diện, và backend cũng từ chối nếu cố tắt qua API. Lý do: đây là thông báo có cửa sổ thời gian phản hồi ngắn, không nhận được sẽ tự động bị tính vi phạm — cho phép tắt sẽ khiến nhân viên vô tình "tự tắt" cơ chế bảo vệ chính mình.
 - Cập nhật hồ sơ cá nhân (ngày sinh, quê quán, giới tính, địa chỉ).
 - Bật xác thực 2 lớp (2FA) cho tài khoản để tăng bảo mật đăng nhập.
 
