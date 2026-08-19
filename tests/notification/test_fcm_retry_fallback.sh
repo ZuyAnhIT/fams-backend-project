@@ -6,6 +6,12 @@
 #   - Email fallback is attempted when all FCM devices fail
 #   - notification_delivery_logs table is populated correctly
 # Usage: BASE_URL=http://localhost:8080 bash test_fcm_retry_fallback.sh
+#
+# #140 (2026-08-19): fallback is now gated to priority="critical" only (per AC — was previously
+# unconditional for every eventType, a real gap). RANDOM_CHECK_SENT is the only eventType at
+# "critical" in NotificationEventTypeCatalog, so test 2 must use it (an arbitrary/unknown
+# eventType like the old "TEST_RETRY" resolves to the "normal" fallback priority and will
+# correctly NOT trigger email fallback anymore).
 
 set -euo pipefail
 
@@ -111,7 +117,7 @@ notif_resp=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/internal/notifications" \
     -H "Content-Type: application/json" \
     -H "X-Internal-Secret: $NOTIFICATIONS_INTERNAL_SECRET" \
-    -d "{\"tenantId\":\"$TENANT_ID\",\"userId\":\"$EMP_USER_ID\",\"eventType\":\"TEST_RETRY\",\"title\":\"Retry Test\",\"body\":\"This tests retry and fallback\"}")
+    -d "{\"tenantId\":\"$TENANT_ID\",\"userId\":\"$EMP_USER_ID\",\"eventType\":\"RANDOM_CHECK_SENT\",\"title\":\"Retry Test\",\"body\":\"This tests retry and fallback\"}")
 notif_status=$(echo "$notif_resp" | tail -n 1)
 notif_body=$(echo "$notif_resp" | head -n -1)
 
@@ -201,7 +207,7 @@ echo ""
 echo "--- 6. In-app notification created despite FCM failure ---"
 inbox=$(curl -s "$BASE_URL/api/v1/tenants/$TENANT_ID/notifications" \
     -H "Authorization: Bearer $EMP_TOKEN")
-check_contains "Employee inbox has the notification" "$inbox" '"TEST_RETRY"'
+check_contains "Employee inbox has the notification" "$inbox" '"RANDOM_CHECK_SENT"'
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 echo ""

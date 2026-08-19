@@ -47,7 +47,16 @@ public final class NotificationEventTypeCatalog {
                     "Gửi khi hệ thống yêu cầu bạn phản hồi một lượt kiểm tra ngẫu nhiên (vị trí/khuôn mặt).",
                     true,
                     true,
-                    "high"),
+                    // #140 (2026-08-19): bumped from "high" to "critical" — the only mandatory,
+                    // time-boxed notification in the system (employee must respond within a short
+                    // window or it becomes a violation, see #141's "random_check_request cannot be
+                    // disabled" rule) and the only eventType that should trigger the new
+                    // priority-gated email fallback in UserDeviceService#sendPush. Before this
+                    // catalog had zero "critical" entries, so gating fallback on priority=="critical"
+                    // (per #140's Acceptance Criteria) would have silently disabled fallback for
+                    // every notification type — decided with the user 2026-08-19 rather than
+                    // silently regressing or ignoring the AC.
+                    "critical"),
             new NotificationEventTypeInfo(
                     // Must match com.fams.modules.employee.constant.InvitationEventTypes.EMPLOYEE_INVITED
                     "EMPLOYEE_INVITED",
