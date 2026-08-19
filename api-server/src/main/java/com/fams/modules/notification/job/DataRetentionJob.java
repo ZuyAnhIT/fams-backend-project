@@ -82,15 +82,16 @@ public class DataRetentionJob {
         }
     }
 
-    /** #144 (2026-08-19): delivery logs carry no tenant_id (see NotificationDeliveryLog — linked
-     *  only via a nullable notificationId FK, and many rows, e.g. push-only paths, have no
-     *  notification row to join through at all), so a true per-tenant sweep isn't possible
-     *  without a schema change. Kept as the one global-config-only sweep in this job; every other
-     *  purge below now honors each tenant's own data_retention_days override. */
+    /** #144 (2026-08-19 follow-up): migration V109 added tenant_id to NotificationDeliveryLog,
+     *  so tenant-scoped rows are now swept per-tenant inside {@link #purgePerTenant()} using each
+     *  tenant's own effective retention window. This global pass only remains for rows where
+     *  tenant_id is genuinely NULL (platform-admin ops alerts with no tenant context, or a row
+     *  whose notificationId link predates the backfill) — those can never be reached by the
+     *  per-tenant query, not a design choice to skip per-tenant handling. */
     private void purgeDeliveryLogs() {
         OffsetDateTime cutoff = OffsetDateTime.now().minusDays(deliveryLogDays);
         int deleted = deliveryLogRepository.deleteByCreatedAtBefore(cutoff);
-        log.info("DataRetentionJob — deleted {} delivery log(s) older than {} days (global default)",
+        log.info("DataRetentionJob — deleted {} tenant-less delivery log(s) older than {} days (global default)",
                 deleted, deliveryLogDays);
     }
 
@@ -114,10 +115,14 @@ public class DataRetentionJob {
             }
             int effectiveNotificationDays = override != null ? override : notificationDays;
             int effectivePhotoDays = override != null ? override : biometricPhotoDays;
+            int effectiveDeliveryLogDays = override != null ? override : deliveryLogDays;
 
             OffsetDateTime notificationCutoff = OffsetDateTime.now().minusDays(effectiveNotificationDays);
             totalNotificationsDeleted += notificationRepository
                     .deleteReadNotificationsOlderThan(tenant.getId(), notificationCutoff);
+
+            deliveryLogRepository.deleteByTenantIdAndCreatedAtBefore(
+                    tenant.getId(), OffsetDateTime.now().minusDays(effectiveDeliveryLogDays));
 
             try {
                 var result = aiServiceClient.cleanupOldCheckinPhotos(effectivePhotoDays, tenant.getId());

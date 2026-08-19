@@ -8,6 +8,7 @@ import com.fams.modules.rbac.entity.UserRole;
 import com.fams.modules.rbac.repository.UserRoleRepository;
 import com.fams.shared.exception.ResourceNotFoundException;
 import com.fams.shared.pagination.PageResponse;
+import com.fams.shared.security.HttpRequestUtils;
 import com.fams.shared.util.MaskingUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -160,10 +161,21 @@ public class AuditLogService {
         .requestId(requestId)
         .ipAddress(ipAddress)
         .userAgent(userAgent)
+        .endpoint(HttpRequestUtils.currentRequestPath())
         .build();
     AuditLog saved = auditLogRepository.save(entry);
+    HttpRequestUtils.markAuditWritten();
     log.debug("Audit recorded action={} entity={}/{} actor={}", action, entityType, entityId, actorEmail);
     return toResponse(saved);
+  }
+
+  /** #138 (2026-08-19 follow-up): called by RequestIdFilter after the response completes, once
+   *  per request — REQUIRES_NEW same as record() so it never depends on the (already-finished)
+   *  request's transaction. Best-effort by design: the caller wraps this in try/catch and never
+   *  lets a failure here affect the real response already sent to the client. */
+  @Transactional(propagation = Propagation.REQUIRES_NEW)
+  public void backfillHttpStatus(String requestId, int httpStatus) {
+    auditLogRepository.backfillHttpStatusByRequestId(requestId, httpStatus);
   }
 
   private AuditLogResponse toResponse(AuditLog a) {
@@ -180,6 +192,8 @@ public class AuditLogService {
         .requestId(a.getRequestId())
         .ipAddress(a.getIpAddress())
         .userAgent(a.getUserAgent())
+        .endpoint(a.getEndpoint())
+        .httpStatus(a.getHttpStatus())
         .createdAt(a.getCreatedAt())
         .build();
   }

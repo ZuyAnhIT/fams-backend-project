@@ -12,6 +12,9 @@ import java.util.UUID;
 public interface TenantSubscriptionRepository extends JpaRepository<TenantSubscription, UUID> {
     Optional<TenantSubscription> findByTenantId(UUID tenantId);
     boolean existsByTenantId(UUID tenantId);
+
+    /** #16 (2026-08-19): batched lookup for the tenant list page — avoids N+1 queries per row. */
+    List<TenantSubscription> findAllByTenantIdIn(List<UUID> tenantIds);
     List<TenantSubscription> findAllByStatusAndExpiresAtBefore(SubscriptionStatus status, OffsetDateTime cutoff);
 
     /** Issue #8 (docs/issues/ISSUES.md): tenants still subscribed to a plan being deactivated. */

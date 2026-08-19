@@ -3,6 +3,7 @@ package com.fams.modules.audit.repository;
 import com.fams.modules.audit.entity.AuditLog;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -32,4 +33,12 @@ public interface AuditLogRepository
   long countExportsByTenantInRange(@Param("tenantId") UUID tenantId,
                                     @Param("from") OffsetDateTime from,
                                     @Param("to") OffsetDateTime to);
+
+  /** #138 (2026-08-19 follow-up): backfilled by RequestIdFilter after the response completes —
+   *  httpStatus isn't known at record() time (the controller hasn't returned yet). Guarded by
+   *  "IS NULL" so a request whose backfill already ran (shouldn't happen twice per request, but
+   *  cheap insurance) doesn't get overwritten. */
+  @Modifying
+  @Query("UPDATE AuditLog a SET a.httpStatus = :httpStatus WHERE a.requestId = :requestId AND a.httpStatus IS NULL")
+  int backfillHttpStatusByRequestId(@Param("requestId") String requestId, @Param("httpStatus") int httpStatus);
 }

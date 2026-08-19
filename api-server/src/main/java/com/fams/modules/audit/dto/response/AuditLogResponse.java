@@ -49,6 +49,14 @@ public class AuditLogResponse {
   @Schema(description = "User-Agent of the actor's client")
   private String userAgent;
 
+  @Schema(description = "Request path this action occurred in, e.g. /api/v1/tenants/{id} (#138, 2026-08-19)", example = "/api/v1/tenants/550e8400-e29b-41d4-a716-446655440000")
+  private String endpoint;
+
+  @Schema(description = "Final HTTP status of the request this action occurred in — null if the "
+      + "backfill hasn't run yet or the action wasn't written inside a real HTTP request (e.g. a "
+      + "scheduled job) (#138, 2026-08-19)", example = "200")
+  private Integer httpStatus;
+
   @Schema(description = "Timestamp of the action")
   private OffsetDateTime createdAt;
 }

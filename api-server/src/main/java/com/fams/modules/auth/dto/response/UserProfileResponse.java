@@ -55,6 +55,20 @@ public class UserProfileResponse {
     @Schema(description = "True if this account holds platform-wide admin access (visible to the account owner about themselves, and to Platform Admins browsing the user directory)")
     private boolean isPlatformAdmin;
 
+    @Schema(description = "Whether TOTP 2FA is enabled for this account (#10, 2026-08-19)")
+    private boolean totpEnabled;
+
+    @Schema(description = "Primary tenant UUID — the same one a fresh login would place this user "
+            + "in (via PrimaryRoleResolver). Null if the user holds no active tenant role anywhere "
+            + "(#10, 2026-08-19)", example = "550e8400-e29b-41d4-a716-446655440000")
+    private UUID currentTenantId;
+
+    @Schema(description = "Primary tenant's display name, null if currentTenantId is null (#10, 2026-08-19)", example = "Acme Corp")
+    private String currentTenantName;
+
+    @Schema(description = "Role name held in the primary tenant, null if currentTenantId is null (#10, 2026-08-19)", example = "HR_MANAGER")
+    private String currentTenantRole;
+
     @Schema(description = "Last successful login timestamp (UTC), null if never logged in")
     private OffsetDateTime lastLoginAt;
 

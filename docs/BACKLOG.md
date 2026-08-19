@@ -101,7 +101,7 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
   - *User Story:* Là một người dùng đã có tài khoản, tôi muốn đăng nhập bằng email/số điện thoại và mật khẩu để truy cập hệ thống an toàn.
   - *Acceptance Criteria:* Nhập email/phone + password; kiểm tra tài khoản active; báo lỗi rõ ràng; tạo access/refresh token; ghi last_login và audit LOGIN.
   - *DB Entities:* `users, tokens, audit_logs`
-- [ ] **#2 — Đăng nhập bằng số điện thoại OTP** `P0` · 5sp · Nền tảng: Backend, Mobile App, Queue/AI/Automation
+- [x] **#2 — Đăng nhập bằng số điện thoại OTP** `P0` · 5sp · Nền tảng: Backend, Mobile App, Queue/AI/Automation
   - 🟡 **Test tay thật — PASS MỘT PHẦN (2026-08-13):** Phần A (không cần Firebase) đã pass. Mobile
     App — luồng OTP thật (Phần B) chưa test, chờ build EAS dev-client. Chưa khóa. Xem
     `docs/manual-tests/MANUAL_TEST_LOG.md`.
@@ -132,9 +132,14 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
   - *User Story:* Là một người dùng đang đăng nhập, tôi muốn đăng xuất khỏi phiên hiện tại để bảo vệ tài khoản khi dùng xong.
   - *Acceptance Criteria:* Bấm đăng xuất; revoke refresh token hiện tại; xóa token local; chuyển về màn hình login.
   - *DB Entities:* `tokens, audit_logs`
-- [ ] **#5 — Đăng xuất khỏi tất cả thiết bị** `P1` · 3sp · Nền tảng: Backend, Web Admin, Mobile App
-  - 🔒 **Test tay thật — ĐÃ KHÓA (2026-08-13):** toàn bộ case pass (kể cả đa thiết bị) qua UI thật trên Web + App. Gap thiếu audit `LOGOUT_ALL` vẫn còn, không chặn khóa. Xem `docs/manual-tests/MANUAL_TEST_LOG.md`.
+- [x] **#5 — Đăng xuất khỏi tất cả thiết bị** `P1` · 3sp · Nền tảng: Backend, Web Admin, Mobile App
+  - 🔒 **Test tay thật — ĐÃ KHÓA (2026-08-13):** toàn bộ case pass (kể cả đa thiết bị) qua UI thật trên Web + App. Xem `docs/manual-tests/MANUAL_TEST_LOG.md`.
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: LogoutService.logoutAll, test_logout_all.sh; thiếu: revoke đúng nhưng không ghi audit
+  - *Audit (2026-08-19):* ✅ **Gap KHÔNG còn tồn tại** — kiểm tra lại code hiện tại thấy
+    `LogoutService.logoutAll` (dòng 99-113) đã gọi `auditLogService.record(..., "LOGOUT_ALL", ...)`
+    từ trước, đã commit sẵn (không phải thay đổi của đợt này). Live-test xác nhận: gọi logout-all
+    → có đúng dòng `action='LOGOUT_ALL'` trong `audit_logs`. Ghi chú cũ trong BACKLOG.md bị lỗi
+    thời, đã sửa lại.
   - *User Story:* Là một người dùng, tôi muốn đăng xuất khỏi mọi thiết bị để xử lý khi nghi ngờ lộ tài khoản.
   - *Acceptance Criteria:* Bấm logout all; revoke toàn bộ refresh token; giữ lại audit; yêu cầu đăng nhập lại ở các thiết bị khác.
   - *DB Entities:* `tokens, audit_logs`
@@ -153,43 +158,62 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
   - *User Story:* Là một người dùng, tôi muốn yêu cầu đặt lại mật khẩu để lấy lại quyền truy cập khi quên mật khẩu.
   - *Acceptance Criteria:* Nhập email/phone; tạo reset token; gửi email/OTP; token có hạn; không lộ tài khoản tồn tại hay không.
   - *DB Entities:* `users, tokens, notifications, audit_logs`
-- [ ] **#8 — Đặt lại mật khẩu** `P0` · 3sp · Nền tảng: Backend, Web Admin, Mobile App
-  - 🔒 **Test tay thật — ĐÃ KHÓA (2026-08-13):** toàn bộ case pass qua UI thật trên Web + App. Gap thiếu audit `RESET_PASSWORD` vẫn còn, không chặn khóa. Xem `docs/manual-tests/MANUAL_TEST_LOG.md`.
+- [x] **#8 — Đặt lại mật khẩu** `P0` · 3sp · Nền tảng: Backend, Web Admin, Mobile App
+  - 🔒 **Test tay thật — ĐÃ KHÓA (2026-08-13):** toàn bộ case pass qua UI thật trên Web + App. Xem `docs/manual-tests/MANUAL_TEST_LOG.md`.
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: PasswordResetService.resetPassword; thiếu: không ghi audit
+  - *Audit (2026-08-19):* ✅ **Gap KHÔNG còn tồn tại** — `PasswordResetService.resetPassword`
+    (dòng 141-159) đã ghi `action="RESET_PASSWORD"` từ trước, đã commit sẵn. Ghi chú cũ lỗi thời,
+    đã sửa lại.
   - *User Story:* Là một người dùng, tôi muốn đặt lại mật khẩu bằng token hợp lệ để khôi phục tài khoản an toàn.
   - *Acceptance Criteria:* Token hợp lệ và chưa dùng; mật khẩu đạt policy; cập nhật password_hash; revoke refresh token cũ; ghi audit.
   - *DB Entities:* `users, tokens, audit_logs`
-- [ ] **#9 — Đổi mật khẩu** `P0` · 3sp · Nền tảng: Backend, Web Admin, Mobile App
-  - 🔒 **Test tay thật — ĐÃ KHÓA (2026-08-13):** toàn bộ case pass qua UI thật. Gap thiếu audit `CHANGE_PASSWORD` vẫn còn, không chặn khóa. Xem `docs/manual-tests/MANUAL_TEST_LOG.md`.
+- [x] **#9 — Đổi mật khẩu** `P0` · 3sp · Nền tảng: Backend, Web Admin, Mobile App
+  - 🔒 **Test tay thật — ĐÃ KHÓA (2026-08-13):** toàn bộ case pass qua UI thật. Xem `docs/manual-tests/MANUAL_TEST_LOG.md`.
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: ChangePasswordService, test_change_password.sh; thiếu: không ghi audit
+  - *Audit (2026-08-19):* ✅ **Gap KHÔNG còn tồn tại** — `ChangePasswordService.changePassword`
+    (dòng 93-111) đã ghi `action="CHANGE_PASSWORD"` từ trước, đã commit sẵn. Ghi chú cũ lỗi thời,
+    đã sửa lại.
   - *User Story:* Là một người dùng đang đăng nhập, tôi muốn đổi mật khẩu hiện tại để tăng bảo mật tài khoản.
   - *Acceptance Criteria:* Nhập mật khẩu cũ đúng; mật khẩu mới đạt policy; cập nhật password_hash; có thể revoke phiên khác; ghi audit.
   - *DB Entities:* `users, tokens, audit_logs`
 
 #### Hồ sơ cá nhân
 
-- [ ] **#10 — Xem thông tin cá nhân** `P0` · 2sp · Nền tảng: Backend, Web Admin, Mobile App
-  - 🔒 **Test tay thật — ĐÃ KHÓA (2026-08-13):** toàn bộ case pass qua UI thật. Gap thiếu field 2FA/tenant hiện tại vẫn còn, không chặn khóa. Xem `docs/manual-tests/MANUAL_TEST_LOG.md`.
+- [x] **#10 — Xem thông tin cá nhân** `P0` · 2sp · Nền tảng: Backend, Web Admin, Mobile App
+  - 🔒 **Test tay thật — ĐÃ KHÓA (2026-08-13):** toàn bộ case pass qua UI thật. Xem `docs/manual-tests/MANUAL_TEST_LOG.md`.
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: UserProfileService.getProfile, test_profile.sh; thiếu: response thiếu trạng thái 2FA và tenant hiện tại
+  - *Audit (2026-08-19):* ✅ **ĐÃ VÁ đúng gap thật.** Thêm 3 field vào `UserProfileResponse`:
+    `totpEnabled` (đọc trực tiếp từ `User.totpEnabled` có sẵn, chỉ chưa map ra response),
+    `currentTenantId`/`currentTenantName`/`currentTenantRole` (tenant "chính" — dùng đúng
+    `PrimaryRoleResolver` mà `AuthService.login()` đã dùng để chọn tenant claim cho JWT, đảm bảo
+    nhất quán với tenant mà 1 lần đăng nhập mới sẽ đưa user vào — hệ thống hiện không có khái niệm
+    "tenant đang active trong phiên" tách biệt để dùng chính xác hơn). **Test live qua API thật**:
+    `GET /auth/me` trả đúng `totpEnabled:false`, `currentTenantId`/`currentTenantName`/
+    `currentTenantRole` khớp đúng tenant/role thật của user. Regression: `test_profile.sh` 3/3,
+    `test_profile_fields_and_avatar.sh` 8/8 — không lỗi.
   - *User Story:* Là một người dùng, tôi muốn xem hồ sơ cá nhân của mình để kiểm tra thông tin đang lưu.
   - *Acceptance Criteria:* Hiển thị full_name, email, phone, avatar, tenant hiện tại, trạng thái 2FA; không hiển thị dữ liệu nhạy cảm.
   - *DB Entities:* `users, tenant_users`
-- [ ] **#11 — Cập nhật hồ sơ cá nhân** `P0` · 3sp · Nền tảng: Backend, Web Admin, Mobile App
-  - 🔒 **Test tay thật — ĐÃ KHÓA (2026-08-13):** toàn bộ case pass qua UI thật. Gap thiếu audit `UPDATE_PROFILE` vẫn còn, không chặn khóa. Xem `docs/manual-tests/MANUAL_TEST_LOG.md`.
+- [x] **#11 — Cập nhật hồ sơ cá nhân** `P0` · 3sp · Nền tảng: Backend, Web Admin, Mobile App
+  - 🔒 **Test tay thật — ĐÃ KHÓA (2026-08-13):** toàn bộ case pass qua UI thật. Xem `docs/manual-tests/MANUAL_TEST_LOG.md`.
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: UserProfileService.updateProfile; thiếu: không ghi audit
+  - *Audit (2026-08-19):* ✅ **Gap KHÔNG còn tồn tại** — `UserProfileService.updateProfile`
+    (dòng 170-188) đã ghi `action="UPDATE_PROFILE"` kèm before/after snapshot thật từ trước, đã
+    commit sẵn. Live-test xác nhận qua API thật: PATCH `/auth/me` → có đúng dòng
+    `action='UPDATE_PROFILE'` trong `audit_logs`. Ghi chú cũ lỗi thời, đã sửa lại.
   - *User Story:* Là một người dùng, tôi muốn cập nhật tên, avatar và thông tin liên hệ để giữ thông tin cá nhân chính xác.
   - *Acceptance Criteria:* Cập nhật full_name/avatar; validate phone/email nếu thay đổi; ghi audit; đồng bộ hiển thị trong tenant.
   - *DB Entities:* `users, tenant_users, audit_logs`
 
 #### Bảo mật tài khoản
 
-- [ ] **#12 — Bật TOTP 2FA** `P1` · 5sp · Nền tảng: Backend, Web Admin, Mobile App
+- [x] **#12 — Bật TOTP 2FA** `P1` · 5sp · Nền tảng: Backend, Web Admin, Mobile App
   - 🔒 **Test tay thật — ĐÃ KHÓA (2026-08-13):** toàn bộ case pass qua UI thật, gồm contract mới (otpauthUri, chặn bật trùng). Xem `docs/manual-tests/MANUAL_TEST_LOG.md`.
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: TotpService, test_totp.sh; thiếu: không sinh/lưu backup codes
   - *User Story:* Là một người dùng, tôi muốn bật xác thực hai lớp bằng ứng dụng Authenticator để bảo vệ tài khoản tốt hơn.
   - *Acceptance Criteria:* Sinh QR/secret; xác minh mã 6 số; lưu totp_secret mã hóa; sinh backup codes; ghi audit.
   - *DB Entities:* `users, audit_logs`
-- [ ] **#13 — Đăng nhập có 2FA** `P1` · 5sp · Nền tảng: Backend, Web Admin, Mobile App
+- [x] **#13 — Đăng nhập có 2FA** `P1` · 5sp · Nền tảng: Backend, Web Admin, Mobile App
   - 🔒 **Test tay thật — ĐÃ KHÓA (2026-08-13):** toàn bộ case pass qua UI thật, gồm hết 8 mã dự phòng. Xem `docs/manual-tests/MANUAL_TEST_LOG.md`.
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: LoginTotpService, test_login_totp.sh; thiếu: thiếu đường dẫn đăng nhập bằng backup code
   - *User Story:* Là một người dùng đã bật 2FA, tôi muốn nhập mã TOTP sau khi đúng mật khẩu để đảm bảo chỉ chủ tài khoản đăng nhập.
@@ -206,19 +230,26 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 
 #### Tenant
 
-- [ ] **#15 — Tạo tenant mới** `P0` · 5sp · Nền tảng: Backend, Web Admin
+- [x] **#15 — Tạo tenant mới** `P0` · 5sp · Nền tảng: Backend, Web Admin
   - 🔒 **Test tay thật — ĐÃ KHÓA (2026-08-13):** toàn bộ case pass, gồm cả luồng self-serve và Platform Admin provisioning. Xem `docs/manual-tests/MANUAL_TEST_LOG.md`.
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: TenantService.createTenant, test_create_tenant.sh; thiếu: chỉ PLATFORM_ADMIN tạo được; không tự gán role admin cho người tạo (chỉ set ownerId); không ghi audit
   - *User Story:* Là một Platform Admin hoặc người dùng được phép, tôi muốn tạo công ty/tenant mới để thiết lập không gian sử dụng FAMS.
   - *Acceptance Criteria:* Nhập tên, slug, timezone; slug không trùng; tạo tenant_settings mặc định; gán role company_admin cho người tạo.
   - *DB Entities:* `tenants, tenant_settings, user_roles, roles, audit_logs`
-- [ ] **#16 — Xem danh sách tenant** `P0` · 3sp · Nền tảng: Backend, Web Admin
-  - 🔒 **Test tay thật — ĐÃ KHÓA (2026-08-13):** toàn bộ case pass. Gap thiếu plan/subscription trong danh sách vẫn còn, không chặn khóa. Xem `docs/manual-tests/MANUAL_TEST_LOG.md`.
+- [x] **#16 — Xem danh sách tenant** `P0` · 3sp · Nền tảng: Backend, Web Admin
+  - 🔒 **Test tay thật — ĐÃ KHÓA (2026-08-13):** toàn bộ case pass. Xem `docs/manual-tests/MANUAL_TEST_LOG.md`.
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: TenantService.listTenants, test_list_tenants.sh; thiếu: danh sách không kèm plan/subscription (phải gọi /detail riêng)
+  - *Audit (2026-08-19):* ✅ **ĐÃ VÁ đúng gap thật.** Thêm `planName`/`planId`/`subscriptionStatus`
+    vào `TenantResponse`, lấy theo cách **batch** (2 câu query thêm cho cả trang, không phải N+1
+    theo từng dòng) — thêm `TenantSubscriptionRepository#findAllByTenantIdIn` mới, tái dùng
+    `PlanRepository#findAllById` có sẵn (kế thừa từ `JpaRepository`). **Test live qua API thật**:
+    `GET /tenants` trả đúng `planName`/`planId`/`subscriptionStatus` cho từng dòng, khớp dữ liệu
+    subscription thật. Regression: `test_list_tenants.sh` 9/9, `test_create_tenant.sh` 12/12 —
+    không lỗi.
   - *User Story:* Là một Platform Admin, tôi muốn xem danh sách công ty có tìm kiếm, lọc, sort, phân trang để quản trị khách hàng SaaS hiệu quả.
   - *Acceptance Criteria:* Tìm theo tên/slug/status; lọc trạng thái; sort ngày tạo; phân trang; xem plan/subscription hiện tại.
   - *DB Entities:* `tenants, tenant_subscriptions, plans`
-- [ ] **#17 — Cập nhật thông tin tenant** `P0` · 3sp · Nền tảng: Backend, Web Admin
+- [x] **#17 — Cập nhật thông tin tenant** `P0` · 3sp · Nền tảng: Backend, Web Admin
   - 🔒 **Test tay thật — ĐÃ KHÓA (2026-08-13):** toàn bộ case pass, gồm giới hạn quyền (chỉ owner sửa được). Xem `docs/manual-tests/MANUAL_TEST_LOG.md`.
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: TenantService.updateTenant, test_update_tenant.sh; thiếu: không ghi audit
   - *User Story:* Là một Company Admin, tôi muốn cập nhật hồ sơ công ty, logo, địa chỉ, timezone để thông tin doanh nghiệp chính xác.
@@ -227,7 +258,7 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 
 #### Tenant Settings
 
-- [ ] **#18 — Cấu hình giao diện và định dạng** `P1` · 3sp · Nền tảng: Backend, Web Admin
+- [x] **#18 — Cấu hình giao diện và định dạng** `P1` · 3sp · Nền tảng: Backend, Web Admin
   - 🔒 **Test tay thật — ĐÃ KHÓA (2026-08-13):** toàn bộ case pass. Đã bổ sung audit `tenant_settings_updated`. Gap language/currency thuộc API #17 vẫn còn (đúng kiến trúc). Xem `docs/manual-tests/MANUAL_TEST_LOG.md`.
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: TenantSettingsService, test_tenant_settings.sh; thiếu: language/currency nằm ở Tenant entity chứ không phải tenant_settings; không ghi audit
   - *User Story:* Là một Company Admin, tôi muốn cấu hình ngôn ngữ, định dạng ngày giờ, tiền tệ và màu thương hiệu để hệ thống phù hợp công ty.
@@ -236,7 +267,7 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 
 #### Tenant Security
 
-- [ ] **#19 — Quản lý IP whitelist** `P1` · 5sp · Nền tảng: Backend, Web Admin
+- [x] **#19 — Quản lý IP whitelist** `P1` · 5sp · Nền tảng: Backend, Web Admin
   - 🔒 **Test tay thật — ĐÃ KHÓA (2026-08-13):** đã sửa scope client-type → scope theo ROLE (backend + UI), test pass đầy đủ. Xem `docs/manual-tests/MANUAL_TEST_LOG.md`.
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: IpWhitelistService, test_ip_whitelist.sh; thiếu: CRUD đầy đủ nhưng KHÔNG có filter nào thực sự chặn request theo IP — dữ liệu whitelist chưa được enforce
   - *User Story:* Là một Company Admin, tôi muốn thêm/sửa/tắt IP whitelist cho web admin hoặc API để kiểm soát truy cập theo mạng.
@@ -1288,12 +1319,21 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
     tái dùng chính endpoint list (không phải route riêng `/trace`, nhưng đáp ứng đủ chức năng),
     `AuditLogService.findByRequestId` trả timeline đầy đủ theo `requestId`, có tenant-scope. Test
     live: 1 request thật (VD: tạo employee) sinh nhiều dòng audit cùng `requestId` → trace trả
-    đúng toàn bộ timeline. **🟡 Gap nhỏ còn lại, KHÔNG vá đợt này**: AC có nhắc "show metadata
-    endpoint/status nếu có" — `AuditLog` entity hiện KHÔNG có cột `endpoint`/`httpStatus` (chỉ có
-    `requestId`/`ipAddress`/`userAgent`). Chữ "nếu có" trong AC gốc đọc là điều kiện tùy chọn, và
-    thêm 2 cột mới sẽ cần migration + populate lại ở toàn bộ ~48 call site `record()` — quy mô lớn
-    hơn 1 gap nhỏ, không tự quyết định thêm. Ghi nhận làm follow-up nếu team vận hành thực sự cần
-    endpoint/status trong trace view.
+    đúng toàn bộ timeline.
+  - *Audit (2026-08-19, đợt 2):* ✅ **ĐÃ VÁ nốt gap nhỏ "endpoint/status".** Không cần sửa 48 call
+    site `record()` như lo ngại ban đầu — 2 cách khác nhau vì lý do khác nhau:
+    - `endpoint`: `AuditLogService.record()` tự động lấy `HttpRequestUtils.currentRequestPath()`
+      **bên trong chính nó** (giống hệt cách `requestId`/`ipAddress`/`userAgent` đã tự động lấy từ
+      trước) — biết được ngay lúc ghi, không cần đổi bất kỳ call site nào.
+    - `httpStatus`: KHÔNG thể biết ngay lúc `record()` chạy (response chưa hoàn tất, status chưa
+      chốt) — migration V110 thêm cột nullable, backfill sau bằng `RequestIdFilter`: sau khi
+      `filterChain.doFilter()` hoàn tất, nếu request này có ghi audit (đánh dấu qua
+      `HttpRequestUtils.markAuditWritten()`, tránh query thừa cho các request GET không ghi audit
+      gì), chạy 1 UPDATE `audit_logs SET http_status=... WHERE request_id=...` (best-effort,
+      không chặn response thật đã gửi cho client).
+    - **Test live qua API thật**: PATCH tenant settings thật → `audit_logs` có đúng
+      `endpoint='/api/v1/tenants/{id}/settings'` và `http_status=200`; xác nhận cả 2 field trả
+      đúng qua `GET /audit-logs`. Regression: `test_audit_logs.sh` 14/14 — không lỗi.
   - *User Story:* Là một kỹ thuật viên vận hành, tôi muốn xem toàn bộ hành động trong cùng request để debug sự cố nhanh.
   - *Acceptance Criteria:* Click request_id; hiển thị timeline audit cùng request; show metadata endpoint/status nếu có.
   - *DB Entities:* `audit_logs`
@@ -1410,6 +1450,18 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
     (chỉ có FK `notification_id` nullable, nhiều dòng như push-only-fallback không join được về
     notification/tenant nào) nên không per-tenant hoá được nếu không đổi schema — ghi rõ lý do
     trong code, không tự ý mở rộng schema thêm.
+  - *Audit (2026-08-19, đợt 2):* ✅ **ĐÃ VÁ nốt gap `notification_delivery_logs` không per-tenant.**
+    Migration V109 thêm cột `tenant_id` (nullable, backfill từ `notifications.tenant_id` qua
+    `notification_id` cho dữ liệu cũ). Thread `tenantId` xuyên suốt
+    `UserDeviceService.sendPush(...)` (cả đường FCM lẫn fallback email) — lấy từ `NotificationService`
+    (đã có sẵn tenantId trong scope, chỉ chưa truyền xuống); `ScheduledJobMonitor`'s ops alert
+    (platform-admin, không thuộc tenant nào) truyền `null`, đúng ý nghĩa "không có tenant" chứ
+    không phải thiếu sót. `DataRetentionJob` giờ xóa delivery log theo đúng
+    `effectiveDays` của từng tenant trong vòng lặp có sẵn; sweep toàn cục cũ chỉ còn xử lý đúng
+    những dòng `tenant_id IS NULL` (không thể per-tenant hoá được, không phải bug). **Test live
+    qua API thật**: gửi notification thất bại (fake device) → dòng `notification_delivery_logs`
+    có đúng `tenant_id` khớp tenant của notification. Regression: `test_fcm_devices.sh` 13/13,
+    `test_fcm_retry_fallback.sh` 11/11 — không lỗi.
     **Test live qua API + ai-service + DB thật** (không có endpoint trigger job thủ công — job
     chạy cron Chủ nhật 3h sáng — nên test từng thành phần trực tiếp): set `dataRetentionDays=45`
     cho 1 tenant qua API → tạo file ảnh giả 60 ngày tuổi cho tenant đó VÀ 1 tenant khác → gọi thẳng

@@ -22,6 +22,11 @@ public class NotificationDeliveryLog {
   @Column(name = "notification_id")
   private UUID notificationId;
 
+  /** #144 (2026-08-19 follow-up): nullable — a platform-admin ops alert (ScheduledJobMonitor) or
+   *  any row with no notificationId link genuinely has no tenant. */
+  @Column(name = "tenant_id")
+  private UUID tenantId;
+
   @Column(name = "device_token", length = 512)
   private String deviceToken;
 
