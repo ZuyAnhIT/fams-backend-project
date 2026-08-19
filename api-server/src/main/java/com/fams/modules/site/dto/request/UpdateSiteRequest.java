@@ -51,4 +51,9 @@ public class UpdateSiteRequest {
     @Pattern(regexp = "^(gps_only|gps_face|gps_face_liveness)$",
             message = "checkinPolicy must be 'gps_only', 'gps_face', or 'gps_face_liveness'")
     private String checkinPolicy;
+
+    @Schema(description = "When true, the employee-facing check-in map omits the geofence "
+            + "polygon shape (current location + site center marker still shown). Omit to leave "
+            + "unchanged. (#130, 2026-08-18)", nullable = true)
+    private Boolean hidePolygonFromEmployee;
 }

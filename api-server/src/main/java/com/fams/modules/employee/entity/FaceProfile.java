@@ -48,6 +48,16 @@ public class FaceProfile {
     // embedding / pending_embedding columns intentionally not mapped — fams-ai is the only
     // component that ever reads or writes raw biometric vectors, via psycopg2.
 
+    /** Anti-spoof confidence (0-1, worst photo in the enrollment batch) captured by fams-ai at
+     *  enrollment time and promoted from pending_quality_score on approve (#127, 2026-08-18) —
+     *  unlike embedding this is a scalar quality signal, not a raw biometric vector, so it's
+     *  safe to map here for the Face ID report. */
+    @Column(name = "quality_score")
+    private Double qualityScore;
+
+    @Column(name = "pending_quality_score")
+    private Double pendingQualityScore;
+
     @Column(name = "enrolled_at")
     private OffsetDateTime enrolledAt;
 

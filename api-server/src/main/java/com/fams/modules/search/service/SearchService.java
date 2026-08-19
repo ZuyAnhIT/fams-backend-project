@@ -13,6 +13,9 @@ import com.fams.modules.search.dto.response.GlobalSearchResponse;
 import com.fams.modules.site.dto.response.SiteResponse;
 import com.fams.modules.site.entity.Site;
 import com.fams.modules.site.repository.SiteRepository;
+import com.fams.modules.violation.dto.response.ViolationListResponse;
+import com.fams.modules.violation.entity.Violation;
+import com.fams.modules.violation.repository.ViolationRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -37,19 +40,22 @@ public class SearchService {
     private final UserRoleRepository userRoleRepository;
     private final SiteScopeService siteScopeService;
     private final AssignmentRepository assignmentRepository;
+    private final ViolationRepository violationRepository;
 
     public SearchService(EmployeeRepository employeeRepository,
                          SiteRepository siteRepository,
                          CheckinRepository checkinRepository,
                          UserRoleRepository userRoleRepository,
                          SiteScopeService siteScopeService,
-                         AssignmentRepository assignmentRepository) {
+                         AssignmentRepository assignmentRepository,
+                         ViolationRepository violationRepository) {
         this.employeeRepository = employeeRepository;
         this.siteRepository = siteRepository;
         this.checkinRepository = checkinRepository;
         this.userRoleRepository = userRoleRepository;
         this.siteScopeService = siteScopeService;
         this.assignmentRepository = assignmentRepository;
+        this.violationRepository = violationRepository;
     }
 
     @Transactional(readOnly = true)
@@ -77,6 +83,7 @@ public class SearchService {
                     .employees(List.of())
                     .sites(List.of())
                     .checkins(List.of())
+                    .violations(List.of())
                     .build();
         }
 
@@ -90,6 +97,7 @@ public class SearchService {
                     .employees(List.of())
                     .sites(List.of())
                     .checkins(List.of())
+                    .violations(List.of())
                     .build();
         }
 
@@ -173,8 +181,41 @@ public class SearchService {
             // q isn't a UUID — nothing to look up directly, employee-linked check-ins above stand.
         }
 
-        log.info("Global search: tenantId={} q='{}' employees={} sites={} checkins={}",
-                tenantId, q, employees.size(), sites.size(), checkins.size());
+        // ── Violation search (#128, 2026-08-18) — the AC calls for grouping results into
+        // employee/site/checkin/violation, but this group never existed even though the
+        // violation module has existed since #114-118. Same pattern as check-ins: unresolved
+        // violations for employees that matched the query, plus a direct exact-UUID lookup.
+        List<Violation> violations = List.of();
+        if (!employees.isEmpty()) {
+            List<UUID> empIds = employees.stream().map(Employee::getId).collect(Collectors.toList());
+            Specification<Violation> violationSpec = (root, cq, cb) -> cb.and(
+                    cb.equal(root.get("tenantId"), tenantId),
+                    cb.isNull(root.get("deletedAt")),
+                    cb.isFalse(root.get("resolved")),
+                    root.get("employeeId").in(empIds)
+            );
+            PageRequest violationPage = PageRequest.of(0, limit,
+                    Sort.by(Sort.Direction.DESC, "checkDate"));
+            violations = violationRepository.findAll(violationSpec, violationPage).getContent();
+        }
+
+        try {
+            UUID violationId = UUID.fromString(q);
+            java.util.Optional<Violation> byId = violationRepository
+                    .findByIdAndTenantIdAndDeletedAtIsNull(violationId, tenantId)
+                    .filter(v -> allowedSiteIds.isEmpty() || allowedSiteIds.get().contains(v.getSiteId()));
+            if (byId.isPresent() && violations.stream().noneMatch(v -> v.getId().equals(violationId))) {
+                List<Violation> merged = new java.util.ArrayList<>();
+                merged.add(byId.get());
+                merged.addAll(violations);
+                violations = merged.size() > limit ? merged.subList(0, limit) : merged;
+            }
+        } catch (IllegalArgumentException notAUuid) {
+            // q isn't a UUID — nothing to look up directly, employee-linked violations above stand.
+        }
+
+        log.info("Global search: tenantId={} q='{}' employees={} sites={} checkins={} violations={}",
+                tenantId, q, employees.size(), sites.size(), checkins.size(), violations.size());
 
         return GlobalSearchResponse.builder()
                 .query(q)
@@ -182,6 +223,7 @@ public class SearchService {
                 .employees(employees.stream().map(this::toEmployeeResponse).collect(Collectors.toList()))
                 .sites(sites.stream().map(this::toSiteResponse).collect(Collectors.toList()))
                 .checkins(checkins.stream().map(this::toCheckinResponse).collect(Collectors.toList()))
+                .violations(violations.stream().map(this::toViolationResponse).collect(Collectors.toList()))
                 .build();
     }
 
@@ -243,6 +285,22 @@ public class SearchService {
                 .deviceId(c.getDeviceId())
                 .createdAt(c.getCreatedAt())
                 .updatedAt(c.getUpdatedAt())
+                .build();
+    }
+
+    private ViolationListResponse toViolationResponse(Violation v) {
+        return ViolationListResponse.builder()
+                .id(v.getId())
+                .employeeId(v.getEmployeeId())
+                .siteId(v.getSiteId())
+                .violationType(v.getViolationType())
+                .checkDate(v.getCheckDate())
+                .description(v.getDescription())
+                .resolved(v.isResolved())
+                .resolvedAt(v.getResolvedAt())
+                .resolution(v.getResolution())
+                .affectsAttendance(v.isAffectsAttendance())
+                .createdAt(v.getCreatedAt())
                 .build();
     }
 }

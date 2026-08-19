@@ -49,6 +49,13 @@ public class Site {
     @Column(name = "checkin_policy", nullable = false, length = 20)
     private String checkinPolicy;
 
+    /** #130 (2026-08-18): when true, the employee-facing check-in map omits the geofence polygon
+     *  shape (current location + site center marker still shown) — an HR opt-in per site, e.g.
+     *  for a security-sensitive boundary. Defaults to false (unchanged prior behavior: always
+     *  shown) so this never silently hides anything for existing sites. */
+    @Column(name = "hide_polygon_from_employee", nullable = false)
+    private boolean hidePolygonFromEmployee;
+
     @Column(name = "created_by")
     private UUID createdBy;
 

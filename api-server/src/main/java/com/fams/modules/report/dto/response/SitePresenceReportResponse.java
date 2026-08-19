@@ -27,6 +27,9 @@ public class SitePresenceReportResponse {
     @Schema(description = "Sum of absentCount across all sites", example = "13")
     private int totalAbsent;
 
+    @Schema(description = "Sum of unresolvedViolations across all sites (#126, 2026-08-18)", example = "2")
+    private long totalUnresolvedViolations;
+
     @Schema(description = "Paginated per-site presence breakdown")
     private PageResponse<SitePresenceEntry> sites;
 }

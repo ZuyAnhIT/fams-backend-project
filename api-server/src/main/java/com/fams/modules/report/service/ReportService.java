@@ -646,7 +646,7 @@ public class ReportService {
 
     @Transactional(readOnly = true)
     public SitePresenceReportResponse getSitePresenceReport(
-            UUID tenantId, UUID siteId, int page, int size,
+            UUID tenantId, UUID siteId, UUID workspaceId, int page, int size,
             UUID callerUserId, boolean callerIsPlatformAdmin) {
 
         if (!callerIsPlatformAdmin) {
@@ -667,6 +667,23 @@ public class ReportService {
                 siteScopeService.resolveAllowedSiteIds(callerUserId, tenantId, callerIsPlatformAdmin);
         if (siteId != null && allowedSiteIds.isPresent() && !allowedSiteIds.get().contains(siteId)) {
             throw new AccessDeniedException("You do not have permission to view presence for this site");
+        }
+
+        // #126 (2026-08-18): workspace filter — AC calls for it like every other report, but it
+        // was entirely absent here (the 07-22 audit marked this endpoint "ĐÃ XONG", which was
+        // wrong on this point, same class of gap as #122/#123/#125). Workspace has no direct
+        // column on Employee — resolve member IDs first, same pattern used everywhere else.
+        Set<UUID> workspaceEmployeeIds = resolveWorkspaceEmployeeIds(tenantId, workspaceId);
+        if (workspaceEmployeeIds != null && workspaceEmployeeIds.isEmpty()) {
+            return SitePresenceReportResponse.builder()
+                    .reportedAt(OffsetDateTime.now())
+                    .totalSites(0)
+                    .totalPresent(0)
+                    .totalAssigned(0)
+                    .totalAbsent(0)
+                    .totalUnresolvedViolations(0)
+                    .sites(PageResponse.from(new PageImpl<>(List.of(), PageRequest.of(page, size), 0)))
+                    .build();
         }
 
         // Fetch active sites for this tenant (optionally filtered to one site)
@@ -701,6 +718,7 @@ public class ReportService {
                     .findOpenSessionsBySite(tenantId, site.getId(), startOfToday);
             Set<UUID> presentIds = openSessions.stream()
                     .map(CheckinRecord::getEmployeeId)
+                    .filter(id -> workspaceEmployeeIds == null || workspaceEmployeeIds.contains(id))
                     .collect(Collectors.toSet());
 
             // Employees with active assignments today
@@ -709,11 +727,16 @@ public class ReportService {
                             DayOfWeekBitmask.bitForDate(today));
             Set<UUID> assignedIds = activeAssignments.stream()
                     .map(Assignment::getEmployeeId)
+                    .filter(id -> workspaceEmployeeIds == null || workspaceEmployeeIds.contains(id))
                     .collect(Collectors.toSet());
 
             List<UUID> absentIdList  = assignedIds.stream()
                     .filter(id -> !presentIds.contains(id))
                     .collect(Collectors.toList());
+
+            // #126 (2026-08-18): AC calls for a violation count alongside assigned/present/absent
+            // — entirely absent before, despite the AC listing it explicitly.
+            long unresolvedViolations = violationRepository.countUnresolved(tenantId, site.getId());
 
             return SitePresenceEntry.builder()
                     .siteId(site.getId())
@@ -722,6 +745,7 @@ public class ReportService {
                     .assignedCount(assignedIds.size())
                     .presentCount(presentIds.size())
                     .absentCount(absentIdList.size())
+                    .unresolvedViolations(unresolvedViolations)
                     .presentEmployees(toEmployeeRefs(tenantId, new ArrayList<>(presentIds)))
                     .absentEmployees(toEmployeeRefs(tenantId, absentIdList))
                     .build();
@@ -731,6 +755,8 @@ public class ReportService {
         int totalPresent  = entries.stream().mapToInt(SitePresenceEntry::getPresentCount).sum();
         int totalAssigned = entries.stream().mapToInt(SitePresenceEntry::getAssignedCount).sum();
         int totalAbsent   = entries.stream().mapToInt(SitePresenceEntry::getAbsentCount).sum();
+        long totalUnresolvedViolations = entries.stream()
+                .mapToLong(SitePresenceEntry::getUnresolvedViolations).sum();
 
         // Manual pagination
         int total   = entries.size();
@@ -750,6 +776,7 @@ public class ReportService {
                 .totalPresent(totalPresent)
                 .totalAssigned(totalAssigned)
                 .totalAbsent(totalAbsent)
+                .totalUnresolvedViolations(totalUnresolvedViolations)
                 .sites(sitePage)
                 .build();
     }
@@ -833,8 +860,8 @@ public class ReportService {
 
     @Transactional(readOnly = true)
     public FaceIdReportResponse getFaceIdEnrollmentReport(
-            UUID tenantId, String statusFilter, UUID departmentId, String search, int page, int size,
-            UUID callerUserId, boolean callerIsPlatformAdmin) {
+            UUID tenantId, String statusFilter, UUID departmentId, UUID siteId, String search,
+            int page, int size, UUID callerUserId, boolean callerIsPlatformAdmin) {
 
         if (!callerIsPlatformAdmin) {
             Set<String> perms = userRoleRepository
@@ -887,6 +914,21 @@ public class ReportService {
             }
         }
 
+        // #127 (2026-08-18): siteId filter — genuinely missing before despite every sibling
+        // report endpoint (daily/monthly attendance, violations) exposing one; only implicit
+        // scope-restriction existed, not a caller-selectable narrow-down. Same
+        // assignment-linkage pattern as the scope check just above, applied on top of it.
+        if (siteId != null) {
+            if (allowedSiteIds.isPresent() && !allowedSiteIds.get().contains(siteId)) {
+                throw new AccessDeniedException("You do not have permission to view Face ID status for this site");
+            }
+            Set<UUID> siteEmployeeIds = assignmentRepository
+                    .findDistinctEmployeeIdsByTenantIdAndSiteIdIn(tenantId, Set.of(siteId));
+            employees = employees.stream()
+                    .filter(e -> siteEmployeeIds.contains(e.getId()))
+                    .collect(Collectors.toList());
+        }
+
         // Build map: employeeId → FaceProfile
         Map<UUID, FaceProfile> profileMap = faceProfileRepository.findAllByTenantId(tenantId)
                 .stream().collect(Collectors.toMap(FaceProfile::getEmployeeId, fp -> fp));
@@ -910,6 +952,7 @@ public class ReportService {
                     .reviewStatus(fp != null ? fp.getReviewStatus() : "none")
                     .submittedAt(fp != null ? fp.getSubmittedAt() : null)
                     .rejectionReason(fp != null ? fp.getRejectionReason() : null)
+                    .qualityScore(fp != null ? fp.getQualityScore() : null)
                     .build();
         }).collect(Collectors.toList());
 
@@ -953,9 +996,68 @@ public class ReportService {
                 .revokedCount(revokedCount)
                 .statusFilter(statusFilter)
                 .departmentId(departmentId)
+                .siteId(siteId)
                 .search(searchTerm)
                 .records(recordPage)
                 .build();
+    }
+
+    /** #127 (2026-08-18): export list of not-yet-enrolled employees — AC calls for it, entirely
+     *  absent before. Reuses getFaceIdEnrollmentReport with statusFilter="not_enrolled" and one
+     *  unpaged page rather than duplicating its filtering/scope logic. */
+    @Transactional(readOnly = true)
+    public byte[] exportFaceIdNotEnrolled(UUID tenantId, UUID departmentId, UUID siteId,
+                                          UUID callerUserId, boolean callerIsPlatformAdmin) {
+        FaceIdReportResponse report = getFaceIdEnrollmentReport(
+                tenantId, "not_enrolled", departmentId, siteId, null, 0, Integer.MAX_VALUE,
+                callerUserId, callerIsPlatformAdmin);
+        List<FaceIdReportRow> rows = report.getRecords().getContent();
+
+        try (XSSFWorkbook workbook = new XSSFWorkbook()) {
+            Sheet sheet = workbook.createSheet("Chưa đăng ký Face ID");
+            String[] headers = {"Mã NV", "Họ", "Tên", "Email", "Phòng ban"};
+            Row headerRow = sheet.createRow(0);
+            for (int i = 0; i < headers.length; i++) {
+                headerRow.createCell(i).setCellValue(headers[i]);
+            }
+            int rowNum = 1;
+            for (FaceIdReportRow r : rows) {
+                Row row = sheet.createRow(rowNum++);
+                row.createCell(0).setCellValue(r.getEmployeeCode() != null ? r.getEmployeeCode() : "");
+                row.createCell(1).setCellValue(r.getLastName() != null ? r.getLastName() : "");
+                row.createCell(2).setCellValue(r.getFirstName() != null ? r.getFirstName() : "");
+                row.createCell(3).setCellValue(r.getEmail() != null ? r.getEmail() : "");
+                row.createCell(4).setCellValue(r.getDepartment() != null ? r.getDepartment() : "");
+            }
+            for (int i = 0; i < headers.length; i++) {
+                sheet.autoSizeColumn(i);
+            }
+
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            workbook.write(out);
+            log.info("Face ID not-enrolled export: tenantId={} siteId={} departmentId={} rows={}",
+                    tenantId, siteId, departmentId, rows.size());
+
+            try {
+                auditLogService.record(
+                        tenantId, callerUserId, null,
+                        "FaceIdExport", "not_enrolled", "EXPORT_FACE_ID_NOT_ENROLLED",
+                        null, java.util.Map.of(
+                                "siteId", siteId != null ? siteId.toString() : "",
+                                "departmentId", departmentId != null ? departmentId.toString() : "",
+                                "rows", rows.size()),
+                        com.fams.shared.security.HttpRequestUtils.currentRequestId(),
+                        com.fams.shared.security.HttpRequestUtils.currentIpAddress(),
+                        com.fams.shared.security.HttpRequestUtils.currentUserAgent());
+            } catch (Exception e) {
+                log.warn("Failed to record audit log for EXPORT_FACE_ID_NOT_ENROLLED tenantId={}: {}",
+                        tenantId, e.getMessage());
+            }
+
+            return out.toByteArray();
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to generate Face ID not-enrolled Excel export", e);
+        }
     }
 
     private ViolationListResponse toViolationListResponse(Violation v) {

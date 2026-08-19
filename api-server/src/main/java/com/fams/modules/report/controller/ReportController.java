@@ -303,6 +303,8 @@ public class ReportController {
                 @RequestParam(required = false) String status,
             @Parameter(description = "Filter by department ID (optional)")
                 @RequestParam(required = false) UUID departmentId,
+            @Parameter(description = "Filter by site ID (optional, #127 2026-08-18)")
+                @RequestParam(required = false) UUID siteId,
             @Parameter(description = "Server-side search by name, email, or employee code (optional)")
                 @RequestParam(required = false) String search,
             @RequestParam(defaultValue = "0") int page,
@@ -310,10 +312,50 @@ public class ReportController {
             @AuthenticationPrincipal FamsUserDetails caller) {
 
         FaceIdReportResponse result = reportService.getFaceIdEnrollmentReport(
-                tenantId, status, departmentId, search, page, size,
+                tenantId, status, departmentId, siteId, search, page, size,
                 caller.getUserId(), caller.isPlatformAdmin());
 
         return ResponseEntity.ok(ApiResponse.success(result));
+    }
+
+    @Operation(
+        summary = "Export not-yet-enrolled employees to Excel (HR/Admin)",
+        description = "Generates and downloads an Excel (.xlsx) file listing every active employee whose Face ID " +
+                      "status is not_enrolled, for onboarding follow-up. Optionally filter by site/department. " +
+                      "Requires reports:list permission."
+    )
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "200",
+            description = "Excel file generated successfully",
+            content = @Content(mediaType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "401",
+            description = "Unauthorized — valid JWT required"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "403",
+            description = "Forbidden — reports:list permission required")
+    })
+    @GetMapping("/face-id/enrollment/export")
+    public ResponseEntity<byte[]> exportFaceIdNotEnrolled(
+            @PathVariable UUID tenantId,
+            @Parameter(description = "Filter by department ID (optional)")
+                @RequestParam(required = false) UUID departmentId,
+            @Parameter(description = "Filter by site ID (optional)")
+                @RequestParam(required = false) UUID siteId,
+            @AuthenticationPrincipal FamsUserDetails caller) {
+
+        byte[] content = reportService.exportFaceIdNotEnrolled(
+                tenantId, departmentId, siteId, caller.getUserId(), caller.isPlatformAdmin());
+
+        String filename = "face-id-not-enrolled.xlsx";
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.parseMediaType(
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"));
+        headers.setContentDispositionFormData("attachment", filename);
+        headers.setContentLength(content.length);
+
+        return ResponseEntity.ok().headers(headers).body(content);
     }
 
     @Operation(
@@ -339,12 +381,14 @@ public class ReportController {
             @PathVariable UUID tenantId,
             @Parameter(description = "Restrict to a single site (optional — omit for all sites)")
                 @RequestParam(required = false) UUID siteId,
+            @Parameter(description = "Restrict to one workspace/department (optional, #126 2026-08-18)")
+                @RequestParam(required = false) UUID workspaceId,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
             @AuthenticationPrincipal FamsUserDetails caller) {
 
         SitePresenceReportResponse result = reportService.getSitePresenceReport(
-                tenantId, siteId, page, size,
+                tenantId, siteId, workspaceId, page, size,
                 caller.getUserId(), caller.isPlatformAdmin());
 
         return ResponseEntity.ok(ApiResponse.success(result));

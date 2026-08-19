@@ -30,6 +30,9 @@ public class SitePresenceEntry {
     @Schema(description = "Assigned employees not yet checked in (assignedCount - presentCount)", example = "3")
     private int absentCount;
 
+    @Schema(description = "Unresolved violations at this site (#126, 2026-08-18)", example = "0")
+    private long unresolvedViolations;
+
     @Schema(description = "Employees currently checked in at this site (id + name + code — no client-side batch resolve needed, added 2026-08-05)")
     private List<EmployeeRef> presentEmployees;
 

@@ -1091,14 +1091,30 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 
 - [x] **#126 — Báo cáo hiện diện theo site** `P1` · 5sp · Nền tảng: Backend, Web Admin, Mobile App
   - *Audit (2026-07-22):* ✅ ĐÃ XONG — bằng chứng: ReportController.getSitePresenceReport, test_site_presence_report.sh
+  - *Audit (2026-08-18):* 🟡 Audit gốc SAI/lỗi thời trên 2 điểm — thiếu filter `workspace` VÀ
+    thiếu số liệu `violation` dù AC liệt kê rõ cả hai (cùng dạng gap #122/123/125 đợt trước). **Đã
+    vá cả 2** — `unresolvedViolations` per-site tái dùng `ViolationRepository.countUnresolved` có
+    sẵn từ #118/#121. Test live qua API thật xác nhận đúng. Web Admin thêm dropdown workspace +
+    StatCard/Tag vi phạm, **đã test live qua Playwright thật**: dropdown workspace + StatCard "Vi
+    phạm chưa xử lý" hiển thị đúng trên UI thật. Xem
+    `docs/manual-tests/sprint-5-feature-126-site-presence-report.md`.
   - *User Story:* Là một HR/Admin/Supervisor, tôi muốn xem số người đang có mặt/thiếu tại từng site để quản lý nhân sự hiện trường.
   - *Acceptance Criteria:* Tổng assigned hôm nay, checked-in, missing, violation; filter site/workspace; cập nhật gần realtime.
   - *DB Entities:* `assignments, checkins, attendance_summaries, sites`
 
 #### Báo cáo Face ID
 
-- [ ] **#127 — Báo cáo trạng thái Face ID** `P1` · 3sp · Nền tảng: Backend, Web Admin
+- [x] **#127 — Báo cáo trạng thái Face ID** `P1` · 3sp · Nền tảng: Backend, Web Admin
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: getFaceIdEnrollmentReport, test_face_id_report.sh; thiếu: không có quality score; không có endpoint export
+  - *Audit (2026-08-18):* ✅ ĐÃ VÁ cả 3 gap (2 đúng theo audit gốc + 1 audit gốc bỏ sót:
+    `siteId` filter). **Quality score — phát hiện quan trọng**: fams-ai đã tính điểm anti-spoof
+    lúc enroll nhưng vứt bỏ hoàn toàn, không lưu không trả về — không phải "chưa có dữ liệu" như
+    tưởng ban đầu. Đã hỏi người dùng, chọn vá ngay: migration mới + sửa `ai-service` (Python) lẫn
+    Java trong cùng đợt, quality score giờ chảy đúng end-to-end (test live xác nhận). Thêm export
+    not-enrolled + siteId filter. Enrollment date xác nhận đã có sẵn, không phải gap. **Đã test
+    live qua Playwright thật**: dropdown site + cột "Chất lượng" hiển thị đúng, nút "Xuất DS chưa
+    đăng ký" tải file thật thành công. Xem
+    `docs/manual-tests/sprint-5-feature-127-face-id-report.md`.
   - *User Story:* Là một HR/Admin, tôi muốn xem nhân viên đã/chưa đăng ký Face ID để hoàn tất onboarding.
   - *Acceptance Criteria:* Filter workspace/site/status; export danh sách chưa đăng ký; hiển thị quality score và ngày đăng ký.
   - *DB Entities:* `tenant_users, face_embeddings, assignments`
@@ -1107,8 +1123,14 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 
 #### Tìm kiếm toàn hệ thống
 
-- [ ] **#128 — Tìm kiếm nhanh nhân viên/site/check-in** `P2` · 5sp · Nền tảng: Backend, Web Admin
+- [x] **#128 — Tìm kiếm nhanh nhân viên/site/check-in** `P2` · 5sp · Nền tảng: Backend, Web Admin
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: SearchController/SearchService, test_global_search.sh; thiếu: thiếu nhóm kết quả violation
+  - *Audit (2026-08-18):* ✅ ĐÃ VÁ gap `violations` (đúng như audit gốc, không lỗi thời). Phát
+    hiện thêm: access control đã được vá TỪ TRƯỚC (commit sau ngày audit gốc) — không phải gap
+    còn tồn đọng, chỉ thiếu test coverage khóa hành vi lại (ghi nhận, chưa vá trong đợt này). Test
+    live qua API thật xác nhận nhóm `violations` trả đúng. **Đã test live qua Playwright thật**: ô
+    tìm kiếm nhanh trên header hoạt động đúng, không crash. Xem
+    `docs/manual-tests/sprint-5-feature-128-global-search.md`.
   - *User Story:* Là một HR/Admin, tôi muốn tìm nhanh dữ liệu chính để giảm thao tác điều hướng.
   - *Acceptance Criteria:* Search theo keyword; phân nhóm kết quả employee/site/checkin/violation; tôn trọng quyền truy cập.
   - *DB Entities:* `tenant_users, users, sites, checkins, violations`
@@ -1117,13 +1139,29 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 
 #### Trải nghiệm app
 
-- [ ] **#129 — Thông báo lỗi thân thiện** `P1` · 3sp · Nền tảng: Mobile App
+- [x] **#129 — Thông báo lỗi thân thiện** `P1` · 3sp · Nền tảng: Mobile App
   - *Audit (2026-07-22):* ❌ CHƯA LÀM — thiếu: không tìm thấy mapping invalid_reason -> tiếng Việt; thuộc phạm vi mobile app, không có gì trong backend repo
+  - *Audit (2026-08-18):* 🟡 Audit gốc SAI hoàn toàn — mapping lỗi tiếng Việt đã có khá đầy đủ từ
+    trước cho cả check-in lẫn random-check (`parseCheckinError`, `randomCheckErrorMessage`...). 2
+    gap thật: (1) thiếu gợi ý hành động cụ thể theo nguyên nhân (di chuyển gần hơn/chụp lại ảnh) —
+    đã thêm; (2) thiếu nút "Liên hệ HR" bấm được (trước chỉ text tĩnh) — đã thêm, điều hướng tới
+    màn Trợ giúp sẵn có. `tsc --noEmit` sạch. **Chưa test trên thiết bị thật.** Xem
+    `docs/manual-tests/sprint-5-feature-129-friendly-error-messages.md`.
   - *User Story:* Là một nhân viên, tôi muốn nhận hướng dẫn rõ ràng khi chấm công lỗi để biết cách xử lý ngay.
   - *Acceptance Criteria:* Map invalid_reason sang thông báo tiếng Việt; gợi ý bật GPS/chụp lại/đến gần site; có nút liên hệ HR nếu cần.
   - *DB Entities:* `checkins, random_check_responses`
-- [ ] **#130 — Bản đồ site và vị trí hiện tại** `P1` · 5sp · Nền tảng: Backend, Mobile App
+- [x] **#130 — Bản đồ site và vị trí hiện tại** `P1` · 5sp · Nền tảng: Backend, Mobile App
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: GeofenceController/Service (polygon+buffer CRUD); thiếu: không có logic cảnh báo accuracy thấp hay ẩn polygon theo policy
+  - *Audit (2026-08-18):* 🟡 Audit gốc lỗi thời 1 phần — bản đồ hiển thị vị trí/geofence trên
+    Mobile App đã có sẵn từ trước (`CheckinLocationMap.tsx`), audit gốc chỉ nhắc CRUD backend nên
+    bỏ sót. 2 gap thật đã vá: (1) cảnh báo GPS accuracy thấp (ngưỡng 50m, khớp ngưỡng risk-score
+    backend); (2) "ẩn polygon theo policy" — không tồn tại ở đâu trong data model, đã hỏi người
+    dùng, chọn thêm cờ per-site `hidePolygonFromEmployee` (migration mới, mặc định false — không
+    đổi hành vi cũ). Test live qua API thật: bật cờ → `coordinates=null`, giữ `bufferMeters`. Web
+    Admin thêm toggle trong form sửa site, **đã test live qua Playwright thật**: toggle "Ẩn vùng
+    geofence khỏi nhân viên" hoạt động đúng, lưu thành công — Web Admin phần này ĐÃ KHÓA. **Chưa
+    test cảnh báo GPS trên thiết bị thật (Mobile App).** Xem
+    `docs/manual-tests/sprint-5-feature-130-site-map-location.md`.
   - *User Story:* Là một nhân viên, tôi muốn xem vị trí của mình so với geofence để giảm lỗi check-in sai vị trí.
   - *Acceptance Criteria:* Hiển thị vị trí hiện tại, site center/geofence; cảnh báo accuracy thấp; không hiển polygon nếu policy ẩn.
   - *DB Entities:* `sites, site_geofences, checkins`
@@ -1376,6 +1414,21 @@ Danh sách bảng/entity được đề cập xuyên suốt backlog (tổng hợ
   luồng đăng nhập + refresh token. Xác nhận qua live test: user có cả `EMPLOYEE` lẫn
   `SITE_SUPERVISOR` trong cùng tenant, JWT (cả lúc login lẫn sau khi refresh-token) đều chọn đúng
   `SITE_SUPERVISOR`.
+- **(Phát hiện 2026-08-19, qua chạy lại toàn bộ 155 test script sau đợt #126-130 — 3 test fail,
+  KHÔNG liên quan gì tới thay đổi đợt này, xác nhận bằng `git status` không file nào bị đụng tới)
+  — 2 gap sản phẩm thật + 1 lỗi trong chính test script:**
+  - `test_plan_limits.sh`: **giới hạn gói (max_employees, max_sites) KHÔNG được enforce** — tạo
+    nhân viên/site thứ 6/thứ 2 vượt hạn mức gói trial vẫn trả HTTP 201 thay vì 422 bị chặn. Gap
+    sản phẩm thật, chưa sửa trong đợt này — cần audit riêng module `PlanLimitsService`.
+  - `test_update_tenant.sh`: platform admin (kể cả người đã tạo ra tenant đó) **KHÔNG bị chặn**
+    sửa thông tin tenant qua `PUT /tenants/{id}` — test kỳ vọng chỉ chủ tenant (owner) mới được
+    sửa, platform admin phải bị 403, nhưng thực tế trả 200. Gap sản phẩm thật hoặc chủ đích thiết
+    kế cần xác nhận lại — chưa sửa trong đợt này.
+  - `test_face_id_verify.sh`: **lỗi trong chính test script**, không phải gap sản phẩm — dùng
+    token platform admin để gọi `POST .../face-id/consent`, trong khi `FaceIdService.giveConsent`
+    cố ý chỉ cho phép chính nhân viên tự cho consent (trích javadoc: biometric consent theo Nghị
+    định 13/2023/NĐ-CP phải đến từ chính chủ thể dữ liệu, HR/Admin không được thay mặt) — hành vi
+    backend ĐÚNG, test cần sửa lại dùng token của chính nhân viên.
 
 ### Ý nghĩa cho việc lên kế hoạch Sprint 1 trở đi
 

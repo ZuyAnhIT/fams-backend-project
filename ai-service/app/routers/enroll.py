@@ -47,6 +47,7 @@ async def enroll_face(
 
     embeddings: list[list[float]] = []
     photo_bytes_list: list[bytes] = []
+    antispoof_scores: list[float] = []
 
     for idx, photo in enumerate(photos):
         data = await photo.read()
@@ -65,6 +66,7 @@ async def enroll_face(
                        "— looks like a photo of a photo/screen, not a live face. Retake with better lighting, "
                        "facing the camera directly.",
             )
+        antispoof_scores.append(antispoof_score)
 
         try:
             emb = face_service.extract_embedding(data)
@@ -85,6 +87,11 @@ async def enroll_face(
             )
 
     avg_embedding = face_service.average_embeddings(embeddings)
+    # Quality score = the WORST photo's anti-spoof confidence, not the average — one weak photo
+    # in the batch (poor lighting, borderline angle) should drag the whole enrollment's reported
+    # quality down, same reasoning as the same-person pairwise check above using min-like logic
+    # (the weakest link determines trust in the batch, not the average).
+    quality_score = min(antispoof_scores)
 
     saved_paths = [storage_service.save_enrollment_photo(tenant_id, employee_id, data)
                    for data in photo_bytes_list]
@@ -99,16 +106,17 @@ async def enroll_face(
             cur.execute(
                 """
                 UPDATE face_profiles
-                SET pending_embedding    = %s::double precision[],
-                    pending_photo_count  = %s,
-                    pending_photo_path   = %s,
-                    review_status        = 'pending',
-                    submitted_at         = now(),
-                    rejection_reason     = NULL,
-                    updated_at           = now()
+                SET pending_embedding     = %s::double precision[],
+                    pending_photo_count   = %s,
+                    pending_photo_path    = %s,
+                    pending_quality_score = %s,
+                    review_status         = 'pending',
+                    submitted_at          = now(),
+                    rejection_reason      = NULL,
+                    updated_at            = now()
                 WHERE employee_id = %s::uuid AND tenant_id = %s::uuid
                 """,
-                [avg_embedding, n, representative_photo_path, employee_id, tenant_id],
+                [avg_embedding, n, representative_photo_path, quality_score, employee_id, tenant_id],
             )
             if cur.rowcount == 0:
                 raise HTTPException(status_code=404, detail="face profile not found — call POST /consent first")
@@ -147,7 +155,7 @@ def enroll_from_challenge(
                 "UPDATE liveness_challenges SET status = 'consumed', consumed_at = now() "
                 "WHERE id = %s::uuid AND tenant_id = %s::uuid AND employee_id = %s::uuid "
                 "AND purpose = 'enroll' AND status = 'passed' "
-                "RETURNING embedding, center_frame_path",
+                "RETURNING embedding, center_frame_path, result_detail",
                 [challenge_id, tenant_id, employee_id],
             )
             row = cur.fetchone()
@@ -155,21 +163,32 @@ def enroll_from_challenge(
                 raise HTTPException(
                     status_code=409,
                     detail="challenge not found, not an 'enroll' challenge, not passed, or already consumed")
-            embedding, center_frame_path = row
+            embedding, center_frame_path, result_detail = row
+
+            # The challenge's own anti_spoof_check step already computed this (liveness_challenge.py)
+            # — reuse it instead of re-running anti-spoofing here, same quality signal as the
+            # raw-photo path above just sourced from the challenge's result_detail JSON.
+            quality_score = None
+            if result_detail:
+                for step in result_detail.get("steps", []):
+                    if step.get("action") == "anti_spoof_check":
+                        quality_score = step.get("score")
+                        break
 
             cur.execute(
                 """
                 UPDATE face_profiles
-                SET pending_embedding    = %s::double precision[],
-                    pending_photo_count  = 3,
-                    pending_photo_path   = %s,
-                    review_status        = 'pending',
-                    submitted_at         = now(),
-                    rejection_reason     = NULL,
-                    updated_at           = now()
+                SET pending_embedding     = %s::double precision[],
+                    pending_photo_count   = 3,
+                    pending_photo_path    = %s,
+                    pending_quality_score = %s,
+                    review_status         = 'pending',
+                    submitted_at          = now(),
+                    rejection_reason      = NULL,
+                    updated_at            = now()
                 WHERE employee_id = %s::uuid AND tenant_id = %s::uuid
                 """,
-                [embedding, center_frame_path, employee_id, tenant_id],
+                [embedding, center_frame_path, quality_score, employee_id, tenant_id],
             )
             if cur.rowcount == 0:
                 raise HTTPException(status_code=404, detail="face profile not found — call POST /consent first")
@@ -201,15 +220,17 @@ def approve_face(
             cur.execute(
                 """
                 UPDATE face_profiles
-                SET embedding          = pending_embedding,
-                    embedding_deleted  = false,
-                    status             = 'enrolled',
-                    enrolled_at        = now(),
-                    review_status      = 'none',
-                    pending_embedding  = NULL,
-                    pending_photo_count = NULL,
-                    pending_photo_path = NULL,
-                    updated_at         = now()
+                SET embedding             = pending_embedding,
+                    embedding_deleted     = false,
+                    status                = 'enrolled',
+                    enrolled_at           = now(),
+                    review_status         = 'none',
+                    quality_score         = pending_quality_score,
+                    pending_embedding     = NULL,
+                    pending_photo_count   = NULL,
+                    pending_photo_path    = NULL,
+                    pending_quality_score = NULL,
+                    updated_at            = now()
                 WHERE employee_id = %s::uuid AND tenant_id = %s::uuid AND review_status = 'pending'
                 """,
                 [employee_id, tenant_id],
@@ -246,12 +267,13 @@ def reject_face(
             cur.execute(
                 """
                 UPDATE face_profiles
-                SET review_status       = 'rejected',
-                    rejection_reason    = %s,
-                    pending_embedding   = NULL,
-                    pending_photo_count = NULL,
-                    pending_photo_path  = NULL,
-                    updated_at          = now()
+                SET review_status         = 'rejected',
+                    rejection_reason      = %s,
+                    pending_embedding     = NULL,
+                    pending_photo_count   = NULL,
+                    pending_photo_path    = NULL,
+                    pending_quality_score = NULL,
+                    updated_at            = now()
                 WHERE employee_id = %s::uuid AND tenant_id = %s::uuid AND review_status = 'pending'
                 """,
                 [reason, employee_id, tenant_id],
@@ -313,15 +335,17 @@ def revoke_face(
             cur.execute(
                 """
                 UPDATE face_profiles
-                SET embedding           = NULL,
-                    embedding_deleted   = true,
-                    status              = 'revoked',
-                    revoked_at          = now(),
-                    review_status       = 'none',
-                    pending_embedding   = NULL,
-                    pending_photo_count = NULL,
-                    rejection_reason    = NULL,
-                    updated_at          = now()
+                SET embedding             = NULL,
+                    embedding_deleted     = true,
+                    status                = 'revoked',
+                    revoked_at            = now(),
+                    review_status         = 'none',
+                    quality_score         = NULL,
+                    pending_embedding     = NULL,
+                    pending_photo_count   = NULL,
+                    pending_quality_score = NULL,
+                    rejection_reason      = NULL,
+                    updated_at            = now()
                 WHERE employee_id = %s::uuid AND tenant_id = %s::uuid
                 """,
                 [employee_id, tenant_id],

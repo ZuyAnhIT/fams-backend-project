@@ -114,7 +114,8 @@ public class AvailableSiteResponse {
         @Schema(description = "Geofence UUID", example = "3fa85f64-5717-4562-b3fc-2c963f66afa6")
         private UUID id;
 
-        @Schema(description = "Polygon coordinates as [longitude, latitude] pairs")
+        @Schema(description = "Polygon coordinates as [longitude, latitude] pairs — null when "
+                + "the site's hidePolygonFromEmployee policy is on (#130, 2026-08-18)")
         private List<List<Double>> coordinates;
 
         @Schema(description = "Additional buffer in metres beyond polygon boundary", example = "50")
