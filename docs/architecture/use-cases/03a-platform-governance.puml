@@ -1,33 +1,27 @@
-@startuml FAMS_Platform_Tenant_RBAC
-title FAMS — Platform, Tenant, Subscription, RBAC & Audit (Mức 2)
+@startuml FAMS_Platform_Governance
+title FAMS — Quản trị nền tảng, Subscription, RBAC & Audit (Mức 2.2A)
 left to right direction
 skinparam packageStyle rectangle
 skinparam shadowing false
 
 actor "Platform Admin" as PA
 actor "Platform Staff" as PS
-actor "Tenant Admin / Owner" as TA
-actor "HR Manager" as HR
-actor "Thành viên tenant" as Member
 actor "Người được mời\nvào platform" as Invitee
 actor "Dịch vụ Email" as Mail <<external system>>
 
-rectangle "FAMS — Platform & Tenant Governance" {
+rectangle "FAMS — Platform Governance" {
   usecase "Tạo tenant" as CreateTenant
   usecase "Xem danh sách/chi tiết tenant" as ViewTenant
-  usecase "Cập nhật hồ sơ/cấu hình tenant" as UpdateTenant
-  usecase "Quản lý IP whitelist" as IP
   usecase "Khóa, mở hoặc hủy tenant" as Lifecycle
   usecase "Quản lý gói dịch vụ" as Plans
   usecase "Gán/thay đổi subscription" as Subscription
   usecase "Kiểm tra giới hạn gói" as EnforcePlan
-  usecase "Quản lý role tùy chỉnh" as Roles
+  usecase "Quản lý role cấp nền tảng" as Roles
   usecase "Xem danh mục permission" as Permissions
-  usecase "Gán/thu hồi role người dùng" as AssignRole
-  usecase "Xem quyền/vai trò của tôi" as MyRoles
+  usecase "Gán/thu hồi role cấp nền tảng" as AssignRole
   usecase "Mời/quản lý Platform Staff" as InviteStaff
   usecase "Chấp nhận lời mời platform" as AcceptStaff
-  usecase "Tra cứu audit log" as Audit
+  usecase "Tra cứu audit log toàn hệ thống" as Audit
   usecase "Xem diff và trace request" as AuditDetail
   usecase "Giám sát trạng thái hệ thống" as Health
   usecase "Quản lý hồ sơ go-live" as GoLive
@@ -50,17 +44,6 @@ PS --> CreateTenant : nếu được cấp quyền
 PS --> ViewTenant : nếu được cấp quyền
 PS --> Audit : nếu được cấp quyền
 PS --> GoLive : nếu được cấp quyền
-
-TA --> CreateTenant : self-service
-TA --> UpdateTenant
-TA --> IP
-TA --> Roles
-TA --> Permissions
-TA --> AssignRole
-TA --> Audit : trong tenant
-TA --> GoLive
-HR --> Audit : nếu được cấp quyền
-Member --> MyRoles
 Invitee --> AcceptStaff
 
 Subscription .> EnforcePlan : <<include>>
@@ -69,7 +52,7 @@ Mail --> InviteStaff
 Mail --> AcceptStaff
 
 note bottom of Roles
-  Role hệ thống là bất biến. Tenant chỉ quản lý role tùy chỉnh
-  của chính tenant; role platform chỉ do Platform Admin quản lý.
+  Role hệ thống là bất biến; role cấp nền tảng
+  chỉ do Platform Admin quản lý.
 end note
 @enduml

@@ -10,25 +10,34 @@ Mô tả đầy đủ từng kết nối để dựng lại thủ công: [`use-c
 
 ### Mức 1 — System Overview
 
-- [`01-system-overview.puml`](01-system-overview.puml): mục tiêu nghiệp vụ lớn và toàn bộ actor của hệ thống.
+Tổng quan được tách theo hai phía để không đặt actor cấp nền tảng và actor của công ty sử dụng trên cùng một sơ đồ:
+
+- [`01a-platform-overview.puml`](01a-platform-overview.puml): Platform Admin, Platform Staff và các năng lực vận hành toàn nền tảng.
+- [`01b-company-overview.puml`](01b-company-overview.puml): Tenant Admin/Owner, HR Manager, Site Supervisor, Employee và các năng lực trong phạm vi tenant/site.
+
+`Người dùng đã xác thực` xuất hiện trong cả hai sơ đồ chỉ với vai trò actor tổng quát cho quan hệ kế thừa. Tài khoản/xác thực và thông báo là năng lực dùng chung; phần chi tiết vẫn được giữ nguyên tại `02-auth-account.puml` và `09-notification.puml`.
 
 ### Mức 2 — Module-level
 
 | # | Phân hệ | File |
 |---|---|---|
 | 1 | Tài khoản và xác thực | [`02-auth-account.puml`](02-auth-account.puml) |
-| 2 | Platform, tenant, subscription, RBAC và audit | [`03-platform-tenant-rbac.puml`](03-platform-tenant-rbac.puml) |
+| 2A | Platform, subscription, RBAC và audit phía nền tảng | [`03a-platform-governance.puml`](03a-platform-governance.puml) |
+| 2B | Tenant, RBAC và audit phía công ty | [`03b-company-governance.puml`](03b-company-governance.puml) |
 | 3 | Tổ chức, nhân sự, nơi làm và lịch làm | [`04-workforce-organization.puml`](04-workforce-organization.puml) |
 | 4 | Face ID và liveness | [`05-face-id.puml`](05-face-id.puml) |
 | 5 | Check-in/out và bảng công | [`06-checkin-attendance.puml`](06-checkin-attendance.puml) |
 | 6 | Random check và vi phạm | [`07-random-check-violation.puml`](07-random-check-violation.puml) |
-| 7 | Dashboard, báo cáo, tìm kiếm và bộ lọc | [`08-analytics-reporting.puml`](08-analytics-reporting.puml) |
+| 7A | Tra cứu dữ liệu phía nền tảng | [`08a-platform-analytics.puml`](08a-platform-analytics.puml) |
+| 7B | Dashboard, báo cáo, tìm kiếm và bộ lọc phía công ty | [`08b-company-analytics-reporting.puml`](08b-company-analytics-reporting.puml) |
 | 8 | Thông báo | [`09-notification.puml`](09-notification.puml) |
+
+Ở Mức 2, chỉ Governance (`03a/03b`) và Analytics (`08a/08b`) cần tách vì bản gốc có actor của cả hai phía. Các sơ đồ `04`–`07` vốn chỉ thuộc phía công ty. Sơ đồ `02` và `09` được giữ nguyên vì mô tả năng lực dùng chung của `Người dùng` / `Người dùng đã xác thực` trên toàn hệ thống.
 
 ## Quy ước actor
 
 - **Người dùng:** actor khái quát cho hành vi công khai như đăng ký/đăng nhập.
-- **Người dùng đã xác thực:** actor khái quát cho chức năng dùng chung sau đăng nhập. Sáu vai trò RBAC kế thừa actor này nhưng **không kế thừa lẫn nhau**.
+- **Người dùng đã xác thực:** actor khái quát cho chức năng dùng chung sau đăng nhập. Sáu vai trò RBAC kế thừa actor này nhưng **không kế thừa lẫn nhau**; actor này có thể được lặp lại ở hai sơ đồ tổng quan để thể hiện quan hệ kế thừa.
 - **Platform Admin / Platform Staff:** vai trò cấp nền tảng. Platform Staff chỉ thực hiện use case mà permission được cấp cho phép.
 - **Tenant Admin / HR Manager / Site Supervisor / Employee:** vai trò cấp tenant; dữ liệu luôn bị giới hạn bởi tenant đang active. Site Supervisor còn bị giới hạn theo site được gán.
 - **Google Identity, Firebase, Email, Object Storage:** supporting actors vì nằm ngoài ranh giới FAMS.

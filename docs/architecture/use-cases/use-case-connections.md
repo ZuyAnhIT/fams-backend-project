@@ -12,82 +12,89 @@ Tài liệu này chuyển toàn bộ các sơ đồ PlantUML thành mô tả d�
 
 ---
 
-# Mức 1 — Use Case tổng quan toàn hệ thống
+# Mức 1 — Use Case tổng quan theo nhóm actor
 
-Nguồn: `01-system-overview.puml`
+Tổng quan toàn hệ thống được tách thành hai sơ đồ theo ranh giới vận hành. Sơ đồ 1A chỉ có actor và mục tiêu cấp nền tảng; sơ đồ 1B chỉ có actor và mục tiêu của công ty sử dụng FAMS. `Người dùng đã xác thực` được lặp lại làm actor tổng quát cho quan hệ kế thừa, không làm hai phía bị gộp lại. Các use case dùng chung về tài khoản, xác thực và thông báo tiếp tục được giữ nguyên tại Mức 2.1 và Mức 2.8.
 
-## Actor
+## Mức 1A — Phía nền tảng
 
-- Người dùng.
-- Người dùng đã xác thực.
+Nguồn: `01a-platform-overview.puml`
+
+### Actor
+
+- Người dùng đã xác thực — actor tổng quát.
 - Platform Admin.
 - Platform Staff.
+
+### Use case trong ranh giới FAMS
+
+- Quản trị tenant và gói dịch vụ.
+- Quản lý vai trò và quyền cấp nền tảng.
+- Tra cứu audit và giám sát hệ thống.
+
+### Quan hệ kế thừa actor
+
+- Platform Admin — kế thừa — Người dùng đã xác thực.
+- Platform Staff — kế thừa — Người dùng đã xác thực.
+
+### Kết nối Platform Admin
+
+- Platform Admin — kết nối — Quản trị tenant và gói dịch vụ.
+- Platform Admin — kết nối — Quản lý vai trò và quyền cấp nền tảng.
+- Platform Admin — kết nối — Tra cứu audit và giám sát hệ thống.
+
+### Kết nối Platform Staff
+
+- Platform Staff — kết nối — Quản trị tenant và gói dịch vụ — constraint: theo quyền được cấp.
+- Platform Staff — kết nối — Tra cứu audit và giám sát hệ thống — constraint: theo quyền được cấp.
+
+## Mức 1B — Phía công ty sử dụng
+
+Nguồn: `01b-company-overview.puml`
+
+### Actor
+
+- Người dùng đã xác thực — actor tổng quát.
 - Tenant Admin / Owner.
 - HR Manager.
 - Site Supervisor.
 - Employee.
-- Google Identity — hệ thống ngoài.
-- Firebase — hệ thống ngoài.
-- Dịch vụ Email — hệ thống ngoài.
 - Object Storage — hệ thống ngoài.
 
-## Use case trong ranh giới FAMS
+### Use case trong ranh giới FAMS
 
-- Quản lý tài khoản và xác thực.
-- Quản trị nền tảng và tenant.
-- Quản lý vai trò và quyền.
+- Quản lý hồ sơ và cấu hình công ty.
+- Quản lý vai trò và quyền trong công ty.
 - Quản lý tổ chức và nhân sự.
 - Quản lý site, geofence, ca và phân công.
 - Quản lý Face ID.
 - Chấm công và quản lý bảng công.
 - Kiểm tra ngẫu nhiên và xử lý vi phạm.
 - Theo dõi dashboard và lập báo cáo.
-- Quản lý và nhận thông báo.
-- Tra cứu audit và trạng thái hệ thống.
+- Tra cứu audit tenant.
 
-## Quan hệ kế thừa actor
+### Quan hệ kế thừa actor
 
-- Platform Admin — kế thừa — Người dùng đã xác thực.
-- Platform Staff — kế thừa — Người dùng đã xác thực.
 - Tenant Admin / Owner — kế thừa — Người dùng đã xác thực.
 - HR Manager — kế thừa — Người dùng đã xác thực.
 - Site Supervisor — kế thừa — Người dùng đã xác thực.
 - Employee — kế thừa — Người dùng đã xác thực.
 
-Không vẽ kế thừa giữa sáu vai trò với nhau. Platform Admin không phải lớp cha của Tenant Admin, HR Manager hoặc Employee.
+Các vai trò phía công ty không kế thừa lẫn nhau; quan hệ với `Người dùng đã xác thực` chỉ biểu diễn các hành vi dùng chung sau đăng nhập.
 
-## Kết nối actor với use case
+### Kết nối Tenant Admin / Owner
 
-### Người dùng và người dùng đã xác thực
-
-- Người dùng — kết nối — Quản lý tài khoản và xác thực.
-- Người dùng đã xác thực — kết nối — Quản lý tài khoản và xác thực.
-- Người dùng đã xác thực — kết nối — Quản lý và nhận thông báo.
-
-### Platform Admin
-
-- Platform Admin — kết nối — Quản trị nền tảng và tenant.
-- Platform Admin — kết nối — Quản lý vai trò và quyền.
-- Platform Admin — kết nối — Tra cứu audit và trạng thái hệ thống.
-
-### Platform Staff
-
-- Platform Staff — kết nối — Quản trị nền tảng và tenant — constraint: theo quyền được cấp.
-- Platform Staff — kết nối — Tra cứu audit và trạng thái hệ thống — constraint: theo quyền được cấp.
-
-### Tenant Admin / Owner
-
-- Tenant Admin / Owner — kết nối — Quản trị nền tảng và tenant.
-- Tenant Admin / Owner — kết nối — Quản lý vai trò và quyền.
+- Tenant Admin / Owner — kết nối — Quản lý hồ sơ và cấu hình công ty.
+- Tenant Admin / Owner — kết nối — Quản lý vai trò và quyền trong công ty.
 - Tenant Admin / Owner — kết nối — Quản lý tổ chức và nhân sự.
 - Tenant Admin / Owner — kết nối — Quản lý site, geofence, ca và phân công.
 - Tenant Admin / Owner — kết nối — Quản lý Face ID.
 - Tenant Admin / Owner — kết nối — Chấm công và quản lý bảng công.
 - Tenant Admin / Owner — kết nối — Kiểm tra ngẫu nhiên và xử lý vi phạm.
 - Tenant Admin / Owner — kết nối — Theo dõi dashboard và lập báo cáo.
-- Tenant Admin / Owner — kết nối — Tra cứu audit và trạng thái hệ thống — constraint: chỉ audit tenant.
+- Tenant Admin / Owner — kết nối — Tra cứu audit tenant.
 
-### HR Manager
+### Kết nối HR Manager
 
 - HR Manager — kết nối — Quản lý tổ chức và nhân sự.
 - HR Manager — kết nối — Quản lý site, geofence, ca và phân công.
@@ -95,34 +102,28 @@ Không vẽ kế thừa giữa sáu vai trò với nhau. Platform Admin không p
 - HR Manager — kết nối — Chấm công và quản lý bảng công.
 - HR Manager — kết nối — Kiểm tra ngẫu nhiên và xử lý vi phạm.
 - HR Manager — kết nối — Theo dõi dashboard và lập báo cáo.
-- HR Manager — kết nối — Tra cứu audit và trạng thái hệ thống — constraint: theo quyền được cấp.
+- HR Manager — kết nối — Tra cứu audit tenant — constraint: theo quyền được cấp.
 
-### Site Supervisor
+### Kết nối Site Supervisor
 
 - Site Supervisor — kết nối — Quản lý site, geofence, ca và phân công — constraint: chỉ đọc theo site.
 - Site Supervisor — kết nối — Chấm công và quản lý bảng công — constraint: theo site được giao.
 - Site Supervisor — kết nối — Kiểm tra ngẫu nhiên và xử lý vi phạm — constraint: theo site được giao.
 - Site Supervisor — kết nối — Theo dõi dashboard và lập báo cáo — constraint: dashboard/báo cáo site.
 
-### Employee
+### Kết nối Employee
 
-- Employee — kết nối — Quản lý Face ID.
-- Employee — kết nối — Chấm công và quản lý bảng công.
-- Employee — kết nối — Kiểm tra ngẫu nhiên và xử lý vi phạm.
-- Employee — kết nối — Theo dõi dashboard và lập báo cáo — constraint: dữ liệu cá nhân.
+- Employee — kết nối — Quản lý Face ID — constraint: dữ liệu cá nhân.
+- Employee — kết nối — Chấm công và quản lý bảng công — constraint: chấm công/bảng công cá nhân.
+- Employee — kết nối — Kiểm tra ngẫu nhiên và xử lý vi phạm — constraint: phản hồi/giải trình cá nhân.
+- Employee — kết nối — Theo dõi dashboard và lập báo cáo — constraint: dashboard cá nhân.
 
 ### Hệ thống ngoài
 
-- Google Identity — hỗ trợ — Quản lý tài khoản và xác thực.
-- Firebase — hỗ trợ — Quản lý tài khoản và xác thực.
-- Firebase — hỗ trợ — Quản lý và nhận thông báo.
-- Dịch vụ Email — hỗ trợ — Quản lý tài khoản và xác thực.
-- Dịch vụ Email — hỗ trợ — Quản lý và nhận thông báo.
 - Object Storage — hỗ trợ — Quản lý Face ID.
 - Object Storage — hỗ trợ — Kiểm tra ngẫu nhiên và xử lý vi phạm.
-- Object Storage — hỗ trợ — Quản lý tài khoản và xác thực — mục đích: ảnh đại diện.
 
-Sơ đồ tổng quan không dùng `include` hoặc `extend`; các quan hệ đó được phân rã ở Mức 2.
+Hai sơ đồ tổng quan không dùng `include` hoặc `extend`; các quan hệ đó được phân rã ở Mức 2. Các sơ đồ `02-auth-account.puml` và `09-notification.puml` vẫn giữ nguyên vì mô tả năng lực dùng chung của toàn hệ thống.
 
 ---
 
@@ -188,59 +189,40 @@ Ghi chú: client làm việc trực tiếp với Firebase để gửi và nhập
 
 ---
 
-# Mức 2.2 — Platform, Tenant, Subscription, RBAC và Audit
+# Mức 2.2 — Governance tách theo hai phía
 
-Nguồn: `03-platform-tenant-rbac.puml`
+## Mức 2.2A — Quản trị phía nền tảng
 
-## Actor
+Nguồn: `03a-platform-governance.puml`
+
+### Actor
 
 - Platform Admin.
 - Platform Staff.
-- Tenant Admin / Owner.
-- HR Manager.
-- Thành viên tenant.
 - Người được mời vào platform.
-- Dịch vụ Email.
+- Dịch vụ Email — hệ thống ngoài.
 
-## Kết nối actor với use case
-
-### Platform Admin
+### Kết nối Platform Admin
 
 - Platform Admin — kết nối — Tạo tenant.
 - Platform Admin — kết nối — Xem danh sách/chi tiết tenant.
 - Platform Admin — kết nối — Khóa, mở hoặc hủy tenant.
 - Platform Admin — kết nối — Quản lý gói dịch vụ.
 - Platform Admin — kết nối — Gán/thay đổi subscription.
-- Platform Admin — kết nối — Quản lý role tùy chỉnh.
+- Platform Admin — kết nối — Quản lý role cấp nền tảng.
 - Platform Admin — kết nối — Xem danh mục permission.
-- Platform Admin — kết nối — Gán/thu hồi role người dùng.
+- Platform Admin — kết nối — Gán/thu hồi role cấp nền tảng.
 - Platform Admin — kết nối — Mời/quản lý Platform Staff.
-- Platform Admin — kết nối — Tra cứu audit log.
+- Platform Admin — kết nối — Tra cứu audit log toàn hệ thống.
 - Platform Admin — kết nối — Giám sát trạng thái hệ thống.
 - Platform Admin — kết nối — Quản lý hồ sơ go-live.
 
-### Platform Staff
+### Kết nối Platform Staff và người được mời
 
 - Platform Staff — kết nối — Tạo tenant — constraint: nếu được cấp quyền.
 - Platform Staff — kết nối — Xem danh sách/chi tiết tenant — constraint: nếu được cấp quyền.
-- Platform Staff — kết nối — Tra cứu audit log — constraint: nếu được cấp quyền.
+- Platform Staff — kết nối — Tra cứu audit log toàn hệ thống — constraint: nếu được cấp quyền.
 - Platform Staff — kết nối — Quản lý hồ sơ go-live — constraint: nếu được cấp quyền.
-
-### Tenant Admin / Owner và HR Manager
-
-- Tenant Admin / Owner — kết nối — Tạo tenant — trường hợp self-service.
-- Tenant Admin / Owner — kết nối — Cập nhật hồ sơ/cấu hình tenant.
-- Tenant Admin / Owner — kết nối — Quản lý IP whitelist.
-- Tenant Admin / Owner — kết nối — Quản lý role tùy chỉnh.
-- Tenant Admin / Owner — kết nối — Xem danh mục permission.
-- Tenant Admin / Owner — kết nối — Gán/thu hồi role người dùng.
-- Tenant Admin / Owner — kết nối — Tra cứu audit log — constraint: trong tenant.
-- Tenant Admin / Owner — kết nối — Quản lý hồ sơ go-live.
-- HR Manager — kết nối — Tra cứu audit log — constraint: nếu được cấp quyền.
-
-### Thành viên và người được mời
-
-- Thành viên tenant — kết nối — Xem quyền/vai trò của tôi.
 - Người được mời vào platform — kết nối — Chấp nhận lời mời platform.
 
 ### Hệ thống ngoài
@@ -248,15 +230,44 @@ Nguồn: `03-platform-tenant-rbac.puml`
 - Dịch vụ Email — hỗ trợ — Mời/quản lý Platform Staff.
 - Dịch vụ Email — hỗ trợ — Chấp nhận lời mời platform.
 
-## Quan hệ include
+### Quan hệ include
 
 - Gán/thay đổi subscription — `<<include>>` → Kiểm tra giới hạn gói.
 
-## Quan hệ extend
+### Quan hệ extend
 
-- Xem diff và trace request — `<<extend>>` → Tra cứu audit log.
+- Xem diff và trace request — `<<extend>>` → Tra cứu audit log toàn hệ thống.
 
 Không nối “Mời Platform Staff” với “Chấp nhận lời mời” bằng `include`: đây là hai mục tiêu của hai actor khác nhau, xảy ra ở hai thời điểm khác nhau.
+
+## Mức 2.2B — Quản trị phía công ty
+
+Nguồn: `03b-company-governance.puml`
+
+### Actor
+
+- Tenant Admin / Owner.
+- HR Manager.
+- Thành viên tenant.
+
+### Kết nối actor với use case
+
+- Tenant Admin / Owner — kết nối — Tạo tenant self-service.
+- Tenant Admin / Owner — kết nối — Cập nhật hồ sơ/cấu hình tenant.
+- Tenant Admin / Owner — kết nối — Quản lý IP whitelist.
+- Tenant Admin / Owner — kết nối — Quản lý role tùy chỉnh của tenant.
+- Tenant Admin / Owner — kết nối — Xem danh mục permission.
+- Tenant Admin / Owner — kết nối — Gán/thu hồi role trong tenant.
+- Tenant Admin / Owner — kết nối — Tra cứu audit log trong tenant.
+- Tenant Admin / Owner — kết nối — Quản lý hồ sơ go-live.
+- HR Manager — kết nối — Tra cứu audit log trong tenant — constraint: nếu được cấp quyền.
+- Thành viên tenant — kết nối — Xem quyền/vai trò của tôi.
+
+### Quan hệ extend
+
+- Xem diff và trace request — `<<extend>>` → Tra cứu audit log trong tenant.
+
+Role hệ thống là bất biến. Tenant chỉ quản lý role tùy chỉnh và phép gán role trong tenant đang active; role cấp nền tảng không xuất hiện trong sơ đồ này.
 
 ---
 
@@ -551,22 +562,31 @@ Ghi chú: vi phạm `no_response` cũng được hệ thống tạo khi lượt 
 
 ---
 
-# Mức 2.7 — Dashboard, báo cáo, tìm kiếm và bộ lọc
+# Mức 2.7 — Analytics và Reporting tách theo hai phía
 
-Nguồn: `08-analytics-reporting.puml`
+## Mức 2.7A — Tra cứu dữ liệu phía nền tảng
 
-## Actor
+Nguồn: `08a-platform-analytics.puml`
 
-- Platform Admin.
-- Platform Staff.
+### Actor và kết nối
+
+- Platform Admin — kết nối — Tìm kiếm nhân viên/site/check-in — constraint: dữ liệu được phép.
+- Platform Staff — kết nối — Tìm kiếm nhân viên/site/check-in — constraint: theo permission.
+
+Sơ đồ này chỉ thể hiện năng lực analytics hiện có cho actor nền tảng, không suy diễn thêm dashboard hoặc báo cáo chưa có trong backend.
+
+## Mức 2.7B — Dashboard và báo cáo phía công ty
+
+Nguồn: `08b-company-analytics-reporting.puml`
+
+### Actor
+
 - Tenant Admin / Owner.
 - HR Manager.
 - Site Supervisor.
 - Employee.
 
-## Kết nối actor với use case
-
-### Employee
+### Kết nối Employee
 
 - Employee — kết nối — Xem dashboard cá nhân.
 
@@ -605,12 +625,7 @@ Nguồn: `08-analytics-reporting.puml`
 - Site Supervisor — kết nối — Xem báo cáo hiện diện theo site.
 - Site Supervisor — kết nối — Áp dụng tenant/site scope.
 
-### Platform Admin và Platform Staff
-
-- Platform Admin — kết nối — Tìm kiếm nhân viên/site/check-in — constraint: dữ liệu được phép.
-- Platform Staff — kết nối — Tìm kiếm nhân viên/site/check-in — constraint: theo permission.
-
-## Quan hệ include
+### Quan hệ include
 
 - Xem dashboard giám sát site — `<<include>>` → Áp dụng tenant/site scope.
 - Xem báo cáo chấm công ngày — `<<include>>` → Áp dụng tenant/site scope.
@@ -618,7 +633,7 @@ Nguồn: `08-analytics-reporting.puml`
 - Xem báo cáo vi phạm — `<<include>>` → Áp dụng tenant/site scope.
 - Xem báo cáo hiện diện theo site — `<<include>>` → Áp dụng tenant/site scope.
 
-## Quan hệ extend
+### Quan hệ extend
 
 - Xuất báo cáo/bảng công — `<<extend>>` → Xem báo cáo chấm công ngày.
 - Xuất báo cáo/bảng công — `<<extend>>` → Xem báo cáo chấm công tháng.

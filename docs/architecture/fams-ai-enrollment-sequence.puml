@@ -1,0 +1,90 @@
+@startuml FAMS_AI_Enrollment_Sequence
+title FAMS - Luồng Face ID enrollment và HR review
+autonumber
+
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam roundcorner 6
+skinparam defaultFontName Arial
+skinparam sequence {
+  ArrowColor #4B5563
+  LifeLineBorderColor #6B7280
+  LifeLineBackgroundColor #F9FAFB
+  ParticipantBorderColor #4B5563
+  ParticipantBackgroundColor #DBEAFE
+  ActorBorderColor #B98B00
+  ActorBackgroundColor #FFF3CD
+}
+
+actor Employee
+actor "HR / Admin" as HR
+participant "Java API" as API
+participant "FastAPI AI" as AI
+database "PostgreSQL" as DB
+collections "Biometric storage" as Storage
+
+Employee -> API : POST /face-id/consent
+API -> DB : tạo/cập nhật face_profiles consent
+API --> Employee : consent recorded
+
+alt Employee tự đăng ký bằng active-liveness
+  Employee -> API : POST /face-id/liveness-challenge\npurpose=enroll
+  API -> AI : POST /liveness-challenge\nX-Internal-Secret
+  AI -> DB : lưu challenge + 3 actions + TTL 90s
+  AI --> API : challengeId + actions
+  API --> Employee : center + 2 actions ngẫu nhiên
+
+  Employee -> API : POST /liveness-challenge/{id}/frames
+  API -> AI : upload đúng một frame cho mỗi action
+  AI -> AI : SCRFD detect đúng 1 mặt
+  AI -> AI : head pose / blink + same-person
+  AI -> AI : anti-spoof center frame + ArcFace
+  AI -> Storage : lưu center frame
+  AI -> DB : status=passed + embedding
+  AI --> API : challenge result
+  API --> Employee : passed / failed
+
+  Employee -> API : POST /face-id/enroll/from-challenge
+  API -> AI : POST /enroll-from-challenge
+else HR/Admin upload 3-5 ảnh
+  HR -> API : POST /face-id/enroll multipart
+  API -> AI : POST /enroll multipart
+  AI -> AI : anti-spoof từng ảnh
+  AI -> AI : ArcFace + pairwise same-person >= 0.45
+  AI -> AI : average embedding
+  AI -> Storage : lưu enrollment photos
+end
+
+AI -> DB : pending_embedding + review_status=pending
+AI --> API : status=pending
+
+HR -> API : GET /face-id/pending-review
+API -> DB : đọc danh sách theo tenant/site scope
+API --> HR : pending enrollments
+HR -> API : GET /employee/{id}/face-id/pending-review/photo
+API -> AI : GET /enroll/{employeeId}/pending-photo
+AI -> Storage : đọc representative photo
+AI --> API : JPEG bytes
+API --> HR : JPEG bytes
+
+alt HR approve
+  HR -> API : POST /employee/{id}/face-id/approve
+  API -> AI : POST /enroll/{employeeId}/approve
+  AI -> DB : pending_embedding -> embedding\nstatus=enrolled
+  API -> DB : ghi audit
+  API --> HR : enrolled
+else HR reject
+  HR -> API : POST /employee/{id}/face-id/reject + reason
+  API -> AI : POST /enroll/{employeeId}/reject
+  AI -> DB : xóa pending data\nreview_status=rejected
+  API -> DB : ghi audit
+  API --> HR : rejected
+end
+
+note over HR,DB #FFF3CD
+  Human-in-the-loop bắt buộc:
+  kiểm tra AI không tự kích hoạt Face ID.
+  Chỉ embedding đã được HR/Admin approve mới dùng để verify.
+end note
+
+@enduml

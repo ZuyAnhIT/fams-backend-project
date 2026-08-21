@@ -1,0 +1,31 @@
+@startuml FAMS_Platform_Overview
+title FAMS — Tổng quan phía nền tảng (Mức 1A)
+left to right direction
+skinparam packageStyle rectangle
+skinparam shadowing false
+skinparam actorStyle awesome
+
+actor "Người dùng\nđã xác thực" as User
+actor "Platform Admin" as PA
+actor "Platform Staff" as PS
+
+PA --|> User
+PS --|> User
+
+rectangle "FAMS — PHÍA NỀN TẢNG" {
+  usecase "Quản trị tenant\nvà gói dịch vụ" as UCTenant
+  usecase "Quản lý vai trò\nvà quyền cấp nền tảng" as UCRbac
+  usecase "Tra cứu audit và\ngiám sát hệ thống" as UCOps
+}
+
+PA --> UCTenant
+PA --> UCRbac
+PA --> UCOps
+PS --> UCTenant : theo quyền được cấp
+PS --> UCOps : theo quyền được cấp
+
+note bottom of UCTenant
+  Platform Staff và vai trò platform tùy biến chỉ có
+  năng lực tương ứng với permission thực tế được cấp.
+end note
+@enduml

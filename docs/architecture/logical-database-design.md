@@ -5,6 +5,9 @@
 **Trạng thái mô tả:** As-is theo mã nguồn và Flyway migration `V1`–`V105` tại ngày 2026-08-18  
 **Cơ sở đối chiếu:** [`conceptual-erd.md`](./conceptual-erd.md), các JPA entity và `api-server/src/main/resources/db/migration`
 
+> Bản PlantUML mô tả backend và các miền bảng để dán vào draw.io:
+> [`fams-backend-database-architecture.puml`](fams-backend-database-architecture.puml).
+
 ## 1. Mục đích và nguyên tắc chuyển đổi
 
 Sau giai đoạn phân tích nghiệp vụ, các thực thể trong ERD mức phân tích được chuyển thành các bảng quan hệ. Mỗi bản ghi nghiệp vụ chính có khóa định danh; quan hệ `1:N` được triển khai bằng khóa ngoại ở bảng phía nhiều; quan hệ `N:M` được tách thành bảng trung gian. Những bảng trung gian có thuộc tính và vòng đời riêng, chẳng hạn `assignments` hoặc `workspace_members`, được xem là thực thể liên kết.

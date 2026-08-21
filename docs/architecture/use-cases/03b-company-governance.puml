@@ -1,0 +1,41 @@
+@startuml FAMS_Company_Governance
+title FAMS — Tenant, RBAC & Audit phía công ty (Mức 2.2B)
+left to right direction
+skinparam packageStyle rectangle
+skinparam shadowing false
+
+actor "Tenant Admin / Owner" as TA
+actor "HR Manager" as HR
+actor "Thành viên tenant" as Member
+
+rectangle "FAMS — Company Governance" {
+  usecase "Tạo tenant self-service" as CreateTenant
+  usecase "Cập nhật hồ sơ/cấu hình tenant" as UpdateTenant
+  usecase "Quản lý IP whitelist" as IP
+  usecase "Quản lý role tùy chỉnh của tenant" as Roles
+  usecase "Xem danh mục permission" as Permissions
+  usecase "Gán/thu hồi role trong tenant" as AssignRole
+  usecase "Xem quyền/vai trò của tôi" as MyRoles
+  usecase "Tra cứu audit log trong tenant" as Audit
+  usecase "Xem diff và trace request" as AuditDetail
+  usecase "Quản lý hồ sơ go-live" as GoLive
+}
+
+TA --> CreateTenant
+TA --> UpdateTenant
+TA --> IP
+TA --> Roles
+TA --> Permissions
+TA --> AssignRole
+TA --> Audit
+TA --> GoLive
+HR --> Audit : nếu được cấp quyền
+Member --> MyRoles
+
+AuditDetail .> Audit : <<extend>>
+
+note bottom of Roles
+  Tenant chỉ quản lý role tùy chỉnh của chính tenant;
+  dữ liệu và phép gán role luôn theo tenant đang active.
+end note
+@enduml

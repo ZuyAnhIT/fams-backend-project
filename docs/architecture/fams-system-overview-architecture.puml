@@ -1,0 +1,117 @@
+@startuml FAMS_System_Overview_Architecture
+title FAMS - Kiến trúc tổng quan toàn hệ thống (As-Is)
+left to right direction
+
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam roundcorner 6
+skinparam packageStyle rectangle
+skinparam componentStyle rectangle
+skinparam defaultFontName Arial
+skinparam defaultFontSize 12
+skinparam ArrowColor #4B5563
+skinparam rectangle {
+  BorderColor #4B5563
+  FontColor #111827
+}
+skinparam component {
+  BorderColor #4B5563
+  FontColor #111827
+}
+skinparam database {
+  BorderColor #6B7280
+  BackgroundColor #F3F4F6
+}
+skinparam queue {
+  BorderColor #6B7280
+  BackgroundColor #F3F4F6
+}
+
+actor "Platform Admin / Staff" as PlatformUser
+actor "Tenant Admin / HR" as TenantManager
+actor "Site Supervisor" as Supervisor
+actor "Employee" as Employee
+
+cloud "Google Identity\nOAuth 2.0" as Google #F3F4F6
+cloud "Firebase\nPhone Auth + FCM" as Firebase #F3F4F6
+cloud "SMTP Email" as Mail #F3F4F6
+cloud "Map / Geocoding\nOpenStreetMap + Nominatim" as Maps #F3F4F6
+cloud "Object Storage\nMinIO dev / AWS S3 prod" as ObjectStorage #F3F4F6
+
+rectangle "FAMS PLATFORM" #F8FAFC {
+  rectangle "FRONTEND CHANNELS" #FFF3CD {
+    component "Web Portal\nNext.js 16 + React 19\nAdmin / Customer" as Web
+    component "Mobile App\nExpo 54 + React Native\nEmployee / Supervisor" as Mobile
+  }
+
+  rectangle "BACKEND" #DBEAFE {
+    component "Java API :8080\nSpring Boot Modular Monolith\nREST + JWT + RBAC + Multi-tenant" as JavaApi
+    component "Schedulers / Async Jobs\nattendance, random check,\nnotification, retention" as Jobs
+    component "AI Service :5000\nFastAPI + InsightFace + DeepFace\nFace ID / active-liveness" as AiService
+  }
+
+  rectangle "DATA AND MESSAGING" #F3F4F6 {
+    database "PostgreSQL 16 + PostGIS\nshared schema, tenant_id isolation" as PostgreSQL
+    queue "Redis 7\ncache, blacklist, rate limit,\nAI queue, dispatch queue" as Redis
+    folder "AI biometric files\nenrollment / challenge / evidence" as AiFiles
+  }
+}
+
+PlatformUser --> Web : quản trị platform
+TenantManager --> Web : quản trị công ty / nhân sự
+Supervisor --> Web : giám sát site / báo cáo
+Supervisor --> Mobile : hiện trường
+Employee --> Mobile : check-in, Face ID, random check
+
+Web --> JavaApi : HTTPS /api/v1\nBearer JWT + X-Request-Id
+Mobile --> JavaApi : HTTPS /api/v1\nBearer JWT + ảnh + GPS
+
+Web --> Google : Google Sign-In
+Web --> Firebase : Phone OTP
+Web --> Maps : map tiles / geocoding
+Mobile --> Google : native Google Sign-In
+Mobile --> Firebase : Phone OTP + nhận FCM push
+Mobile --> Maps : native maps
+
+JavaApi --> PostgreSQL : JPA / SQL / PostGIS
+JavaApi <--> Redis : permission cache, token state,\nrate limit và queue
+Jobs --> PostgreSQL : scheduled processing
+Jobs <--> Redis : dispatch / reconciliation
+
+JavaApi --> AiService : internal HTTP\nX-Internal-Secret
+JavaApi --> Redis : LPUSH face verify job
+Redis --> AiService : BRPOP job
+AiService --> JavaApi : HTTP callback\nface/liveness result
+AiService <--> PostgreSQL : direct SQL\nface profile / challenge
+AiService <--> AiFiles : biometric photos
+
+JavaApi --> Google : verify Google ID token
+JavaApi --> Firebase : verify Firebase token\nFirebase Admin / send FCM
+JavaApi --> Mail : verification / reset / invite
+JavaApi <--> ObjectStorage : avatar / evidence objects
+
+note bottom of JavaApi
+  Kiến trúc backend: modular monolith theo feature.
+  Java API là cổng vào công khai và orchestration layer;
+  AI service không được client gọi trực tiếp.
+end note
+
+note bottom of PostgreSQL
+  Multi-tenant dùng chung database và schema.
+  tenant_id là ranh giới dữ liệu chính;
+  Flyway phía Java là nguồn schema chính thức.
+end note
+
+note bottom of Mobile
+  Mobile hỗ trợ camera, GPS, deep link,
+  push notification và check-in offline.
+end note
+
+legend bottom
+  |= Màu |= Phạm vi |
+  |<#FFF3CD> | Frontend / client channels |
+  |<#DBEAFE> | Backend services |
+  |<#F3F4F6> | Data, queue và external systems |
+endlegend
+
+@enduml

@@ -1,0 +1,21 @@
+@startuml FAMS_Platform_Analytics
+title FAMS — Tra cứu dữ liệu phía nền tảng (Mức 2.7A)
+left to right direction
+skinparam packageStyle rectangle
+skinparam shadowing false
+
+actor "Platform Admin" as PA
+actor "Platform Staff" as PS
+
+rectangle "FAMS — Platform Analytics" {
+  usecase "Tìm kiếm nhân viên/site/check-in" as Search
+}
+
+PA --> Search : dữ liệu được phép
+PS --> Search : theo permission
+
+note bottom of Search
+  Sơ đồ chỉ thể hiện năng lực analytics hiện có cho actor nền tảng;
+  không suy diễn thêm dashboard hoặc báo cáo chưa có trong backend.
+end note
+@enduml

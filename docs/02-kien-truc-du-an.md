@@ -15,6 +15,13 @@ FAMS Backend hiện là:
 
 Tên gọi phù hợp nhất: **Modular Monolith + AI Microservice, layered by feature**.
 
+Các bản PlantUML có thể dán trực tiếp vào draw.io:
+
+- [`architecture/fams-system-overview-architecture.puml`](architecture/fams-system-overview-architecture.puml): tổng quan toàn hệ thống.
+- [`architecture/fams-backend-database-architecture.puml`](architecture/fams-backend-database-architecture.puml): backend và các miền dữ liệu PostgreSQL.
+- [`architecture/fams-frontend-architecture.puml`](architecture/fams-frontend-architecture.puml): Web Portal và Mobile App.
+- [`architecture/fams-ai-api-architecture.puml`](architecture/fams-ai-api-architecture.puml): AI và tương tác API ở mức tổng quan.
+
 ## 2. Sơ đồ container/runtime
 
 ```mermaid
@@ -219,6 +226,9 @@ Error nghiệp vụ đi qua `GlobalExceptionHandler`:
 ```
 
 ## 8. Giao tiếp Java–AI
+
+Sơ đồ component, pipeline inference và các sequence flow chi tiết nằm tại
+[`architecture/fams-ai-api-architecture.md`](architecture/fams-ai-api-architecture.md).
 
 Có hai kiểu:
 

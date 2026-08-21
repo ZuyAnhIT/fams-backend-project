@@ -1,17 +1,15 @@
-@startuml FAMS_Analytics_Reporting
-title FAMS — Dashboard, báo cáo, tìm kiếm và bộ lọc (Mức 2)
+@startuml FAMS_Company_Analytics_Reporting
+title FAMS — Dashboard và báo cáo phía công ty (Mức 2.7B)
 left to right direction
 skinparam packageStyle rectangle
 skinparam shadowing false
 
-actor "Platform Admin" as PA
-actor "Platform Staff" as PS
 actor "Tenant Admin / Owner" as TA
 actor "HR Manager" as HR
 actor "Site Supervisor" as SS
 actor "Employee" as EE
 
-rectangle "FAMS — Analytics & Reporting" {
+rectangle "FAMS — Company Analytics & Reporting" {
   usecase "Xem dashboard cá nhân" as EmployeeDash
   usecase "Xem dashboard HR" as HRDash
   usecase "Xem dashboard giám sát site" as SupervisorDash
@@ -54,8 +52,6 @@ SS --> Daily
 SS --> ViolationReport
 SS --> Presence
 SS --> Scope
-PA --> Search : dữ liệu được phép
-PS --> Search : theo permission
 
 ExportAttendance .> Daily : <<extend>>
 ExportAttendance .> Monthly : <<extend>>
@@ -70,7 +66,7 @@ ViolationReport .> Scope : <<include>>
 Presence .> Scope : <<include>>
 
 note bottom of Scope
-  Tenant actor chỉ thấy tenant đang active;
-  Site Supervisor chỉ thấy hợp các site được gán.
+  Mọi actor chỉ thấy tenant đang active;
+  Site Supervisor chỉ thấy các site được gán.
 end note
 @enduml

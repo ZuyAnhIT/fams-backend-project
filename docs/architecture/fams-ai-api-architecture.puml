@@ -1,0 +1,110 @@
+@startuml FAMS_AI_API_Architecture
+title FAMS - Kiến trúc AI tổng quan (As-Is)
+left to right direction
+
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam roundcorner 6
+skinparam packageStyle rectangle
+skinparam componentStyle rectangle
+skinparam defaultFontName Arial
+skinparam defaultFontSize 12
+skinparam ArrowColor #4B5563
+skinparam rectangle {
+  BorderColor #4B5563
+  FontColor #111827
+}
+skinparam component {
+  BorderColor #4B5563
+  FontColor #111827
+}
+skinparam database {
+  BorderColor #6B7280
+  BackgroundColor #F3F4F6
+}
+skinparam queue {
+  BorderColor #6B7280
+  BackgroundColor #F3F4F6
+}
+
+actor "Employee" as Employee
+actor "HR / Supervisor / Admin" as Operator
+
+rectangle "CLIENT" #FFF3CD {
+  component "Web / Mobile App\nảnh + frame + GPS" as Client
+}
+
+rectangle "JAVA API - Spring Boot :8080" #DBEAFE {
+  component "API & Security\nREST + JWT + RBAC\ntenant/site scope" as Api
+  component "AI Business Flows\nFace ID enrollment/review\nCheck-in/out + Random Check" as Business
+  component "AI Integration\nHTTP đồng bộ + Redis publisher\ninternal callback" as Integration
+  component "Business Result\nAttendance + Violation\nNotification + Report + Audit" as Result
+}
+
+rectangle "FAMS AI - FastAPI :5000" #DCFCE7 {
+  component "Internal REST API\nEnrollment + Challenge + Review" as AiRest
+  component "Async Verify Worker\nconsume Redis jobs" as Worker
+
+  rectangle "COMPUTER VISION PIPELINE" #F0FDF4 {
+    component "Face Detection\nSCRFD" as Detection
+    component "Liveness\nMiniFASNet + pose/blink" as Liveness
+    component "Face Embedding\nArcFace 512-dim" as Embedding
+    component "Validation & Matching\nsame-person + cosine similarity" as Validation
+  }
+}
+
+queue "Redis 7\nface_verify_jobs" as Redis
+database "PostgreSQL / PostGIS\nprofiles + challenges\ncheck-ins + responses + violations" as Database
+folder "Biometric Files\nenrollment + evidence" as Files #F3F4F6
+
+Employee --> Client
+Operator --> Client
+Client --> Api : HTTPS REST + JWT
+Api --> Business
+Business --> Integration
+
+Integration --> AiRest : internal HTTP\nX-Internal-Secret
+Integration --> Redis : publish verify job
+Redis --> Worker : consume job
+
+AiRest --> Detection
+Worker --> Detection
+Detection --> Liveness : khi yêu cầu
+Detection --> Embedding
+Liveness --> Validation
+Embedding --> Validation
+
+AiRest <--> Database : profile / challenge
+Worker --> Database : approved embedding
+AiRest <--> Files
+Worker --> Files : evidence photo
+
+Validation --> AiRest : synchronous result
+Validation --> Integration : async callback\nface + liveness + score
+Integration --> Business : apply theo source type
+Business --> Result
+
+Business <--> Database : trạng thái nghiệp vụ
+Result <--> Database : attendance / violation / audit
+
+note bottom of Business
+  Java API quyết định quyền, geofence, policy,
+  review và tác động nghiệp vụ.
+  AI chỉ cung cấp kết quả sinh trắc kỹ thuật.
+end note
+
+note bottom of AiRest
+  FastAPI là service nội bộ.
+  Enrollment cần HR/Admin approve trước khi
+  embedding được dùng để xác minh.
+end note
+
+legend bottom
+  |= Màu |= Phạm vi |
+  |<#FFF3CD> | Client |
+  |<#DBEAFE> | Java API / nghiệp vụ |
+  |<#DCFCE7> | AI inference |
+  |<#F3F4F6> | Data / queue / file |
+endlegend
+
+@enduml
