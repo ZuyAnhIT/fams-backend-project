@@ -1,0 +1,109 @@
+@startuml FAMS_Backend_Database_Architecture
+title FAMS - Kiến trúc Backend và Database tổng quan (As-Is)
+top to bottom direction
+
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam roundcorner 6
+skinparam packageStyle rectangle
+skinparam componentStyle rectangle
+skinparam defaultFontName Arial
+skinparam defaultFontSize 12
+skinparam ArrowColor #4B5563
+skinparam rectangle {
+  BorderColor #4B5563
+  FontColor #111827
+}
+skinparam component {
+  BorderColor #4B5563
+  FontColor #111827
+}
+skinparam database {
+  BorderColor #6B7280
+  BackgroundColor #F3F4F6
+}
+
+actor "Web / Mobile Client" as Client
+
+rectangle "JAVA API - SPRING BOOT MODULAR MONOLITH" #DBEAFE {
+  component "Request & Security Layer\nfilter chain + JWT + RBAC\ntenant/IP/site scope" as Security
+  component "API Layer\nController + DTO + Validation\nApiResponse + Exception Handler" as ApiLayer
+
+  rectangle "DOMAIN SERVICES - package by feature" #EFF6FF {
+    component "Identity & Governance\nAuth + RBAC + Tenant + Subscription" as Identity
+    component "Workforce & Planning\nWorkspace + Employee + Site\nGeofence + Shift + Assignment" as Workforce
+    component "Attendance & Presence\nCheck-in + Attendance + Random Check\nViolation + Notification" as Attendance
+    component "Analytics & Operations\nDashboard + Report + Search\nAudit + Go-live" as Analytics
+  }
+
+  component "Persistence Layer\nSpring Data JPA + Specifications\nJPQL + native PostGIS" as Persistence
+  component "Background Processing\nSchedulers + @Async" as Background
+  component "Integration Adapters\nAI + Redis + Firebase + SMTP + S3" as Adapters
+}
+
+rectangle "POSTGRESQL 16 + POSTGIS 3.4" #F3F4F6 {
+  entity "IDENTITY & TENANT\nusers + tokens + tenants\nsubscriptions + RBAC" as IdentityData
+  entity "WORKFORCE & PLANNING\nemployees + workspaces\nsites + geofences + shifts + assignments" as WorkforceData
+  entity "ATTENDANCE & BIOMETRIC\ncheckins + attendance summaries\nface profiles + liveness challenges" as AttendanceData
+  entity "PRESENCE & COMMUNICATION\nrandom checks + responses + violations\nnotifications + devices" as PresenceData
+  entity "AUDIT & OPERATIONS\naudit logs + saved filters\ngo-live + scheduled job status" as OperationData
+}
+
+database "Redis 7\ncache + token state + rate limit\nAI queue + dispatch queue" as Redis
+component "FastAPI AI\nFace ID / Liveness" as AI #DCFCE7
+cloud "External Services\nGoogle / Firebase / SMTP / S3" as External #F3F4F6
+
+Client --> Security : HTTPS REST
+Security --> ApiLayer : authenticated request
+ApiLayer --> Identity
+ApiLayer --> Workforce
+ApiLayer --> Attendance
+ApiLayer --> Analytics
+
+Identity --> Persistence
+Workforce --> Persistence
+Attendance --> Persistence
+Analytics --> Persistence
+Background --> Persistence
+
+Persistence --> IdentityData
+Persistence --> WorkforceData
+Persistence --> AttendanceData
+Persistence --> PresenceData
+Persistence --> OperationData
+
+IdentityData --> WorkforceData : tenant + user ownership
+WorkforceData --> AttendanceData : employee + assignment
+WorkforceData --> PresenceData : site + schedule
+PresenceData --> AttendanceData : attendance impact
+IdentityData --> OperationData : actor + tenant audit
+
+Identity <--> Redis : permission / session cache
+Attendance <--> Redis : queues
+Attendance --> Adapters
+Identity --> Adapters
+Background --> Adapters
+Adapters <--> AI : HTTP + callback
+Adapters <--> External
+AI <--> AttendanceData : biometric SQL
+
+note bottom of Persistence
+  Luồng chuẩn: Filter -> Controller/DTO -> Service
+  -> Repository/Specification -> Entity -> Database.
+end note
+
+note bottom of IdentityData
+  Shared database + shared schema.
+  tenant_id là ranh giới cô lập dữ liệu;
+  Flyway là nguồn schema chính thức.
+end note
+
+legend bottom
+  |= Màu |= Phạm vi |
+  |<#DBEAFE> | Java backend |
+  |<#EFF6FF> | Nhóm nghiệp vụ |
+  |<#F3F4F6> | Database / external infrastructure |
+  |<#DCFCE7> | AI service |
+endlegend
+
+@enduml

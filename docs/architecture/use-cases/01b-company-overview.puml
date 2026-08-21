@@ -1,0 +1,68 @@
+@startuml FAMS_Company_Overview
+title FAMS — Tổng quan phía công ty sử dụng (Mức 1B)
+left to right direction
+skinparam packageStyle rectangle
+skinparam shadowing false
+skinparam actorStyle awesome
+
+actor "Người dùng\nđã xác thực" as User
+actor "Tenant Admin / Owner" as TA
+actor "HR Manager" as HR
+actor "Site Supervisor" as SS
+actor "Employee" as EE
+
+TA --|> User
+HR --|> User
+SS --|> User
+EE --|> User
+
+actor "Object Storage" as Storage <<external system>>
+
+rectangle "FAMS — PHÍA CÔNG TY SỬ DỤNG" {
+  usecase "Quản lý hồ sơ và\ncấu hình công ty" as UCTenant
+  usecase "Quản lý vai trò\nvà quyền trong công ty" as UCRbac
+  usecase "Quản lý tổ chức\nvà nhân sự" as UCWorkforce
+  usecase "Quản lý site, geofence,\nca và phân công" as UCScheduling
+  usecase "Quản lý Face ID" as UCFace
+  usecase "Chấm công và\nquản lý bảng công" as UCAttendance
+  usecase "Kiểm tra ngẫu nhiên\nvà xử lý vi phạm" as UCRandom
+  usecase "Theo dõi dashboard\nvà lập báo cáo" as UCReporting
+  usecase "Tra cứu audit tenant" as UCAudit
+}
+
+TA --> UCTenant
+TA --> UCRbac
+TA --> UCWorkforce
+TA --> UCScheduling
+TA --> UCFace
+TA --> UCAttendance
+TA --> UCRandom
+TA --> UCReporting
+TA --> UCAudit
+
+HR --> UCWorkforce
+HR --> UCScheduling
+HR --> UCFace
+HR --> UCAttendance
+HR --> UCRandom
+HR --> UCReporting
+HR --> UCAudit : theo quyền được cấp
+
+SS --> UCScheduling : chỉ đọc theo site
+SS --> UCAttendance : theo site được giao
+SS --> UCRandom : theo site được giao
+SS --> UCReporting : dashboard/báo cáo site
+
+EE --> UCFace : dữ liệu cá nhân
+EE --> UCAttendance : chấm công/bảng công cá nhân
+EE --> UCRandom : phản hồi/giải trình cá nhân
+EE --> UCReporting : dashboard cá nhân
+
+Storage --> UCFace
+Storage --> UCRandom
+
+note bottom of UCAudit
+  Mọi vai trò phía công ty chỉ thao tác trong tenant đang active;
+  Site Supervisor còn bị giới hạn theo các site được gán.
+end note
+@enduml

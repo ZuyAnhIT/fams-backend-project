@@ -1,0 +1,84 @@
+@startuml FAMS_Frontend_Architecture
+title FAMS - Kiến trúc Frontend tổng quan (As-Is)
+left to right direction
+
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam roundcorner 6
+skinparam packageStyle rectangle
+skinparam componentStyle rectangle
+skinparam defaultFontName Arial
+skinparam defaultFontSize 12
+skinparam ArrowColor #4B5563
+skinparam rectangle {
+  BorderColor #4B5563
+  FontColor #111827
+}
+skinparam component {
+  BorderColor #4B5563
+  FontColor #111827
+}
+
+actor "Platform Admin / Staff" as PlatformUser
+actor "Tenant Admin / HR / Supervisor" as WebUser
+actor "Employee / Supervisor" as MobileUser
+
+rectangle "WEB PORTAL" #DBEAFE {
+  component "Next.js 16 App Router\nReact 19 + TypeScript" as WebRuntime
+  component "Presentation\nAuth + Admin + Customer routes\nLayouts + Guards + Ant Design" as WebPresentation
+  component "Feature & State Layer\nfeature modules + hooks\nReact Query + Zustand + Zod" as WebState
+  component "API & Browser Layer\nAxios + JWT refresh\nNext rewrite + LocalStorage" as WebApi
+}
+
+rectangle "MOBILE APP" #DCFCE7 {
+  component "Expo 54 + React Native\nExpo Router + TypeScript" as MobileRuntime
+  component "Presentation\nAuth + Tabs + Face + Modal\nAuthGate + native UI" as MobilePresentation
+  component "Feature & State Layer\ncheck-in + attendance + Face ID\nReact Query + Zustand + Zod" as MobileState
+  component "API, Device & Offline Layer\nAxios + SecureStore\nCamera + GPS + FCM\nAsyncStorage offline queue" as MobileApi
+}
+
+component "FAMS Java API\nREST /api/v1" as Backend #FFF3CD
+cloud "Identity & Messaging\nGoogle + Firebase Auth/FCM" as Identity #F3F4F6
+cloud "Map Services\nOpenStreetMap / Nominatim\nNative Map Provider" as Maps #F3F4F6
+
+PlatformUser --> WebRuntime
+WebUser --> WebRuntime
+MobileUser --> MobileRuntime
+
+WebRuntime --> WebPresentation
+WebPresentation --> WebState
+WebState --> WebApi
+WebApi --> Backend : HTTPS + JWT
+WebRuntime --> Identity : OAuth / Phone OTP
+WebPresentation --> Maps : maps + geocoding
+
+MobileRuntime --> MobilePresentation
+MobilePresentation --> MobileState
+MobileState --> MobileApi
+MobileApi --> Backend : HTTPS + JWT\nảnh + GPS + offline sync
+MobileRuntime <--> Identity : OAuth / Phone OTP / FCM
+MobilePresentation --> Maps : native maps
+
+Backend --> WebApi : ApiResponse / PageResponse
+Backend --> MobileApi : ApiResponse / PageResponse
+
+note bottom of WebPresentation
+  Frontend guard điều khiển UX/navigation.
+  Backend vẫn là nguồn authorization chính thức.
+end note
+
+note bottom of MobileApi
+  Token lưu trong SecureStore.
+  Check-in offline lưu theo user + tenant
+  và tự đồng bộ khi mạng trở lại.
+end note
+
+legend bottom
+  |= Màu |= Phạm vi |
+  |<#DBEAFE> | Web Portal |
+  |<#DCFCE7> | Mobile App |
+  |<#FFF3CD> | Backend contract |
+  |<#F3F4F6> | External services |
+endlegend
+
+@enduml

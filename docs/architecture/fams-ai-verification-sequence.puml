@@ -1,0 +1,87 @@
+@startuml FAMS_AI_Verification_Sequence
+title FAMS - Luồng xác minh Face ID bất đồng bộ
+autonumber
+
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam roundcorner 6
+skinparam defaultFontName Arial
+skinparam sequence {
+  ArrowColor #4B5563
+  LifeLineBorderColor #6B7280
+  LifeLineBackgroundColor #F9FAFB
+  ParticipantBorderColor #4B5563
+  ParticipantBackgroundColor #DBEAFE
+  ActorBorderColor #B98B00
+  ActorBackgroundColor #FFF3CD
+}
+
+actor Client
+participant "Java REST API" as API
+database "PostgreSQL / PostGIS" as DB
+queue "Redis face verify queue" as Redis
+participant "FastAPI AI Worker" as Worker
+participant "Java AI Callback" as Callback
+participant "Attendance / Violation /\nNotification / Report" as Domain
+
+Client -> API : check-in / check-out / random-check\nhoặc standalone verify
+API -> API : JWT + RBAC + tenant/site scope
+API -> DB : employee + assignment + policy + geofence
+
+opt Policy yêu cầu active-liveness
+  API -> DB : validate challenge passed, fresh,\nđúng employee/site/purpose
+  API -> DB : consumeIfPassed() nguyên tử
+end
+
+API -> DB : tạo/cập nhật source record\nfaceVerified = null
+API -> Redis : LPUSH JSON job\nsourceType + sourceId + image/challengeId
+API --> Client : trả response ngay
+
+Redis -> Worker : BRPOP job
+
+alt Job mang challengeId
+  Worker -> DB : lấy center_frame_path
+  Worker -> Worker : đọc frame đã qua active-liveness
+else Job mang ảnh base64
+  Worker -> Worker : decode ảnh
+  opt requiresLiveness=true
+    Worker -> Worker : MiniFASNet anti-spoof
+  end
+end
+
+Worker -> DB : SELECT enrolled face_profiles.embedding
+Worker -> Worker : SCRFD detect đúng 1 mặt
+Worker -> Worker : ArcFace embedding 512 chiều
+Worker -> Worker : cosine similarity >= 0.55
+Worker -> Callback : POST /internal/ai-callback/face-result\nX-Internal-Secret
+Callback -> Callback : route theo sourceType
+Callback -> DB : cập nhật face/liveness/score/error
+
+alt sourceType = checkin hoặc checkout và policy bắt buộc bị fail
+  Callback -> DB : status=pending_review + violation
+  Callback -> Domain : audit + dữ liệu HR/report
+else sourceType = check_response bị fail
+  Callback -> DB : outcome=fail + violation idempotent
+  Callback -> Domain : notification + report
+else sourceType = standalone_verify
+  Callback -> DB : FaceVerifyRequest=pass/fail
+  Client -> API : GET /face-id/verify/{verifyRequestId}
+  API -> DB : đọc verify result
+  API --> Client : pending / pass / fail
+else Verify thành công
+  Callback -> Domain : kết quả hợp lệ cho nghiệp vụ
+end
+
+note over API,Worker #FFEBEE
+  Gap hiện tại ở challenge path:
+  Java đổi status sang consumed trước khi publish,
+  nhưng worker đang yêu cầu status=passed khi load frame.
+end note
+
+note over Redis,Callback #FFF3CD
+  Redis list chưa có ACK/DLQ.
+  Callback lỗi chỉ được log, chưa retry bền vững.
+  Timeout reconciliation hiện chỉ bao phủ random-check response.
+end note
+
+@enduml
