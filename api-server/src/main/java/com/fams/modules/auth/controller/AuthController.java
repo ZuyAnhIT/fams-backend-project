@@ -1,6 +1,7 @@
 package com.fams.modules.auth.controller;
 
 import com.fams.modules.auth.dto.request.ChangePasswordRequest;
+import com.fams.modules.auth.dto.request.ConfirmPhoneChangeFirebaseRequest;
 import com.fams.modules.auth.dto.request.SendOtpRequest;
 import com.fams.modules.auth.dto.request.DisableTotpRequest;
 import com.fams.modules.auth.dto.request.FirebasePhoneLoginRequest;
@@ -531,6 +532,29 @@ public class AuthController {
         log.info("Phone change confirmation by user {}", userDetails.getUserId());
         UserProfileResponse profile = userProfileService.confirmPhoneChange(
                 userDetails.getUserId(), request.getPhone(), request.getOtpCode());
+        return ResponseEntity.ok(ApiResponse.success(profile));
+    }
+
+    @Operation(summary = "Confirm phone change with Firebase ID token (step 2 of 2)",
+        description = "Activates the pending phone number using a Firebase Phone Auth ID token obtained after "
+            + "the client completes SMS OTP verification directly with Firebase. The backend verifies the token "
+            + "server-side and extracts the phone number from it. No separate backend OTP send step is needed "
+            + "— the client drives the SMS flow entirely through the Firebase SDK. Requires Bearer token.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Phone changed and verified",
+            content = @Content(schema = @Schema(implementation = UserProfileResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Validation error or Firebase token invalid/expired"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Unauthorized"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "409", description = "Phone was claimed by another account"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "503", description = "Firebase is not configured on this server")
+    })
+    @PostMapping("/profile/phone/confirm-firebase")
+    public ResponseEntity<ApiResponse<UserProfileResponse>> confirmPhoneChangeWithFirebase(
+            @Valid @RequestBody ConfirmPhoneChangeFirebaseRequest request,
+            @AuthenticationPrincipal FamsUserDetails userDetails) {
+        log.info("Firebase phone change confirmation by user {}", userDetails.getUserId());
+        UserProfileResponse profile = userProfileService.confirmPhoneChangeWithFirebase(
+                userDetails.getUserId(), request.getFirebaseIdToken());
         return ResponseEntity.ok(ApiResponse.success(profile));
     }
 

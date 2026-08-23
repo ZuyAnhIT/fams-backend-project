@@ -42,6 +42,10 @@ RUN pip install --no-cache-dir tf-keras
 # Installed as a separate layer AFTER pip installs to preserve torch/tensorflow/dlib cache.
 RUN apt-get update && apt-get install -y --no-install-recommends libgl1 && rm -rf /var/lib/apt/lists/*
 
+# Set HOME to /app so model weights bake into /app/.deepface and /app/.insightface
+# (accessible to the non-root user we add below, without needing /root).
+ENV HOME=/app
+
 # Pre-bake deepface FasNet liveness model weights into the image layer
 COPY preload_models.py /tmp/preload_models.py
 RUN python /tmp/preload_models.py
@@ -52,6 +56,13 @@ RUN python -c "import insightface; insightface.app.FaceAnalysis(name='buffalo_l'
 COPY . .
 
 RUN mkdir -p /app/storage/enrollments /app/storage/checkins
+
+# Drop to non-root user. chown covers model weights, app code, and storage dirs.
+RUN groupadd --system --gid 1001 fams && \
+    useradd --system --uid 1001 --gid 1001 --home-dir /app --no-create-home fams && \
+    chown -R fams:fams /app
+
+USER fams
 
 EXPOSE 5000
 
