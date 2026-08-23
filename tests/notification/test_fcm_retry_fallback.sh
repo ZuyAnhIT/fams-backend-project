@@ -209,6 +209,64 @@ inbox=$(curl -s "$BASE_URL/api/v1/tenants/$TENANT_ID/notifications" \
     -H "Authorization: Bearer $EMP_TOKEN")
 check_contains "Employee inbox has the notification" "$inbox" '"RANDOM_CHECK_SENT"'
 
+# ── 7. Zero-device user still gets email fallback (#140, 2026-08-22 follow-up) ─
+# Found via a live support case: an employee who never opened/logged into the mobile app has
+# ZERO rows in user_devices at all (not even a dead/fake one). The old code's early return for
+# devices.isEmpty() skipped the fallback check entirely — this employee got no push AND no email.
+echo ""
+echo "--- 7. Zero-device user (never registered any device) still gets email fallback ---"
+ZD_EMAIL="zerodev.emp.${TS}@example.com"
+curl -s -o /dev/null -X POST "$BASE_URL/api/v1/tenants/$TENANT_ID/invitations" \
+    -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" \
+    -d "{\"email\":\"$ZD_EMAIL\",\"firstName\":\"ZeroDev\",\"lastName\":\"Emp\"}"
+
+ZD_INV_TOKEN=$(docker exec fams-postgres psql -U fams_user -d fams_db -t -c \
+    "SELECT token FROM employee_invitations WHERE email='$ZD_EMAIL' AND status='pending' LIMIT 1;" \
+    | tr -d ' \n')
+curl -s -o /dev/null -X POST "$BASE_URL/api/v1/invitations/accept" \
+    -H "Content-Type: application/json" \
+    -d "{\"token\":\"$ZD_INV_TOKEN\",\"password\":\"Employee@1234\"}"
+
+zd_login=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/auth/login" \
+    -H "Content-Type: application/json" \
+    -d "{\"identifier\":\"$ZD_EMAIL\",\"password\":\"Employee@1234\"}")
+ZD_TOKEN=$(echo "$zd_login" | head -n -1 | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4)
+ZD_USER_ID=$(curl -s "$BASE_URL/api/v1/auth/me" -H "Authorization: Bearer $ZD_TOKEN" \
+    | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+
+# No POST to /api/v1/me/devices here — this employee has literally zero device rows.
+zd_devices=$(docker exec fams-postgres psql -U fams_user -d fams_db -t -c \
+    "SELECT COUNT(*) FROM user_devices WHERE user_id='$ZD_USER_ID';" | tr -d ' \n')
+check_val "Employee has zero registered devices (test precondition)" "$zd_devices" "0"
+
+zd_notif_resp=$(curl -s -w "\n%{http_code}" \
+    -X POST "$BASE_URL/internal/notifications" \
+    -H "Content-Type: application/json" \
+    -H "X-Internal-Secret: $NOTIFICATIONS_INTERNAL_SECRET" \
+    -d "{\"tenantId\":\"$TENANT_ID\",\"userId\":\"$ZD_USER_ID\",\"eventType\":\"RANDOM_CHECK_SENT\",\"title\":\"Zero Device Test\",\"body\":\"This tests fallback with no devices at all\"}")
+ZD_NOTIF_ID=$(echo "$zd_notif_resp" | head -n -1 | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+sleep 2
+
+zd_fcm_count=$(docker exec fams-postgres psql -U fams_user -d fams_db -t -c \
+    "SELECT COUNT(*) FROM notification_delivery_logs WHERE notification_id='$ZD_NOTIF_ID' AND channel='FCM';" \
+    | tr -d ' \n')
+check_val "No FCM log rows (no devices to attempt)" "$zd_fcm_count" "0"
+
+zd_fallback_status=$(docker exec fams-postgres psql -U fams_user -d fams_db -t -c \
+    "SELECT status FROM notification_delivery_logs WHERE notification_id='$ZD_NOTIF_ID' AND channel='EMAIL_FALLBACK' LIMIT 1;" \
+    | tr -d ' \n')
+if [ "$zd_fallback_status" = "FALLBACK_EMAIL_SENT" ] || [ "$zd_fallback_status" = "FALLBACK_EMAIL_FAILED" ]; then
+    echo "PASS: Zero-device user still got an email fallback attempt ($zd_fallback_status)"
+    PASS=$((PASS + 1))
+else
+    echo "FAIL: Zero-device user got no email fallback log entry at all (status='$zd_fallback_status')"
+    FAIL=$((FAIL + 1))
+fi
+
+zd_inbox=$(curl -s "$BASE_URL/api/v1/tenants/$TENANT_ID/notifications" \
+    -H "Authorization: Bearer $ZD_TOKEN")
+check_contains "Zero-device employee inbox still has the in-app notification" "$zd_inbox" '"RANDOM_CHECK_SENT"'
+
 # ── Summary ───────────────────────────────────────────────────────────────────
 echo ""
 echo "============================================"

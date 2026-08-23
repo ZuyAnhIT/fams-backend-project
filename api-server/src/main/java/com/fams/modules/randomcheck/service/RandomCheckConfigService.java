@@ -10,6 +10,8 @@ import com.fams.modules.randomcheck.repository.RandomCheckConfigRepository;
 import com.fams.modules.audit.service.AuditLogService;
 import com.fams.modules.rbac.repository.UserRoleRepository;
 import com.fams.modules.rbac.service.SiteScopeService;
+import com.fams.modules.shift.entity.Shift;
+import com.fams.modules.shift.repository.ShiftRepository;
 import com.fams.modules.site.repository.SiteRepository;
 import com.fams.shared.exception.DuplicateResourceException;
 import com.fams.shared.exception.ResourceNotFoundException;
@@ -39,17 +41,20 @@ public class RandomCheckConfigService {
     private final RandomCheckConfigRepository configRepository;
     private final UserRoleRepository userRoleRepository;
     private final SiteRepository siteRepository;
+    private final ShiftRepository shiftRepository;
     private final SiteScopeService siteScopeService;
     private final AuditLogService auditLogService;
 
     public RandomCheckConfigService(RandomCheckConfigRepository configRepository,
                                     UserRoleRepository userRoleRepository,
                                     SiteRepository siteRepository,
+                                    ShiftRepository shiftRepository,
                                     SiteScopeService siteScopeService,
                                     AuditLogService auditLogService) {
         this.configRepository = configRepository;
         this.userRoleRepository = userRoleRepository;
         this.siteRepository = siteRepository;
+        this.shiftRepository = shiftRepository;
         this.siteScopeService = siteScopeService;
         this.auditLogService = auditLogService;
     }
@@ -105,6 +110,7 @@ public class RandomCheckConfigService {
 
         siteRepository.findByIdAndTenantIdAndDeletedAtIsNull(siteId, tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Site not found: " + siteId));
+        validateOverlapsSiteShifts(tenantId, siteId, req.getAllowedStartTime(), req.getAllowedEndTime());
 
         if (configRepository.findBySite(tenantId, siteId).isPresent()) {
             throw new DuplicateResourceException(
@@ -230,6 +236,7 @@ public class RandomCheckConfigService {
         int effectiveChecks   = req.getChecksPerShift()      != null ? req.getChecksPerShift()      : config.getChecksPerShift();
         int effectiveInterval = req.getMinIntervalMinutes()  != null ? req.getMinIntervalMinutes()  : config.getMinIntervalMinutes();
         validateSchedulingFields(effectiveStart, effectiveEnd, effectiveChecks, effectiveInterval);
+        validateOverlapsSiteShifts(tenantId, config.getSiteId(), effectiveStart, effectiveEnd);
 
         Map<String, Object> oldValue = configSnapshot(config);
 
@@ -331,6 +338,53 @@ public class RandomCheckConfigService {
             throw new IllegalArgumentException(String.format(
                     "Time window (%d min) is too short: %d checks with %d min intervals require at least %d min",
                     windowMinutes, checksPerShift, minIntervalMinutes, minWindowNeeded));
+        }
+    }
+
+    /** Found via support case (2026-08-22): a tenant set a site's random-check window to
+     *  15:00-17:00 while the site's only shift ran 14:25-14:35 — zero overlap. Nothing broke or
+     *  errored anywhere; {@link com.fams.modules.randomcheck.service.ScheduledCheckGeneratorService
+     *  #resolveEffectiveWindow} (intersects config window with each assignment's actual shift
+     *  hours, on purpose, so checks are never scheduled outside real working hours) silently
+     *  produced an empty intersection every single day, so the config "existed" but never
+     *  generated a single check — indistinguishable from the feature being broken, purely from
+     *  the admin UI's perspective. This check surfaces that mismatch AT CONFIG SAVE TIME instead
+     *  of silently, for the same reason validateSchedulingFields already does for the
+     *  checks/interval-vs-window feasibility case.
+     *
+     *  Only meaningful for a SITE-level config, not the tenant-wide default (siteId == null) —
+     *  a tenant default is deliberately shift-agnostic, applying across every site/shift that
+     *  doesn't have its own override, so there is no single set of shift hours to validate
+     *  against. Only checked against shifts that actually exist yet (a site created before any
+     *  shift has nothing to overlap-check against) and skips overnight shifts (same as
+     *  resolveEffectiveWindow — a window spanning midnight needs handling this simple same-day
+     *  overlap test doesn't attempt). Warns (does not block) if the site has shifts but ALL of
+     *  them are overnight, since this check genuinely cannot evaluate that case either way. */
+    private void validateOverlapsSiteShifts(UUID tenantId, UUID siteId, LocalTime start, LocalTime end) {
+        if (siteId == null) return;
+
+        List<Shift> shifts = shiftRepository.findBySiteIdAndStatusAndDeletedAtIsNullOrderByStartTimeAsc(
+                siteId, "active");
+        if (shifts.isEmpty()) return;
+
+        List<Shift> comparable = shifts.stream().filter(s -> !s.isAllowOvernight()).collect(Collectors.toList());
+        if (comparable.isEmpty()) {
+            log.warn("Random check window validation skipped tenantId={} siteId={} — every active "
+                    + "shift at this site crosses midnight, cannot overlap-check", tenantId, siteId);
+            return;
+        }
+
+        boolean overlapsAny = comparable.stream()
+                .anyMatch(s -> start.isBefore(s.getEndTime()) && end.isAfter(s.getStartTime()));
+        if (!overlapsAny) {
+            String shiftSummary = comparable.stream()
+                    .map(s -> String.format("\"%s\" (%s–%s)", s.getName(), s.getStartTime(), s.getEndTime()))
+                    .collect(Collectors.joining(", "));
+            throw new IllegalArgumentException(String.format(
+                    "Allowed window (%s–%s) does not overlap any active shift at this site: %s. "
+                            + "Random checks will never be generated for those shifts with this "
+                            + "window — adjust either the window or the shift hours so they overlap.",
+                    start, end, shiftSummary));
         }
     }
 
