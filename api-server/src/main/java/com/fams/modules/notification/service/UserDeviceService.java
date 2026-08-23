@@ -123,7 +123,17 @@ public class UserDeviceService {
                        Map<String, String> data, boolean fallbackEligible) {
     List<UserDevice> devices = userDeviceRepository.findActiveByUserId(userId);
     if (devices.isEmpty()) {
+      // #140 (2026-08-22 follow-up): this early return used to skip the fallback check entirely
+      // (it lived below, guarded by `!devices.isEmpty()`) — a user who has NEVER registered any
+      // device (never installed/opened the app, or never granted push permission) got silently
+      // no notification at all for a critical/mandatory eventType like RANDOM_CHECK_SENT, which
+      // is arguably the single worst case to miss: no push AND no fallback. Found via a live
+      // support case where a freshly-invited employee with an in-app notification already
+      // sitting unread had received no email either.
       log.debug("No active devices for userId={} — skipping FCM push", userId);
+      if (fallbackEligible) {
+        sendEmailFallback(notificationId, tenantId, userId, title, body);
+      }
       return 0;
     }
 

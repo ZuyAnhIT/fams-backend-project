@@ -826,6 +826,26 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
 - [x] **#93 — Cấu hình số lần và khung giờ check** `P0` · 5sp · Nền tảng: Backend, Web Admin
   - *Audit (2026-07-22):* 🟡 LÀM MỘT PHẦN — bằng chứng: validateSchedulingFields, test_scheduling_fields.sh; thiếu: field cố định không phải min/max
   - *Audit (2026-08-18):* 🟡→✅ ĐÃ VÁ audit log (chung #91). Quyết định chủ dự án: giữ nguyên checksPerShift cố định + 1 khung giờ/ngày, không đổi min/max hay nhiều khung giờ. Test live: PASS (xem `sprint-4-feature-93-scheduling-fields.md`).
+  - *Audit (2026-08-22, phát hiện qua ca hỗ trợ thật):* **Phát hiện gap thật còn sót lại đúng nửa
+    sau của AC** — "validate nằm trong ca; hiển thị cảnh báo nếu không thể sinh lịch" trước đó chỉ
+    validate self-consistency của chính config (số lần × khoảng cách có nhét vừa khung giờ CỦA
+    CHÍNH NÓ không — `validateSchedulingFields`, đã có từ trước), **KHÔNG hề đối chiếu khung giờ
+    với giờ ca làm thực tế của site** — đúng gap 1 khách hàng gặp thật (tenant "FOFO"): đặt khung
+    giờ kiểm tra ngẫu nhiên 15:00-17:00 cho site chỉ có 1 ca 14:25-14:35, không hề trùng nhau. Hệ
+    thống không báo lỗi ở đâu cả — `ScheduledCheckGeneratorService#resolveEffectiveWindow` (giao
+    khung config với giờ ca thật, có chủ đích, để không gửi kiểm tra ngoài giờ làm) âm thầm cho ra
+    kết quả rỗng mỗi ngày, tạo cảm giác tính năng "bị hỏng" dù cấu hình "tồn tại".
+    **Đã vá**: thêm `RandomCheckConfigService#validateOverlapsSiteShifts` — khi tạo/sửa site
+    override, nếu site đã có ≥1 ca active và khung giờ cấu hình không giao với BẤT KỲ ca nào
+    (bỏ qua ca qua đêm — cùng logic loại trừ như `resolveEffectiveWindow`), trả 400 kèm thông điệp
+    liệt kê rõ tên+giờ từng ca để người dùng biết sửa gì. Chỉ áp dụng cho site override, không áp
+    dụng cho tenant-default (vốn cố ý không gắn với 1 ca cụ thể nào). **Web Admin**: thêm cảnh báo
+    tương tự ngay trên form (`RandomCheckConfigFormModal.tsx`) — validate live trước khi gọi API,
+    tránh người dùng phải submit mới biết lỗi. **Test live qua API + UI thật**: tạo site+ca
+    14:25-14:35 test, đặt khung 15:00-17:00 → 400 đúng thông điệp; đổi khung 14:00-15:00 (giao ca)
+    → 200; test qua Playwright thật trên form Web Admin thấy đúng dòng cảnh báo đỏ dưới field +
+    submit thành công khi khung giờ hợp lệ. `test_random_check_config_site_override.sh` thêm 3
+    case mới, PASS 16/16 (toàn bộ file, chạy ổn định 2 lần liên tiếp).
   - *User Story:* Là một HR/Admin, tôi muốn thiết lập số lần check, khoảng cách và khung giờ cho phép để tránh kiểm tra quá dày hoặc sai giờ.
   - *Acceptance Criteria:* Nhập checks_per_shift_min/max, min_gap, allowed_time_ranges; validate nằm trong ca; hiển thị cảnh báo nếu không thể sinh lịch.
   - *DB Entities:* `random_check_configs, shift_templates`
@@ -1387,6 +1407,19 @@ Khi được yêu cầu "làm tiếp theo backlog" hoặc "bắt đầu Sprint N
     "normal" → sẽ không còn test được đường fallback) — PASS 11/11. Regression toàn bộ
     notification suite (templates 29/29, settings 24/24, inbox 16/16, mark-read 13/13, devices
     13/13, dispatch 9/9) + audit 14/14 — không lỗi.
+  - *Audit (2026-08-22, follow-up, phát hiện qua ca hỗ trợ FOFO thật):* **✅ ĐÃ VÁ bug thật** —
+    trong lúc verify site "Xây Nhà Tập Thể" sẵn sàng test random check, trigger thử 1 lượt kiểm
+    tra thủ công cho nhân viên thật thì phát hiện `notification_delivery_logs` rỗng hoàn toàn dù
+    Notification đã tạo và `RANDOM_CHECK_SENT` là priority critical. Nguyên nhân:
+    `UserDeviceService#sendPush` nhánh `devices.isEmpty()` (nhân viên **chưa từng đăng ký thiết
+    bị nào**, khác với "có thiết bị nhưng FCM fail") return sớm TRƯỚC khi kiểm tra
+    `fallbackEligible` — đây là trường hợp duy nhất không nhận được cả push lẫn email, im lặng
+    tuyệt đối, dù lẽ ra là ca cần fallback nhất. Vá: nhánh 0-thiết-bị nay cũng gọi
+    `sendEmailFallback` khi `fallbackEligible=true`. Rebuild+redeploy+test live xác nhận
+    `notification_delivery_logs` nay có `EMAIL_FALLBACK|FALLBACK_EMAIL_SENT`. Thêm case test mới
+    vào `test_fcm_retry_fallback.sh` (nhân viên hoàn toàn mới, 0 dòng `user_devices`) — PASS
+    15/15. Regression 4 file liên quan + `run_all.sh` (146 suite) không lỗi. Xem
+    `docs/manual-tests/sprint-6-feature-140-zero-device-fallback.md`.
   - *User Story:* Là một hệ thống, tôi muốn retry khi gửi thông báo thất bại để tăng tỷ lệ nhận thông báo.
   - *Acceptance Criteria:* Retry tối đa theo policy; cập nhật retry_count/failure_reason; fallback email/SMS cho priority critical.
   - *DB Entities:* `notifications, tokens`

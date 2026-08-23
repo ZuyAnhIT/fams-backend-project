@@ -61,7 +61,12 @@ def _process_job(job_data: dict) -> None:
 
     save_checkin_photo(tenant_id, source_id, image_bytes)
 
-    liveness_verified: bool | None = None
+    # A successfully loaded challenge frame can only come from an active-liveness
+    # challenge that already passed its pose/blink and anti-spoof checks. Preserve
+    # that proof in the callback instead of reporting NULL, which clients interpret
+    # as "still verifying". Plain-photo jobs still start unresolved and run the
+    # passive single-frame liveness check only when requires_liveness is true.
+    liveness_verified: bool | None = True if challenge_id else None
     liveness_score: float | None = None
 
     if requires_liveness:
