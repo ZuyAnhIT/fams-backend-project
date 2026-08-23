@@ -148,7 +148,7 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health,info,prometheus
 
 springdoc:
   api-docs:

@@ -26,6 +26,7 @@ class UserProfileServiceTest {
     @Mock private EmailVerificationService emailVerificationService;
     @Mock private EmailService emailService;
     @Mock private PhoneOtpService phoneOtpService;
+    @Mock private FirebasePhoneTokenVerifier firebasePhoneTokenVerifier;
     @Mock private UserRoleRepository userRoleRepository;
     @Mock private TenantRepository tenantRepository;
     @Mock private AuditLogService auditLogService;
@@ -50,6 +51,7 @@ class UserProfileServiceTest {
                 emailVerificationService,
                 emailService,
                 phoneOtpService,
+                firebasePhoneTokenVerifier,
                 userRoleRepository,
                 tenantRepository,
                 auditLogService,

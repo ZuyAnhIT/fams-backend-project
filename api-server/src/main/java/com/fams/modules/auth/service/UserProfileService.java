@@ -41,6 +41,7 @@ public class UserProfileService {
     private final EmailVerificationService emailVerificationService;
     private final EmailService emailService;
     private final PhoneOtpService phoneOtpService;
+    private final FirebasePhoneTokenVerifier firebasePhoneTokenVerifier;
     private final UserRoleRepository userRoleRepository;
     private final TenantRepository tenantRepository;
     private final AuditLogService auditLogService;
@@ -51,6 +52,7 @@ public class UserProfileService {
                               EmailVerificationService emailVerificationService,
                               EmailService emailService,
                               PhoneOtpService phoneOtpService,
+                              FirebasePhoneTokenVerifier firebasePhoneTokenVerifier,
                               UserRoleRepository userRoleRepository,
                               TenantRepository tenantRepository,
                               AuditLogService auditLogService,
@@ -60,6 +62,7 @@ public class UserProfileService {
         this.emailVerificationService = emailVerificationService;
         this.emailService = emailService;
         this.phoneOtpService = phoneOtpService;
+        this.firebasePhoneTokenVerifier = firebasePhoneTokenVerifier;
         this.userRoleRepository = userRoleRepository;
         this.tenantRepository = tenantRepository;
         this.auditLogService = auditLogService;
@@ -279,6 +282,28 @@ public class UserProfileService {
         user.setPhoneVerified(true);
         userRepository.save(user);
         log.info("Phone changed and verified for user {}", userId);
+
+        return toResponse(user);
+    }
+
+    @Transactional
+    public UserProfileResponse confirmPhoneChangeWithFirebase(UUID userId, String firebaseIdToken) {
+        String phone = firebasePhoneTokenVerifier.verifyAndExtractPhone(firebaseIdToken);
+        User user = userRepository.findByIdAndDeletedAtIsNull(userId)
+                .orElseThrow(() -> new InvalidCredentialsException("User not found"));
+
+        String normalized = PhoneNumbers.normalize(phone);
+        if (!normalized.equals(user.getPhone())) {
+            userRepository.findByPhoneAndDeletedAtIsNull(normalized).ifPresent(existing -> {
+                if (!existing.getId().equals(userId)) {
+                    throw new DuplicateResourceException("Phone number is already in use");
+                }
+            });
+            user.setPhone(normalized);
+        }
+        user.setPhoneVerified(true);
+        userRepository.save(user);
+        log.info("Phone changed and verified via Firebase for user {}", userId);
 
         return toResponse(user);
     }

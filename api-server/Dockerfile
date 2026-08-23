@@ -12,6 +12,9 @@ RUN mvn clean package -DskipTests -q
 # Stage 2: Runtime
 FROM eclipse-temurin:21-jre-jammy
 WORKDIR /app
-COPY --from=builder /build/target/*.jar app.jar
+RUN groupadd --system --gid 1001 fams && \
+    useradd --system --uid 1001 --gid 1001 --no-create-home fams
+COPY --from=builder --chown=fams:fams /build/target/*.jar app.jar
+USER fams
 EXPOSE 8080
 ENTRYPOINT ["java", "-jar", "app.jar"]
