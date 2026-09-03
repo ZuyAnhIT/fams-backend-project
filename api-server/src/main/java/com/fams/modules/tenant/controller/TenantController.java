@@ -172,6 +172,50 @@ public class TenantController {
         return ResponseEntity.ok(ApiResponse.success(response));
     }
 
+    @Operation(summary = "Upload company logo image",
+        description = "#08: uploads an image file (JPEG/PNG/WEBP/SVG, max 5MB) from the caller's device as this "
+            + "tenant's logo, replacing any previous uploaded logo. Owner-only (Platform Admin bypasses). Stored "
+            + "in S3-compatible object storage — same mechanism as user avatar upload. To point at an already-"
+            + "hosted image URL instead, use PATCH /{id} with logoUrl.")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Logo uploaded",
+            content = @Content(schema = @Schema(implementation = TenantResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Missing file, wrong type, or too large"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Unauthorized"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "Not this tenant's owner"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "Tenant not found")
+    })
+    @PostMapping(value = "/{id}/logo", consumes = org.springframework.http.MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<ApiResponse<TenantResponse>> uploadLogo(
+            @Parameter(description = "Tenant UUID") @PathVariable UUID id,
+            @RequestParam("file") org.springframework.web.multipart.MultipartFile file,
+            @AuthenticationPrincipal FamsUserDetails userDetails) {
+        log.info("Tenant logo upload: tenantId={} by userId={}", id, userDetails.getUserId());
+        TenantResponse response = tenantService.updateLogoFile(
+                id, userDetails.getUserId(), userDetails.isPlatformAdmin(), file);
+        return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    @Operation(summary = "Remove company logo",
+        description = "#08: clears this tenant's logo and best-effort deletes the stored file. Owner-only "
+            + "(Platform Admin bypasses).")
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Logo removed",
+            content = @Content(schema = @Schema(implementation = TenantResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Unauthorized"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "Not this tenant's owner"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "Tenant not found")
+    })
+    @DeleteMapping("/{id}/logo")
+    public ResponseEntity<ApiResponse<TenantResponse>> removeLogo(
+            @Parameter(description = "Tenant UUID") @PathVariable UUID id,
+            @AuthenticationPrincipal FamsUserDetails userDetails) {
+        log.info("Tenant logo removal: tenantId={} by userId={}", id, userDetails.getUserId());
+        TenantResponse response = tenantService.deleteLogoFile(
+                id, userDetails.getUserId(), userDetails.isPlatformAdmin());
+        return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
     @Operation(summary = "Transfer tenant ownership",
         description = "Hands off owner-gated capabilities (profile edit, display settings, IP whitelist, billing "
             + "detail) to another existing member of this tenant. Callable by the CURRENT owner, or a Platform "

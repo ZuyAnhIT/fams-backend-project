@@ -57,6 +57,7 @@ public class TenantService {
     private final StringRedisTemplate redis;
     private final AuditLogService auditLogService;
     private final com.fams.modules.notification.service.NotificationService notificationService;
+    private final TenantLogoStorageService logoStorageService;
 
     public TenantService(TenantRepository tenantRepository, UserRepository userRepository,
                          PlanRepository planRepository,
@@ -66,7 +67,8 @@ public class TenantService {
                          StringRedisTemplate redis,
                          AuditLogService auditLogService,
                          @org.springframework.context.annotation.Lazy
-                         com.fams.modules.notification.service.NotificationService notificationService) {
+                         com.fams.modules.notification.service.NotificationService notificationService,
+                         TenantLogoStorageService logoStorageService) {
         this.tenantRepository = tenantRepository;
         this.userRepository = userRepository;
         this.planRepository = planRepository;
@@ -76,6 +78,53 @@ public class TenantService {
         this.redis = redis;
         this.auditLogService = auditLogService;
         this.notificationService = notificationService;
+        this.logoStorageService = logoStorageService;
+    }
+
+    /**
+     * #08: upload an actual image file as this tenant's logo (replacing any previous one).
+     * Owner-only, same as {@link #updateTenant} — Platform Admin bypasses. Mirrors the user
+     * avatar upload flow.
+     */
+    @Transactional
+    public TenantResponse updateLogoFile(UUID tenantId, UUID callerUserId, boolean callerIsPlatformAdmin,
+                                          org.springframework.web.multipart.MultipartFile file) {
+        Tenant tenant = tenantRepository.findByIdAndDeletedAtIsNull(tenantId)
+                .orElseThrow(() -> new ResourceNotFoundException("Tenant not found: " + tenantId));
+        if (!callerIsPlatformAdmin && !callerUserId.equals(tenant.getOwnerId())) {
+            throw new AccessDeniedException("Only this tenant's owner may change its logo");
+        }
+
+        Map<String, Object> before = tenantAuditSnapshot(tenant);
+        String previousUrl = tenant.getLogoUrl();
+        String newUrl = logoStorageService.store(tenantId, file);
+        tenant.setLogoUrl(newUrl);
+        tenantRepository.save(tenant);
+        logoStorageService.deleteIfManaged(previousUrl);
+
+        log.info("Tenant logo uploaded: id={} by userId={}", tenantId, callerUserId);
+        recordTenantAudit(tenantId, callerUserId, "tenant_updated", before, tenantAuditSnapshot(tenant));
+        return toResponse(tenant);
+    }
+
+    /** #08: clear the tenant logo and best-effort delete the stored file. Owner-only. */
+    @Transactional
+    public TenantResponse deleteLogoFile(UUID tenantId, UUID callerUserId, boolean callerIsPlatformAdmin) {
+        Tenant tenant = tenantRepository.findByIdAndDeletedAtIsNull(tenantId)
+                .orElseThrow(() -> new ResourceNotFoundException("Tenant not found: " + tenantId));
+        if (!callerIsPlatformAdmin && !callerUserId.equals(tenant.getOwnerId())) {
+            throw new AccessDeniedException("Only this tenant's owner may change its logo");
+        }
+
+        Map<String, Object> before = tenantAuditSnapshot(tenant);
+        String previousUrl = tenant.getLogoUrl();
+        tenant.setLogoUrl(null);
+        tenantRepository.save(tenant);
+        logoStorageService.deleteIfManaged(previousUrl);
+
+        log.info("Tenant logo removed: id={} by userId={}", tenantId, callerUserId);
+        recordTenantAudit(tenantId, callerUserId, "tenant_updated", before, tenantAuditSnapshot(tenant));
+        return toResponse(tenant);
     }
 
     /** #31 (docs/api/backend-feature-audit-2026-08-07.md): tenant lifecycle actions are

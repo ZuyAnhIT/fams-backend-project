@@ -336,7 +336,14 @@ public class AuthService {
         if (targetRoles.isEmpty()) {
             throw new AccessDeniedException("You do not have a role in this company");
         }
-        String targetRole = targetRoles.get(0).getRole().getName();
+        // Resolve the same way login and refresh-token do (PrimaryRoleResolver) instead of
+        // taking whichever row the DB returned first: a user holding two roles in the target
+        // tenant (e.g. HR_MANAGER + a narrow custom role) would otherwise land on a JWT `role`
+        // claim picked at random after switching, sending the web dashboard to the wrong view.
+        UserRole targetPrimary = com.fams.modules.rbac.util.PrimaryRoleResolver
+                .pickPrimaryForTenant(targetRoles, targetTenantId);
+        String targetRole = (targetPrimary != null ? targetPrimary : targetRoles.get(0))
+                .getRole().getName();
 
         tenantRepository.findByIdAndDeletedAtIsNull(targetTenantId).ifPresentOrElse(tenant -> {
             if ("suspended".equals(tenant.getStatus())) throw new TenantSuspendedException();
