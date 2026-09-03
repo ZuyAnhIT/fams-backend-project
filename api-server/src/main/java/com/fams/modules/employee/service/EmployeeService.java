@@ -72,6 +72,7 @@ public class EmployeeService {
     private final FaceIdService faceIdService;
     private final ScheduledCheckCancelService scheduledCheckCancelService;
     private final com.fams.modules.audit.service.AuditLogService auditLogService;
+    private final com.fams.modules.site.repository.SiteRepository siteRepository;
 
     public EmployeeService(EmployeeRepository employeeRepository,
                            UserRoleRepository userRoleRepository,
@@ -87,7 +88,8 @@ public class EmployeeService {
                            com.fams.modules.assignment.service.AssignmentService assignmentService,
                            FaceIdService faceIdService,
                            ScheduledCheckCancelService scheduledCheckCancelService,
-                           com.fams.modules.audit.service.AuditLogService auditLogService) {
+                           com.fams.modules.audit.service.AuditLogService auditLogService,
+                           com.fams.modules.site.repository.SiteRepository siteRepository) {
         this.employeeRepository = employeeRepository;
         this.userRoleRepository = userRoleRepository;
         this.roleRepository = roleRepository;
@@ -103,6 +105,7 @@ public class EmployeeService {
         this.faceIdService = faceIdService;
         this.scheduledCheckCancelService = scheduledCheckCancelService;
         this.auditLogService = auditLogService;
+        this.siteRepository = siteRepository;
     }
 
     /** Subset of Employee fields worth an audit trail — not every column (e.g. avatarUrl churns
@@ -498,12 +501,31 @@ public class EmployeeService {
         if (employee.getUserId() != null) {
             List<UserRole> userRoles = userRoleRepository
                     .findActiveByUserIdAndTenantId(employee.getUserId(), tenantId);
+            // Resolve site names once for every site referenced across this user's assignments —
+            // previously siteIds/sites were left null here, so a site-scoped role always showed
+            // as tenant-wide ("Toàn công ty") on the employee's Roles tab (#11).
+            Set<UUID> allSiteIds = userRoles.stream()
+                    .flatMap(ur -> ur.getSiteIds().stream())
+                    .collect(java.util.stream.Collectors.toSet());
+            Map<UUID, String> siteNamesById = allSiteIds.isEmpty()
+                    ? Collections.emptyMap()
+                    : siteRepository.findAllById(allSiteIds).stream()
+                            .collect(java.util.stream.Collectors.toMap(
+                                    com.fams.modules.site.entity.Site::getId,
+                                    com.fams.modules.site.entity.Site::getName));
             roles = userRoles.stream().map(ur -> UserRoleResponse.builder()
                     .id(ur.getId())
                     .userId(ur.getUserId())
                     .roleId(ur.getRole().getId())
                     .roleName(ur.getRole().getName())
                     .tenantId(ur.getTenantId())
+                    .siteIds(new ArrayList<>(ur.getSiteIds()))
+                    .sites(ur.getSiteIds().stream()
+                            .map(sid -> com.fams.modules.rbac.dto.response.SiteRefResponse.builder()
+                                    .id(sid)
+                                    .name(siteNamesById.getOrDefault(sid, "Công trình đã xoá"))
+                                    .build())
+                            .toList())
                     .assignedBy(ur.getAssignedBy())
                     .createdAt(ur.getCreatedAt())
                     .updatedAt(ur.getUpdatedAt())
