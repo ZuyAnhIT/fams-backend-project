@@ -2,6 +2,28 @@
 
 > Cập nhật theo code đang chạy ngày 30/07/2026. Base path: `/api/v1/tenants/{tenantId}/employees/{employeeId}/face-id` (theo nhân viên) và `/api/v1/tenants/{tenantId}/face-id` (hàng đợi duyệt của HR).
 
+## 0.00 [MỚI] 03/09/2026 — sửa lỗi "quay đầu ngược chiều mới được chấp nhận" (QA thiết bị thật)
+
+### Vấn đề người dùng báo
+
+Khi check-in/check-out bằng Face ID liveness với **camera trước**: hệ thống yêu cầu "quay đầu sang phải" nhưng người dùng phải quay sang **trái** thì mới được nhận; quay đúng theo hướng dẫn thì bị báo sai chiều (`detected ['turn_left']`). Chiều nào cũng bị đảo.
+
+### Nguyên nhân gốc
+
+`ai-service/app/services/head_pose_service.py::classify_frame()` ánh xạ **sai dấu** của góc yaw:
+code cũ giả định `yaw > 0` ⇒ `turn_right`. Nhưng khung hình được chụp từ camera selfie **không lật gương** (`FaceLivenessCamera` đặt `mirror={false}`), tức ảnh có chiều như người đối diện nhìn thấy. Ở chiều đó InsightFace trả **yaw ÂM khi người dùng quay sang phải của chính họ** và **yaw DƯƠNG khi quay sang trái** — ngược với giả định của code. Hệ quả: mọi bước `turn_left`/`turn_right` đều từ chối động tác đúng và chấp nhận động tác ngược.
+
+### Đã sửa
+
+1. **`classify_frame()`** — đảo lại nhánh phân loại yaw: `yaw_delta <= -YAW_THRESHOLD ⇒ turn_right`, `yaw_delta >= YAW_THRESHOLD ⇒ turn_left`. Pitch (`look_up`/`look_down`) và `center` không đổi (đối xứng). Không đụng baseline theo phiên (mục 0.0) — vẫn so delta với khung `center`.
+2. **Docstring `estimate_head_pose()`** — ghi rõ quy ước dấu yaw đã kiểm chứng trên thiết bị thật.
+3. **App `FaceLivenessCamera.tsx`** — mô tả bước quay đầu nói rõ "về phía vai TRÁI/PHẢI của chính bạn" để giảm nhầm lẫn (preview không lật gương).
+
+### Test đã chạy
+
+- `ai-service/tests/test_head_pose_service.py` (mới, 5 test, chạy trong container `fams-ai`): frame yaw âm ⇒ `turn_right` & không `turn_left`; yaw dương ⇒ `turn_left` & không `turn_right`; frontal ⇒ `center`; baseline lệch trục được tôn trọng; pitch không đổi. Toàn bộ suite ai-service: 7/7 pass, không hồi quy.
+- App: `tsc --noEmit` sạch.
+
 ## 0.0 [MỚI] P0: sửa lỗi hệ thống "center bị nhận nhầm thành look_down" trên thiết bị thật
 
 Bạn gửi đề xuất nâng cấp Active Liveness V2 (`20_DE_XUAT_NANG_CAP_FACE_ID_LIVENESS_V2_2026-07-30.md`) sau khi test 4/4 lần trên camera điện thoại thật đều bị lỗi `expected 'center', detected ['look_down']`. Đã xác minh chẩn đoán trong tài liệu là đúng, sửa ngay phần P0 (an toàn, không cần kiến trúc mới), phần V2 (video liên tục + MediaPipe) trình bày ở mục 0.1 dưới đây để bạn quyết định vì đây là dự án nhiều tuần, đụng tới cả `fams-front-app-project` lẫn thêm dependency mới cho AI service.
