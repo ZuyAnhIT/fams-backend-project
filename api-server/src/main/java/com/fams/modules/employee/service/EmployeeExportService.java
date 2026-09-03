@@ -28,10 +28,22 @@ import java.util.UUID;
 @Service
 public class EmployeeExportService {
 
+    // Vietnamese headers + a "Họ và tên" combined column — HR opening this file shouldn't have
+    // to read camelCase English or mentally join first/last name (#export-readability).
     private static final String[] HEADERS = {
-        "employeeCode", "firstName", "lastName", "email", "phone", "nationalId",
-        "position", "department", "status", "hiredDate", "createdAt"
+        "Mã nhân viên", "Họ và tên đệm", "Tên", "Họ và tên", "Email", "Số điện thoại",
+        "CCCD/CMND", "Chức vụ", "Phòng ban", "Trạng thái", "Ngày vào làm", "Ngày tạo hồ sơ"
     };
+
+    private static String statusLabel(String status) {
+        if (status == null) return "";
+        return switch (status.toLowerCase()) {
+            case "active" -> "Đang làm việc";
+            case "inactive" -> "Tạm nghỉ";
+            case "terminated" -> "Đã nghỉ việc";
+            default -> status;
+        };
+    }
 
     private final EmployeeRepository employeeRepository;
     private final UserRoleRepository userRoleRepository;
@@ -116,19 +128,21 @@ public class EmployeeExportService {
             for (Employee e : employees) {
                 Row row = sheet.createRow(rowNum++);
                 row.createCell(0).setCellValue(nullSafe(e.getEmployeeCode()));
-                row.createCell(1).setCellValue(nullSafe(e.getFirstName()));
-                row.createCell(2).setCellValue(nullSafe(e.getLastName()));
-                row.createCell(3).setCellValue(bypassMasking ? nullSafe(e.getEmail()) : nullSafe(MaskingUtils.maskEmail(e.getEmail())));
-                row.createCell(4).setCellValue(bypassMasking ? nullSafe(e.getPhone()) : nullSafe(MaskingUtils.maskPhone(e.getPhone())));
+                row.createCell(1).setCellValue(nullSafe(e.getLastName()));
+                row.createCell(2).setCellValue(nullSafe(e.getFirstName()));
+                // Vietnamese full name = họ + tên (lastName then firstName)
+                row.createCell(3).setCellValue((nullSafe(e.getLastName()) + " " + nullSafe(e.getFirstName())).trim());
+                row.createCell(4).setCellValue(bypassMasking ? nullSafe(e.getEmail()) : nullSafe(MaskingUtils.maskEmail(e.getEmail())));
+                row.createCell(5).setCellValue(bypassMasking ? nullSafe(e.getPhone()) : nullSafe(MaskingUtils.maskPhone(e.getPhone())));
                 // nationalId has no dedicated mask format (see Masked.MaskType.DEFAULT /
                 // MaskedSerializer) — masked value is the fixed literal "***", same as the JSON
                 // API, not a partial-reveal format like email/phone.
-                row.createCell(5).setCellValue(bypassMasking ? nullSafe(e.getNationalId()) : (e.getNationalId() != null ? "***" : ""));
-                row.createCell(6).setCellValue(nullSafe(e.getPosition()));
-                row.createCell(7).setCellValue(nullSafe(e.getDepartment()));
-                row.createCell(8).setCellValue(nullSafe(e.getStatus()));
-                row.createCell(9).setCellValue(e.getHiredDate() != null ? e.getHiredDate().toString() : "");
-                row.createCell(10).setCellValue(e.getCreatedAt() != null ? e.getCreatedAt().toLocalDate().toString() : "");
+                row.createCell(6).setCellValue(bypassMasking ? nullSafe(e.getNationalId()) : (e.getNationalId() != null ? "***" : ""));
+                row.createCell(7).setCellValue(nullSafe(e.getPosition()));
+                row.createCell(8).setCellValue(nullSafe(e.getDepartment()));
+                row.createCell(9).setCellValue(statusLabel(e.getStatus()));
+                row.createCell(10).setCellValue(e.getHiredDate() != null ? e.getHiredDate().toString() : "");
+                row.createCell(11).setCellValue(e.getCreatedAt() != null ? e.getCreatedAt().toLocalDate().toString() : "");
             }
 
             for (int i = 0; i < HEADERS.length; i++) {
