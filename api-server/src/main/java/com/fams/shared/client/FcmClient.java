@@ -3,6 +3,10 @@ package com.fams.shared.client;
 import com.google.firebase.FirebaseApp;
 import com.google.firebase.messaging.FirebaseMessaging;
 import com.google.firebase.messaging.FirebaseMessagingException;
+import com.google.firebase.messaging.AndroidConfig;
+import com.google.firebase.messaging.AndroidNotification;
+import com.google.firebase.messaging.ApnsConfig;
+import com.google.firebase.messaging.Aps;
 import com.google.firebase.messaging.Message;
 import com.google.firebase.messaging.Notification;
 import lombok.extern.slf4j.Slf4j;
@@ -53,6 +57,25 @@ public class FcmClient {
         .setNotification(Notification.builder()
             .setTitle(title)
             .setBody(body)
+            .build())
+        // Android 8+ drops any notification without a channel. The App creates a matching
+        // "fams-default" channel at HIGH importance (see push-notification.service.ts) so the
+        // OS shows a heads-up banner even while the App is closed/killed — without this the
+        // message would only surface after the user next opened the App (#19, 2026-09-03).
+        .setAndroidConfig(AndroidConfig.builder()
+            .setPriority(AndroidConfig.Priority.HIGH)
+            .setNotification(AndroidNotification.builder()
+                .setChannelId("fams-default")
+                .setDefaultSound(true)
+                .build())
+            .build())
+        // iOS: play the default sound and let the system present the alert in the tray while
+        // the App is backgrounded; content-available wakes the App briefly to sync its inbox.
+        .setApnsConfig(ApnsConfig.builder()
+            .setAps(Aps.builder()
+                .setSound("default")
+                .setContentAvailable(true)
+                .build())
             .build());
     if (data != null && !data.isEmpty()) {
       messageBuilder.putAllData(data);

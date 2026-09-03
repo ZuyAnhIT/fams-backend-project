@@ -60,6 +60,7 @@ public class AssignmentService {
     private final SiteScopeService siteScopeService;
     private final ScheduledCheckCancelService scheduledCheckCancelService;
     private final AuditLogService auditLogService;
+    private final AssignmentNotificationService assignmentNotificationService;
 
     public AssignmentService(AssignmentRepository assignmentRepository,
                              SiteRepository siteRepository,
@@ -69,7 +70,8 @@ public class AssignmentService {
                              UserRoleRepository userRoleRepository,
                              SiteScopeService siteScopeService,
                              ScheduledCheckCancelService scheduledCheckCancelService,
-                             AuditLogService auditLogService) {
+                             AuditLogService auditLogService,
+                             AssignmentNotificationService assignmentNotificationService) {
         this.assignmentRepository = assignmentRepository;
         this.siteRepository = siteRepository;
         this.employeeRepository = employeeRepository;
@@ -79,6 +81,7 @@ public class AssignmentService {
         this.siteScopeService = siteScopeService;
         this.scheduledCheckCancelService = scheduledCheckCancelService;
         this.auditLogService = auditLogService;
+        this.assignmentNotificationService = assignmentNotificationService;
     }
 
     private Map<String, Object> assignmentAuditSnapshot(Assignment a) {
@@ -412,6 +415,7 @@ public class AssignmentService {
         log.info("Assignment created: id={} employeeId={} siteId={} tenantId={} by={}",
                 assignment.getId(), request.getEmployeeId(), siteId, tenantId, callerUserId);
         recordAudit(tenantId, callerUserId, assignment.getId(), "assignment_created", null, assignmentAuditSnapshot(assignment));
+        assignmentNotificationService.notifyAssignmentCreated(assignment);
         return toResponse(assignment);
     }
 
@@ -590,6 +594,7 @@ public class AssignmentService {
         log.info("Assignment cancelled: id={} siteId={} tenantId={} by={}",
                 assignmentId, siteId, tenantId, callerUserId);
         recordAudit(tenantId, callerUserId, assignmentId, "assignment_cancelled", before, assignmentAuditSnapshot(assignment));
+        assignmentNotificationService.notifyAssignmentCancelled(assignment);
 
         int cancelled = scheduledCheckCancelService.cancelPendingByAssignment(
                 tenantId, assignmentId, callerUserId, "Assignment cancelled");
