@@ -349,23 +349,23 @@ public class ReportService {
                     String.format("Attendance %d-%02d", year, month));
 
             Row metaRow = sheet.createRow(0);
-            metaRow.createCell(0).setCellValue("Exported at");
+            metaRow.createCell(0).setCellValue("Xuất lúc");
             metaRow.createCell(1).setCellValue(OffsetDateTime.now().toString());
-            metaRow.createCell(3).setCellValue("Rows with pending review");
+            metaRow.createCell(3).setCellValue("Số dòng chờ HR duyệt");
             metaRow.createCell(4).setCellValue(rowsWithPendingReview);
-            metaRow.createCell(5).setCellValue("Rows with rejected sessions");
+            metaRow.createCell(5).setCellValue("Số dòng có phiên bị từ chối");
             metaRow.createCell(6).setCellValue(rowsWithRejected);
-            metaRow.createCell(7).setCellValue("Rows with random-check failure");
+            metaRow.createCell(7).setCellValue("Số dòng có kiểm tra ngẫu nhiên thất bại");
             metaRow.createCell(8).setCellValue(rowsWithRandomCheckFailure);
 
             String[] headers = {
-                "Employee Code", "Employee Name", "Site Name", "Year", "Month",
-                "Present Days", "Work Minutes (incl. OT)",
-                "Late Days", "Late Minutes",
-                "Early Leave Days", "Early Leave Minutes",
-                "OT Minutes", "Missing Checkout Days",
-                "Days With Pending Review", "Days With Rejected Session",
-                "Days With Random-Check Failure", "Exceeds Failure Threshold", "Violation Count"
+                "Mã nhân viên", "Họ và tên", "Công trình", "Năm", "Tháng",
+                "Số ngày công", "Tổng phút làm (gồm OT)",
+                "Số ngày đi muộn", "Tổng phút đi muộn",
+                "Số ngày về sớm", "Tổng phút về sớm",
+                "Tổng phút OT", "Số ngày quên check-out",
+                "Số ngày chờ HR duyệt", "Số ngày có phiên bị từ chối",
+                "Số ngày kiểm tra ngẫu nhiên thất bại", "Vượt ngưỡng thất bại", "Số vi phạm"
             };
             Row headerRow = sheet.createRow(1);
             for (int i = 0; i < headers.length; i++) {
@@ -375,7 +375,7 @@ public class ReportService {
             int rowNum = 2;
             for (AttendanceHrMonthlyResponse rec : aggregated) {
                 Row row = sheet.createRow(rowNum++);
-                row.createCell(0).setCellValue(empCodes.getOrDefault(rec.getEmployeeId(), rec.getEmployeeId().toString()));
+                row.createCell(0).setCellValue(empCodes.getOrDefault(rec.getEmployeeId(), "(không rõ)"));
                 row.createCell(1).setCellValue(rec.getEmployeeName() != null ? rec.getEmployeeName() : "");
                 row.createCell(2).setCellValue(rec.getSiteName() != null ? rec.getSiteName() : "");
                 row.createCell(3).setCellValue(rec.getYear());
@@ -399,7 +399,7 @@ public class ReportService {
             // the file themselves before handing it off for payroll — previously the export
             // ended right after the last employee row with no summary.
             Row totalRow = sheet.createRow(rowNum);
-            totalRow.createCell(0).setCellValue("TOTAL");
+            totalRow.createCell(0).setCellValue("TỔNG");
             totalRow.createCell(5).setCellValue(aggregated.stream().mapToInt(AttendanceHrMonthlyResponse::getPresentDays).sum());
             totalRow.createCell(6).setCellValue(aggregated.stream().mapToInt(AttendanceHrMonthlyResponse::getTotalWorkMinutes).sum());
             totalRow.createCell(7).setCellValue(aggregated.stream().mapToInt(AttendanceHrMonthlyResponse::getLateDays).sum());
@@ -827,10 +827,30 @@ public class ReportService {
         try (XSSFWorkbook workbook = new XSSFWorkbook()) {
             Sheet sheet = workbook.createSheet("Violations");
 
+            // Resolve employee / site NAMES once for the whole file — HR reading this file
+            // can't match a UUID against a person (#export-readability).
+            Set<UUID> vEmpIds = all.stream().map(Violation::getEmployeeId).filter(java.util.Objects::nonNull)
+                    .collect(Collectors.toSet());
+            Set<UUID> vSiteIds = all.stream().map(Violation::getSiteId).filter(java.util.Objects::nonNull)
+                    .collect(Collectors.toSet());
+            Map<UUID, String> vEmpNames = vEmpIds.isEmpty() ? Map.of()
+                    : employeeRepository.findAllByTenantIdAndIdInAndDeletedAtIsNull(tenantId, vEmpIds).stream()
+                        .collect(Collectors.toMap(com.fams.modules.employee.entity.Employee::getId,
+                                e -> ((e.getLastName() == null ? "" : e.getLastName()) + " "
+                                        + (e.getFirstName() == null ? "" : e.getFirstName())).trim()));
+            Map<UUID, String> vEmpCodes = vEmpIds.isEmpty() ? Map.of()
+                    : employeeRepository.findAllByTenantIdAndIdInAndDeletedAtIsNull(tenantId, vEmpIds).stream()
+                        .collect(Collectors.toMap(com.fams.modules.employee.entity.Employee::getId,
+                                e -> e.getEmployeeCode() == null ? "" : e.getEmployeeCode()));
+            Map<UUID, String> vSiteNames = vSiteIds.isEmpty() ? Map.of()
+                    : siteRepository.findAllByTenantIdAndIdInAndDeletedAtIsNull(tenantId, vSiteIds).stream()
+                        .collect(Collectors.toMap(com.fams.modules.site.entity.Site::getId,
+                                com.fams.modules.site.entity.Site::getName));
+
             String[] headers = {
-                "ID", "Employee ID", "Site ID", "Violation Type",
-                "Check Date", "Description", "Resolved", "Resolved At",
-                "Affects Attendance", "Employee Note", "Created At"
+                "Mã nhân viên", "Họ và tên", "Công trình", "Loại vi phạm",
+                "Ngày kiểm tra", "Mô tả", "Trạng thái xử lý", "Xử lý lúc",
+                "Ảnh hưởng bảng công", "Giải trình của nhân viên", "Ghi nhận lúc"
             };
             Row headerRow = sheet.createRow(0);
             for (int i = 0; i < headers.length; i++) {
@@ -840,15 +860,16 @@ public class ReportService {
             int rowNum = 1;
             for (Violation v : all) {
                 Row row = sheet.createRow(rowNum++);
-                row.createCell(0).setCellValue(v.getId().toString());
-                row.createCell(1).setCellValue(v.getEmployeeId().toString());
-                row.createCell(2).setCellValue(v.getSiteId() != null ? v.getSiteId().toString() : "");
-                row.createCell(3).setCellValue(v.getViolationType());
+                row.createCell(0).setCellValue(vEmpCodes.getOrDefault(v.getEmployeeId(), ""));
+                row.createCell(1).setCellValue(vEmpNames.getOrDefault(v.getEmployeeId(), "(không rõ)"));
+                row.createCell(2).setCellValue(v.getSiteId() != null
+                        ? vSiteNames.getOrDefault(v.getSiteId(), "(không rõ)") : "");
+                row.createCell(3).setCellValue(violationTypeLabel(v.getViolationType()));
                 row.createCell(4).setCellValue(v.getCheckDate() != null ? v.getCheckDate().toString() : "");
                 row.createCell(5).setCellValue(v.getDescription() != null ? v.getDescription() : "");
-                row.createCell(6).setCellValue(v.isResolved());
+                row.createCell(6).setCellValue(v.isResolved() ? "Đã xử lý" : "Chưa xử lý");
                 row.createCell(7).setCellValue(v.getResolvedAt() != null ? v.getResolvedAt().toString() : "");
-                row.createCell(8).setCellValue(v.isAffectsAttendance());
+                row.createCell(8).setCellValue(v.isAffectsAttendance() ? "Có" : "Không");
                 row.createCell(9).setCellValue(v.getEmployeeNote() != null ? v.getEmployeeNote() : "");
                 row.createCell(10).setCellValue(v.getCreatedAt() != null ? v.getCreatedAt().toString() : "");
             }
@@ -1161,5 +1182,19 @@ public class ReportService {
                 .updatedAt(a.getUpdatedAt())
                 .adjustmentReason(a.getAdjustmentReason())
                 .build();
+    }
+
+    /** Short Vietnamese label for a violation type code, for exports/reports. Unknown codes
+     *  pass through unchanged. */
+    private static String violationTypeLabel(String type) {
+        if (type == null) return "";
+        return switch (type) {
+            case "no_response" -> "Không phản hồi";
+            case "location_fail" -> "Sai vị trí";
+            case "face_fail" -> "Sai khuôn mặt";
+            case "liveness_fail" -> "Sai liveness";
+            case "face_verify_timeout" -> "AI xác minh quá hạn";
+            default -> type;
+        };
     }
 }

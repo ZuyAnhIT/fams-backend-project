@@ -643,7 +643,7 @@ public class EmployeeService {
             Map<String, Integer> colIndex = new HashMap<>();
             for (Cell cell : header) {
                 String name = cell.getStringCellValue().trim().toLowerCase();
-                colIndex.put(name, cell.getColumnIndex());
+                colIndex.putIfAbsent(canonicalImportHeader(name), cell.getColumnIndex());
             }
 
             for (int i = 1; i <= sheet.getLastRowNum(); i++) {
@@ -790,7 +790,7 @@ public class EmployeeService {
 
             Map<String, Integer> colIndex = new HashMap<>();
             for (Cell cell : header) {
-                colIndex.put(cell.getStringCellValue().trim().toLowerCase(), cell.getColumnIndex());
+                colIndex.putIfAbsent(canonicalImportHeader(cell.getStringCellValue().trim().toLowerCase()), cell.getColumnIndex());
             }
 
             Set<String> codesSeenInBatch = new HashSet<>();
@@ -849,6 +849,23 @@ public class EmployeeService {
     }
 
     private static final DataFormatter DATA_FORMATTER = new DataFormatter();
+
+    /** Maps an import-sheet header cell to the canonical English key the parser looks up.
+     *  Accepts both the old English headers and the Vietnamese headers the export now uses
+     *  (#export-readability) so an exported file can be edited and re-imported. */
+    private static String canonicalImportHeader(String rawLowerTrimmed) {
+        return switch (rawLowerTrimmed) {
+            case "mã nhân viên", "mã nv", "ma nhan vien" -> "employeecode";
+            case "tên", "ten" -> "firstname";
+            case "họ và tên đệm", "họ và tên lót", "ho va ten dem" -> "lastname";
+            case "email", "thư điện tử" -> "email";
+            case "số điện thoại", "sđt", "so dien thoai" -> "phone";
+            case "chức vụ", "chuc vu", "vị trí" -> "position";
+            case "phòng ban", "phong ban", "bộ phận" -> "department";
+            case "ngày vào làm", "ngay vao lam", "ngày tuyển" -> "hireddate";
+            default -> rawLowerTrimmed;
+        };
+    }
 
     private String str(Row row, Integer colIdx) {
         if (colIdx == null) return null;
