@@ -1,0 +1,51 @@
+# #19 — "Cần giải thích" không tải được dữ liệu (404 khi tài khoản không có hồ sơ nhân viên)
+
+Ngày: 2026-09-04 · Repo: `fams-backend-project`
+
+## Vấn đề (ảnh người dùng)
+Trang **"Cần tôi giải thích"** (`/customer/exceptions` trên web, tab tương ứng trên app) hiện
+banner đỏ: *"Không thể tải hộp thư — Không tìm thấy dữ liệu yêu cầu."*
+
+Tài khoản trong ảnh là **QA · Quản trị công ty** (TENANT_ADMIN).
+
+## Nguyên nhân
+`GET /api/v1/tenants/{tenantId}/me/exceptions` gộp 2 nguồn:
+- `checkinService.getCheckinHistory(...)` → `resolveEmployee()` → `orElseThrow(ResourceNotFoundException)`
+- `violationService.listMyViolations(...)` → cũng `orElseThrow(ResourceNotFoundException)`
+
+Menu "Cần giải thích" hiển thị cho **mọi thành viên công ty** (tenant_admin, hr_manager,
+supervisor, employee), nhưng **chỉ tài khoản có hồ sơ `employees`** mới có thể có check-in
+`pending_review` hoặc vi phạm. Một tenant_admin / HR / chủ công ty thuần (không phải nhân viên)
+gọi endpoint này → 404 → banner đỏ dead-end trên Web + App.
+
+## Đã sửa
+[MyExceptionsController.java](../../../api-server/src/main/java/com/fams/modules/selfservice/controller/MyExceptionsController.java):
+inject `EmployeeRepository`, kiểm tra `existsByTenantIdAndUserIdAndDeletedAtIsNull` ở đầu
+handler. Nếu người gọi **không có hồ sơ nhân viên** trong công ty → trả **`200` + danh sách
+rỗng** (đúng nghiệp vụ: "bạn không có mục nào cần giải thích"), thay vì 404.
+
+Web/App không cần sửa: trang đã có sẵn trạng thái rỗng *"Không có mục cần giải thích"*.
+
+## Kiểm thử — `tests/selfservice/test_my_exceptions.sh` (6/6 PASS)
+
+```
+--- Test 1: tenant owner WITHOUT an employee profile ---
+PASS: no-profile caller → HTTP 200 (was 404)
+PASS: no-profile caller → empty data array
+
+--- Test 2: real employee still sees their exceptions ---
+PASS: employee caller → HTTP 200
+PASS: employee caller → the seeded violation is listed
+PASS: employee caller → reasonType no_response
+
+--- Test 3: unauthenticated ---
+PASS: no token → HTTP 401
+```
+
+Xác minh thêm bằng dữ liệu seed thật (không sửa DB):
+- `duyanh19102005@gmail.com` (TENANT_ADMIN FOFO, **0 hồ sơ nhân viên**) →
+  `GET /me/exceptions` → `200 {"data":[]}` (trước: 404).
+- `anhtrauluoi@gmail.com` (nhân viên FOFO) → `200` + 1 vi phạm `no_response` chưa xử lý.
+
+Regression: `test_checkin_history.sh` 8/8, `test_employee_explanation.sh` 16/16,
+`test_hr_list_violations.sh` 11/11. `mvn -o compile` OK, `fams-api` restart OK, health UP.
