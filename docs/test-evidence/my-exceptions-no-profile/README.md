@@ -24,7 +24,15 @@ inject `EmployeeRepository`, kiểm tra `existsByTenantIdAndUserIdAndDeletedAtIs
 handler. Nếu người gọi **không có hồ sơ nhân viên** trong công ty → trả **`200` + danh sách
 rỗng** (đúng nghiệp vụ: "bạn không có mục nào cần giải thích"), thay vì 404.
 
-Web/App không cần sửa: trang đã có sẵn trạng thái rỗng *"Không có mục cần giải thích"*.
+### Frontend (phòng thủ 2 lớp — không bắt buộc nhưng theo tiền lệ #14)
+Backend đã trả `200` rỗng nên trang tự hiện trạng thái rỗng. Bổ sung thêm lớp chắn cho các
+nguyên nhân 404 khác (tenantId cũ trong lúc hydrate, backend cũ chưa có bản vá):
+- **Web** [MyExceptionsPage.tsx](../../../../fams-front-web-project/src/features/customer/violation/components/MyExceptionsPage.tsx)
+  + [use-violation.ts](../../../../fams-front-web-project/src/features/customer/violation/hooks/use-violation.ts):
+  404/403 → không hiện banner đỏ "Không thể tải hộp thư", hiện `<Empty>`; không retry.
+- **App** [use-my-exceptions.ts](../../../../fams-front-app-project/src/features/exception/hooks/use-my-exceptions.ts):
+  404 → `isError=false` → màn hình rơi vào `ListEmptyComponent` "Không có mục cần giải thích";
+  không retry 403/404.
 
 ## Kiểm thử — `tests/selfservice/test_my_exceptions.sh` (6/6 PASS)
 
@@ -49,3 +57,7 @@ Xác minh thêm bằng dữ liệu seed thật (không sửa DB):
 
 Regression: `test_checkin_history.sh` 8/8, `test_employee_explanation.sh` 16/16,
 `test_hr_list_violations.sh` 11/11. `mvn -o compile` OK, `fams-api` restart OK, health UP.
+
+Web E2E: `fams-front-web-project/tests/e2e/my-exceptions-no-profile.spec.ts` — PASS
+(TENANT_ADMIN FOFO không hồ sơ → thấy "Không có mục cần giải thích", không có banner đỏ).
+Ảnh `web-no-profile.png`. `tsc` + `eslint` (web + app) sạch.
