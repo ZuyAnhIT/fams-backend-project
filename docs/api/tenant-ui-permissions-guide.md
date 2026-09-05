@@ -34,7 +34,8 @@ Ký hiệu: **Full** = thao tác đầy đủ · **View** = chỉ xem/đọc · 
 | IP whitelist — xem/sửa | `GET/POST/PATCH/DELETE .../ip-whitelists` | Full, nhưng **ẩn mặc định** (xem mục 4.4) | Full | Ẩn | Ẩn |
 | Quản lý **định nghĩa** gói dịch vụ (trial/basic/pro/enterprise) | `POST/PATCH /plans`, `/plans/{id}/limits` | Full | Ẩn hoàn toàn | Ẩn | Ẩn |
 | Xem danh sách gói (để tham khảo) | `GET /plans` | Full | View (màn "So sánh gói") | Ẩn | Ẩn |
-| Gán/đổi subscription cho 1 tenant | `PATCH /tenants/{id}/subscription` | Full | Ẩn — thay bằng nút "Liên hệ nâng cấp" (chưa có thanh toán online) | Ẩn | Ẩn |
+| Gán/đổi subscription thủ công | `PATCH /tenants/{id}/subscription` | Full | Ẩn — Owner dùng luồng billing PayOS | Ẩn | Ẩn |
+| Mua/gia hạn gói qua PayOS | `POST/GET /tenants/{id}/billing-orders` | Xem/đối soát | Full — chỉ Owner | Ẩn | Ẩn |
 | Tạm dừng / Hủy tenant | `POST .../suspend`, `/reactivate`, `/cancel` | Full | Ẩn | Ẩn | Ẩn |
 
 ## 3. Chi tiết ẩn/hiện theo từng tính năng
@@ -70,7 +71,7 @@ Ký hiệu: **Full** = thao tác đầy đủ · **View** = chỉ xem/đọc · 
 Đây là tính năng **duy nhất trong 6 tính năng hoàn toàn thuộc Admin Console**, Company Portal chỉ có phần đọc:
 
 - **Định nghĩa gói** (tạo/sửa trial/basic/pro/enterprise, đặt `maxEmployees`/`maxSites`/`maxStorageGb`/`maxRandomChecksPerMonth`): chỉ Platform Admin, chỉ Admin Console. Owner **không bao giờ** thấy màn này — họ không được tự định nghĩa gói cho chính mình.
-- **Gán/đổi gói cho 1 tenant cụ thể** (`PATCH .../subscription`): chỉ Platform Admin, chỉ Admin Console — vì hệ thống **chưa có thanh toán online**. Company Portal phía owner nếu muốn hiện nút "Nâng cấp gói", nút đó **không được gọi PATCH trực tiếp** (owner không có quyền) — nên dẫn tới form liên hệ/yêu cầu nâng cấp (gửi email/ticket cho FAMS xử lý thủ công), đúng tinh thần "sau này làm thanh toán có thể tạm để lại" đã chốt.
+- **Gán/đổi gói thủ công** (`PATCH .../subscription`) vẫn chỉ dành cho Platform Admin để xử lý ngoại lệ. Owner mua/gia hạn qua `POST .../billing-orders`; subscription chỉ được cập nhật sau webhook PayOS đã xác minh hoặc kết quả đối soát trực tiếp với PayOS.
 - **Xem gói + mức sử dụng hiện tại của công ty mình** (`GET /tenants/{id}/detail`, mới mở 24/07/2026): Owner xem được ngay trong Company Portal — dựng màn "Gói dịch vụ & Mức sử dụng" hiển thị tên gói, giới hạn (`maxEmployees`/`maxSites`/`maxStorageGb`/`maxRandomChecksPerMonth`), và số đã dùng hiện tại (`currentEmployeeCount`/`currentSiteCount`/`currentMonthRandomChecks`). `max* = null` → hiển thị "Không giới hạn".
 - Nhân viên thường trong tenant: **không** thấy màn "Gói dịch vụ" — đây là thông tin billing, chỉ owner cần.
 
@@ -93,7 +94,7 @@ COMPANY PORTAL (fams-front-web-project, sau khi đăng nhập + chọn tenant)
 ├── [Chỉ Owner] Hồ sơ công ty     (xem + sửa)
 ├── [Chỉ Owner] Cấu hình giao diện & định dạng (xem + sửa)
 ├── [Chỉ Owner] Bảo mật → IP whitelist (xem + sửa, kèm cảnh báo tự khóa)
-├── [Chỉ Owner] Gói dịch vụ & Mức sử dụng (xem + nút "Liên hệ nâng cấp")
+├── [Chỉ Owner] Gói dịch vụ & Mức sử dụng (xem + thanh toán PayOS + lịch sử)
 └── [Ai cũng tạo được] "+ Tạo công ty mới" (self-service, không có field owner/plan)
 
 MOBILE APP (fams-front-app-project)
@@ -109,10 +110,10 @@ MOBILE APP (fams-front-app-project)
 - [ ] Dashboard chung của Company Portal gọi `GET /tenants/{id}/settings` 1 lần lúc vào (không phải chỉ màn cấu hình) để áp `dateFormat`/`timeFormat`/màu brand toàn app — áp dụng cho **mọi vai trò**, không riêng owner.
 - [ ] Màn "Gói dịch vụ & Mức sử dụng" phía owner dùng `GET /tenants/{id}/detail` (không phải `GET .../subscription` — endpoint đó thiếu số liệu usage).
 - [ ] IP whitelist: hiện rõ cảnh báo + xử lý message lỗi tự khóa nguyên văn từ backend (mục 3.4).
-- [ ] Nút "Nâng cấp gói" ở Company Portal chỉ là link liên hệ/tạo yêu cầu — không gọi thẳng API subscription (owner sẽ nhận `403`).
+- [ ] Nút "Nâng cấp/gia hạn" tạo billing order và mở `checkoutUrl`; tuyệt đối không gọi thẳng API quản trị subscription.
 
 ## 6. Khoảng trống & việc cần bàn thêm (chưa nằm trong scope hiện tại)
 
 - **`maxStorageGb` chưa được enforce ở backend** — dựng UI hiển thị giới hạn này là được (đọc từ API bình thường), nhưng **đừng dựa vào nó để tự tin rằng hệ thống sẽ chặn khi khách vượt dung lượng** — hiện tại không có gì chặn cả. Xem chi tiết kỹ thuật ở `tenant-api.md` mục 3.6.
 - **Mobile App hiện chưa đọc `dateFormat`/`timeFormat`/màu brand của công ty** — API `GET /tenants/{id}/settings` đã mở cho mọi thành viên tenant (không chỉ owner) nên về mặt quyền, app gọi được ngay nếu sau này cần đồng bộ giao diện app theo từng công ty. Đây là quyết định sản phẩm cần bạn xác nhận, không tự ý thêm vào scope app.
-- **Owner hiện chưa có nút tự nâng cấp gói** (chỉ có "liên hệ") — đúng như đã chốt, chờ tính năng thanh toán online sau này mới mở nút tự đăng ký gói trực tiếp trong Company Portal.
+- Owner đã có luồng tự mua/gia hạn qua PayOS. Phạm vi MVP chưa gồm tự động trừ tiền định kỳ, prorate, hoàn tiền và hóa đơn điện tử.

@@ -36,7 +36,8 @@ public class UpdateSiteRequest {
     @DecimalMax(value = "180.0",  message = "Longitude must be between -180 and 180")
     private Double longitude;
 
-    @Schema(description = "New IANA timezone name", example = "Asia/Bangkok")
+    @Schema(description = "Vietnam business timezone (fixed)", example = "Asia/Ho_Chi_Minh",
+            allowableValues = {"Asia/Ho_Chi_Minh"})
     @Size(max = 50, message = "Timezone must be 50 characters or fewer")
     private String timezone;
 

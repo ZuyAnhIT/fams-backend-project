@@ -78,6 +78,20 @@ public class CheckinController {
     }
 
     @Operation(
+        summary = "Get the employee's current open check-in session",
+        description = "Canonical source for both Home and Check-in screens. A session past its "
+                + "snapshotted checkout cutoff is logically closed as missing_checkout and is not returned."
+    )
+    @PreAuthorize("hasAuthority('checkins:read')")
+    @GetMapping("/open-session")
+    public ResponseEntity<ApiResponse<CheckinResponse>> getOpenSession(
+            @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
+            @AuthenticationPrincipal FamsUserDetails userDetails) {
+        return ResponseEntity.ok(ApiResponse.success(
+                checkinService.getOpenSession(tenantId, userDetails.getUserId())));
+    }
+
+    @Operation(
         summary = "Submit GPS check-in",
         description = "Records a check-in for the authenticated employee at the specified site using GPS coordinates. " +
                       "The employee must have an active assignment at the site today. " +

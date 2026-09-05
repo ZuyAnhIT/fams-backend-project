@@ -178,6 +178,9 @@ public interface AssignmentRepository extends JpaRepository<Assignment, UUID>,
      *  single shift, without a separate exists-check query. */
     long countByShiftId(UUID shiftId);
 
+    List<Assignment> findByTenantIdAndShiftIdAndStatusAndDeletedAtIsNull(
+            UUID tenantId, UUID shiftId, String status);
+
     /** Batch variant for listShifts — avoids one count query per row in the page. */
     @Query("SELECT a.shiftId AS shiftId, COUNT(a) AS cnt FROM Assignment a "
             + "WHERE a.shiftId IN :shiftIds GROUP BY a.shiftId")

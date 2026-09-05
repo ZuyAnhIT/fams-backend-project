@@ -73,6 +73,12 @@ public class ShiftResponse {
             allowableValues = {"gps_only", "gps_face", "gps_face_liveness"})
     private String checkinPolicyOverride;
 
+    @Schema(description = "inherit, enabled, or disabled for automatic random checks")
+    private String randomCheckPolicy;
+
+    @Schema(description = "inherit, enabled, or disabled for immediate manual checks")
+    private String manualCheckPolicy;
+
     @Schema(description = "Number of assignments (active or historical) that have ever referenced this shift.", example = "0")
     private long assignmentHistoryCount;
 

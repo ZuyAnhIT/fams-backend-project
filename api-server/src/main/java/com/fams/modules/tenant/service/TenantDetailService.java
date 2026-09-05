@@ -104,6 +104,7 @@ public class TenantDetailService {
                 .ownerId(tenant.getOwnerId())
                 .createdAt(tenant.getCreatedAt())
                 // Subscription
+                .planId(plan != null ? plan.getId() : null)
                 .planName(plan != null ? plan.getName() : null)
                 .planDisplayName(plan != null ? plan.getDisplayName() : null)
                 .subscriptionStatus(sub != null ? sub.getStatus() : null)

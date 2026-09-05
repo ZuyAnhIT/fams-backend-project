@@ -2,6 +2,8 @@ package com.fams.modules.shift.service;
 
 import com.fams.modules.audit.service.AuditLogService;
 import com.fams.modules.rbac.repository.UserRoleRepository;
+import com.fams.modules.randomcheck.service.RandomCheckConfigService;
+import com.fams.modules.randomcheck.service.ScheduledCheckGeneratorService;
 import com.fams.modules.shift.dto.request.ConfigureShiftOtRequest;
 import com.fams.modules.shift.dto.request.CreateShiftRequest;
 import com.fams.modules.shift.dto.request.UpdateShiftRequest;
@@ -10,6 +12,7 @@ import com.fams.modules.shift.entity.Shift;
 import com.fams.modules.shift.repository.ShiftRepository;
 import com.fams.modules.shift.specification.ShiftSpecification;
 import com.fams.modules.assignment.repository.AssignmentRepository;
+import com.fams.modules.assignment.service.AssignmentService;
 import com.fams.modules.site.repository.SiteRepository;
 import com.fams.modules.tenant.repository.TenantRepository;
 import com.fams.shared.exception.DuplicateResourceException;
@@ -30,8 +33,10 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.time.OffsetDateTime;
 
 @Slf4j
 @Service
@@ -42,20 +47,29 @@ public class ShiftService {
     private final TenantRepository tenantRepository;
     private final UserRoleRepository userRoleRepository;
     private final AssignmentRepository assignmentRepository;
+    private final AssignmentService assignmentService;
     private final AuditLogService auditLogService;
+    private final RandomCheckConfigService randomCheckConfigService;
+    private final ScheduledCheckGeneratorService scheduledCheckGeneratorService;
 
     public ShiftService(ShiftRepository shiftRepository,
                         SiteRepository siteRepository,
                         TenantRepository tenantRepository,
                         UserRoleRepository userRoleRepository,
                         AssignmentRepository assignmentRepository,
-                        AuditLogService auditLogService) {
+                        AssignmentService assignmentService,
+                        AuditLogService auditLogService,
+                        RandomCheckConfigService randomCheckConfigService,
+                        ScheduledCheckGeneratorService scheduledCheckGeneratorService) {
         this.shiftRepository = shiftRepository;
         this.siteRepository = siteRepository;
         this.tenantRepository = tenantRepository;
         this.userRoleRepository = userRoleRepository;
         this.assignmentRepository = assignmentRepository;
+        this.assignmentService = assignmentService;
         this.auditLogService = auditLogService;
+        this.randomCheckConfigService = randomCheckConfigService;
+        this.scheduledCheckGeneratorService = scheduledCheckGeneratorService;
     }
 
     private void clearExistingDefaultShift(UUID siteId) {
@@ -79,6 +93,8 @@ public class ShiftService {
         map.put("graceMinutes", s.getGraceMinutes());
         map.put("maxOtMinutesPerDay", s.getMaxOtMinutesPerDay());
         map.put("maxOtMinutesPerWeek", s.getMaxOtMinutesPerWeek());
+        map.put("randomCheckPolicy", s.getRandomCheckPolicy());
+        map.put("manualCheckPolicy", s.getManualCheckPolicy());
         map.put("status", s.getStatus());
         map.put("isDefault", s.isDefault());
         return map;
@@ -142,11 +158,14 @@ public class ShiftService {
                 .allowOvernight(request.isAllowOvernight())
                 .status("active")
                 .checkinPolicyOverride(request.getCheckinPolicyOverride())
+                .randomCheckPolicy(request.getRandomCheckPolicy())
+                .manualCheckPolicy(request.getManualCheckPolicy())
                 .isDefault(request.isDefaultShift())
                 .graceMinutes(request.getGraceMinutes())
                 .createdBy(callerUserId)
                 .build();
 
+        randomCheckConfigService.assertShiftCompatible(tenantId, shift);
         shiftRepository.save(shift);
         log.info("Shift created: id={} siteId={} tenantId={} by={}", shift.getId(), siteId, tenantId, callerUserId);
         recordAudit(tenantId, callerUserId, shift.getId(), "shift_created", null, shiftAuditSnapshot(shift));
@@ -208,6 +227,14 @@ public class ShiftService {
             shift.setMaxOtMinutesPerWeek(null);
         }
 
+        // OT must always have a finite positive checkout window. An unlimited open session
+        // would recreate the exact stale "still working" state this setting is meant to avoid;
+        // zero minutes would advertise OT while closing it at the scheduled shift end.
+        if (shift.isAllowOvertime() && shift.getLateCheckoutMinutes() <= 0) {
+            throw new IllegalArgumentException(
+                    "lateCheckoutMinutes must be greater than 0 when allowOvertime is true");
+        }
+
         shiftRepository.save(shift);
         log.info("Shift OT configured: shiftId={} siteId={} tenantId={} by={}", shiftId, siteId, tenantId, callerUserId);
         recordAudit(tenantId, callerUserId, shiftId, "shift_ot_configured", before, shiftAuditSnapshot(shift));
@@ -237,6 +264,9 @@ public class ShiftService {
                 .orElseThrow(() -> new ResourceNotFoundException("Shift not found: " + shiftId));
 
         Map<String, Object> before = shiftAuditSnapshot(shift);
+        java.time.LocalTime previousStartTime = shift.getStartTime();
+        java.time.LocalTime previousEndTime = shift.getEndTime();
+        boolean previousAllowOvernight = shift.isAllowOvernight();
 
         if (StringUtils.hasText(request.getName())) {
             String newName = request.getName().trim();
@@ -259,6 +289,12 @@ public class ShiftService {
             validateCheckinPolicy(request.getCheckinPolicyOverride());
             shift.setCheckinPolicyOverride(request.getCheckinPolicyOverride());
         }
+        if (request.getRandomCheckPolicy() != null) {
+            shift.setRandomCheckPolicy(request.getRandomCheckPolicy());
+        }
+        if (request.getManualCheckPolicy() != null) {
+            shift.setManualCheckPolicy(request.getManualCheckPolicy());
+        }
 
         if (request.getDefaultShift() != null) {
             if (request.getDefaultShift() && !shift.isDefault()) {
@@ -269,7 +305,19 @@ public class ShiftService {
 
         validateShiftTimes(shift.getStartTime(), shift.getEndTime(), shift.isAllowOvernight());
 
+        boolean scheduleChanged = !Objects.equals(previousStartTime, shift.getStartTime())
+                || !Objects.equals(previousEndTime, shift.getEndTime())
+                || previousAllowOvernight != shift.isAllowOvernight();
+        if (scheduleChanged) {
+            assignmentService.assertShiftUpdateKeepsAssignmentsConflictFree(tenantId, shiftId);
+        }
+
+        randomCheckConfigService.assertShiftCompatible(tenantId, shift);
         shiftRepository.save(shift);
+        if (scheduleChanged) {
+            scheduledCheckGeneratorService.rescheduleCurrentDateForShift(
+                    tenantId, shiftId, OffsetDateTime.now());
+        }
         log.info("Shift updated: id={} siteId={} tenantId={} by={}", shiftId, siteId, tenantId, callerUserId);
         recordAudit(tenantId, callerUserId, shiftId, "shift_updated", before, shiftAuditSnapshot(shift));
         return toResponse(shift);
@@ -405,6 +453,8 @@ public class ShiftService {
                 .status(s.getStatus())
                 .defaultShift(s.isDefault())
                 .checkinPolicyOverride(s.getCheckinPolicyOverride())
+                .randomCheckPolicy(s.getRandomCheckPolicy())
+                .manualCheckPolicy(s.getManualCheckPolicy())
                 .assignmentHistoryCount(assignmentHistoryCount)
                 .canDelete(assignmentHistoryCount == 0)
                 .createdBy(s.getCreatedBy())

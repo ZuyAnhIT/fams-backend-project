@@ -18,6 +18,7 @@ import com.fams.modules.tenant.repository.TenantRepository;
 import com.fams.shared.exception.DuplicateResourceException;
 import com.fams.shared.exception.ResourceNotFoundException;
 import com.fams.shared.pagination.PageResponse;
+import com.fams.shared.time.VietnamTime;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -142,7 +143,7 @@ public class SiteService {
         }
 
         String timezone = StringUtils.hasText(request.getTimezone())
-                ? request.getTimezone().trim() : "UTC";
+                ? request.getTimezone().trim() : VietnamTime.ID;
         validateTimezone(timezone);
 
         String checkinPolicy = StringUtils.hasText(request.getCheckinPolicy())
@@ -281,16 +282,12 @@ public class SiteService {
         return toResponse(site);
     }
 
-    /** {@code @Size} alone lets garbage like "Whatever" through — every downstream consumer
-     *  (check-in early/late windows, attendance summary, cross-site conflict math) does
-     *  {@code ZoneId.of(site.getTimezone())} and would blow up with a raw 500 at check-in time,
-     *  long after the typo was saved. Validate it's a real IANA zone ID up front instead. */
+    /** FAMS currently operates only in Vietnam. Rejecting another zone at the write boundary
+     * prevents one site from calculating a different business date/shift window. */
     private void validateTimezone(String timezone) {
-        try {
-            java.time.ZoneId.of(timezone);
-        } catch (java.time.DateTimeException e) {
+        if (!VietnamTime.ID.equals(timezone)) {
             throw new IllegalArgumentException(
-                    "'" + timezone + "' is not a valid IANA timezone name (e.g. 'Asia/Ho_Chi_Minh', 'UTC')");
+                    "Hệ thống hiện chỉ hỗ trợ múi giờ " + VietnamTime.ID + ".");
         }
     }
 

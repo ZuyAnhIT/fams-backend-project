@@ -7,6 +7,8 @@ set -uo pipefail
 BASE_URL="${BASE_URL:-http://localhost:8080}"
 PASS=0
 FAIL=0
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/../lib/test_helpers.sh"
 
 run_test() {
     local name="$1"
@@ -77,15 +79,24 @@ else
     FAIL=$((FAIL + 1))
 fi
 
-# ─── Setup: Create a tenant and assign admin a role ───────────────────────────
+# ─── Setup: Create a separate company owner ───────────────────────────────────
 echo ""
-echo "--- Setup: Create tenant + assign role to admin ---"
+echo "--- Setup: Create tenant with a non-platform owner ---"
 TS=$(date +%s)
+OWNER_EMAIL="myroles_${TS}_$$@example.com"
+OWNER_TOKEN=$(register_verified_test_user_token "$BASE_URL" "My Roles Owner" "$OWNER_EMAIL")
+OWNER_USER_ID=$(echo "$OWNER_TOKEN" | cut -d'.' -f2 | tr '_-' '/+' | awk '{l=length($0)%4; if(l==2)$0=$0"=="; if(l==3)$0=$0"="; print}' | \
+    base64 -d 2>/dev/null | grep -o '"sub":"[^"]*"' | cut -d'"' -f4 || true)
+if [ -z "$OWNER_TOKEN" ] || [ -z "$OWNER_USER_ID" ]; then
+    echo "SETUP FAILED: Could not create regular company owner"
+    exit 1
+fi
+
 t_resp=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/tenants" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"name\":\"MyRoles Corp\",\"slug\":\"my-roles-$TS\",\"ownerEmail\":\"admin@fams.com\"}")
+    -d "{\"name\":\"MyRoles Corp\",\"slug\":\"my-roles-$TS-$$\",\"ownerEmail\":\"$OWNER_EMAIL\"}")
 t_body=$(echo "$t_resp" | head -n -1)
 t_status=$(echo "$t_resp" | tail -n 1)
 if [ "$t_status" -ne 201 ]; then
@@ -95,7 +106,7 @@ fi
 TENANT_ID=$(echo "$t_body" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 echo "Tenant: $TENANT_ID"
 
-# Get a role id with known permissions (TENANT_ADMIN or HR_MANAGER)
+# Get a company role and verify that it cannot be assigned to Platform Admin.
 roles_resp=$(curl -s \
     -X GET "$BASE_URL/api/v1/roles?isSystem=true&search=TENANT_ADMIN" \
     -H "Authorization: Bearer $ADMIN_TOKEN")
@@ -122,18 +133,20 @@ assign_resp=$(curl -s -w "\n%{http_code}" \
     -H "Authorization: Bearer $ADMIN_TOKEN" \
     -d "{\"userId\":\"$ADMIN_USER_ID\",\"roleId\":\"$ROLE_ID\",\"tenantId\":\"$TENANT_ID\"}")
 assign_status=$(echo "$assign_resp" | tail -n 1)
-if [ "$assign_status" -ne 201 ] && [ "$assign_status" -ne 409 ]; then
-    echo "SETUP FAILED: Could not assign role (HTTP $assign_status)"
-    exit 1
+if [ "$assign_status" -eq 400 ]; then
+    echo "PASS: Platform Admin cannot receive a company role (HTTP 400)"
+    PASS=$((PASS + 1))
+else
+    echo "FAIL: expected Platform Admin role assignment to return HTTP 400, got $assign_status"
+    FAIL=$((FAIL + 1))
 fi
-echo "Role assigned."
 echo ""
 
 # ─── Test 3: After role assignment — returns the role with permissions ─────────
 echo "--- Test 3: Response contains role assignment with permissions ---"
 me2_resp=$(curl -s -w "\n%{http_code}" \
     -X GET "$ME_URL" \
-    -H "Authorization: Bearer $ADMIN_TOKEN")
+    -H "Authorization: Bearer $OWNER_TOKEN")
 me2_body=$(echo "$me2_resp" | head -n -1)
 me2_status=$(echo "$me2_resp" | tail -n 1)
 
@@ -209,16 +222,15 @@ else
     FAIL=$((FAIL + 1))
 fi
 
-# ─── Cleanup: Revoke the test role assignment ──────────────────────────────────
+# ─── Cleanup: archive the disposable tenant/user created by this test ──────────
 echo ""
-echo "--- Cleanup: Revoke test role ---"
-ASSIGN_ID=$(echo "$me2_body" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4 || true)
-if [ -n "$ASSIGN_ID" ]; then
-    revoke_status=$(curl -s -o /dev/null -w "%{http_code}" \
-        -X DELETE "$BASE_URL/api/v1/user-roles/$ASSIGN_ID" \
-        -H "Authorization: Bearer $ADMIN_TOKEN" || true)
-    echo "Revoke HTTP: $revoke_status"
-fi
+echo "--- Cleanup: Archive disposable fixtures ---"
+docker exec fams-postgres psql -U fams_user -d fams_db -q \
+    -c "UPDATE user_roles SET deleted_at = COALESCE(deleted_at, NOW()) WHERE tenant_id = '$TENANT_ID'::uuid;
+     UPDATE tenants SET status = 'cancelled', deleted_at = COALESCE(deleted_at, NOW()) WHERE id = '$TENANT_ID'::uuid;
+     UPDATE refresh_tokens SET revoked_at = COALESCE(revoked_at, NOW()) WHERE user_id = '$OWNER_USER_ID'::uuid;
+     UPDATE users SET is_active = false, deleted_at = COALESCE(deleted_at, NOW()) WHERE id = '$OWNER_USER_ID'::uuid;" \
+    >/dev/null
 
 echo ""
 echo "=== Results ==="

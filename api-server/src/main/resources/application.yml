@@ -2,6 +2,9 @@ spring:
   application:
     name: fams-api-server
 
+  jackson:
+    time-zone: Asia/Ho_Chi_Minh
+
   profiles:
     active: ${SPRING_PROFILES_ACTIVE:dev}
 
@@ -127,6 +130,13 @@ app:
     # never touch this HTTP endpoint; it exists only for a genuinely external caller (separate
     # process/service), which previously had zero authentication.
     internal-secret: ${NOTIFICATIONS_INTERNAL_SECRET}
+  billing:
+    payment-link-expiry-minutes: ${PAYOS_PAYMENT_LINK_EXPIRY_MINUTES:30}
+    reconciliation-delay-ms: ${PAYOS_RECONCILIATION_DELAY_MS:300000}
+    payos:
+      client-id: ${PAYOS_CLIENT_ID:}
+      api-key: ${PAYOS_API_KEY:}
+      checksum-key: ${PAYOS_CHECKSUM_KEY:}
   data-retention:
     delivery-log-days: ${DATA_RETENTION_DELIVERY_LOG_DAYS:30}
     notification-days: ${DATA_RETENTION_NOTIFICATION_DAYS:90}

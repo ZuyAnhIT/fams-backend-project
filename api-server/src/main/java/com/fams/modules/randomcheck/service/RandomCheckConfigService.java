@@ -22,6 +22,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalTime;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
@@ -35,6 +38,9 @@ import java.util.stream.Collectors;
 @Slf4j
 @Service
 public class RandomCheckConfigService {
+
+    private static final LocalTime DEFAULT_ALLOWED_START = LocalTime.of(8, 0);
+    private static final LocalTime DEFAULT_ALLOWED_END = LocalTime.of(17, 0);
 
     private static final String PERM_CONFIGURE = "randomchecks:configure";
 
@@ -65,8 +71,14 @@ public class RandomCheckConfigService {
                                                          UUID callerId,
                                                          boolean callerIsPlatformAdmin) {
         checkPermission(callerId, tenantId, callerIsPlatformAdmin);
-        validateSchedulingFields(req.getAllowedStartTime(), req.getAllowedEndTime(),
+        LocalTime storedStart = req.getAllowedStartTime() != null
+                ? req.getAllowedStartTime() : DEFAULT_ALLOWED_START;
+        LocalTime storedEnd = req.getAllowedEndTime() != null
+                ? req.getAllowedEndTime() : DEFAULT_ALLOWED_END;
+        validateSchedulingFields(req.getWindowMode(), req.getAllowedStartTime(), req.getAllowedEndTime(),
                 req.getChecksPerShift(), req.getMinIntervalMinutes());
+        validateShiftCoverage(tenantId, null, req.getWindowMode(), storedStart,
+                storedEnd, req.getChecksPerShift(), req.getMinIntervalMinutes());
 
         if (configRepository.existsByTenantIdAndSiteIdIsNullAndDeletedAtIsNull(tenantId)) {
             throw new DuplicateResourceException(
@@ -78,14 +90,16 @@ public class RandomCheckConfigService {
                 .siteId(null)
                 .checksPerShift(req.getChecksPerShift())
                 .minIntervalMinutes(req.getMinIntervalMinutes())
-                .allowedStartTime(req.getAllowedStartTime())
-                .allowedEndTime(req.getAllowedEndTime())
+                .allowedStartTime(storedStart)
+                .allowedEndTime(storedEnd)
+                .windowMode(req.getWindowMode())
                 .checkMode(req.getCheckMode())
                 .applicableRoles(toRolesString(req.getApplicableRoles()))
                 .responseWindowSeconds(req.getResponseWindowSeconds())
                 .failureEscalationThreshold(
                         req.getFailureEscalationThreshold() != null ? req.getFailureEscalationThreshold() : 0)
                 .isActive(true)
+                .manualChecksAllowed(!Boolean.FALSE.equals(req.getManualChecksAllowed()))
                 .createdBy(callerId)
                 .build();
 
@@ -105,12 +119,17 @@ public class RandomCheckConfigService {
                                                         UUID callerId, boolean callerIsPlatformAdmin) {
         checkPermission(callerId, tenantId, callerIsPlatformAdmin);
         assertSiteInScope(callerId, tenantId, siteId, callerIsPlatformAdmin);
-        validateSchedulingFields(req.getAllowedStartTime(), req.getAllowedEndTime(),
+        LocalTime storedStart = req.getAllowedStartTime() != null
+                ? req.getAllowedStartTime() : DEFAULT_ALLOWED_START;
+        LocalTime storedEnd = req.getAllowedEndTime() != null
+                ? req.getAllowedEndTime() : DEFAULT_ALLOWED_END;
+        validateSchedulingFields(req.getWindowMode(), req.getAllowedStartTime(), req.getAllowedEndTime(),
                 req.getChecksPerShift(), req.getMinIntervalMinutes());
 
         siteRepository.findByIdAndTenantIdAndDeletedAtIsNull(siteId, tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Site not found: " + siteId));
-        validateOverlapsSiteShifts(tenantId, siteId, req.getAllowedStartTime(), req.getAllowedEndTime());
+        validateShiftCoverage(tenantId, siteId, req.getWindowMode(), storedStart,
+                storedEnd, req.getChecksPerShift(), req.getMinIntervalMinutes());
 
         if (configRepository.findBySite(tenantId, siteId).isPresent()) {
             throw new DuplicateResourceException(
@@ -122,14 +141,16 @@ public class RandomCheckConfigService {
                 .siteId(siteId)
                 .checksPerShift(req.getChecksPerShift())
                 .minIntervalMinutes(req.getMinIntervalMinutes())
-                .allowedStartTime(req.getAllowedStartTime())
-                .allowedEndTime(req.getAllowedEndTime())
+                .allowedStartTime(storedStart)
+                .allowedEndTime(storedEnd)
+                .windowMode(req.getWindowMode())
                 .checkMode(req.getCheckMode())
                 .applicableRoles(toRolesString(req.getApplicableRoles()))
                 .responseWindowSeconds(req.getResponseWindowSeconds())
                 .failureEscalationThreshold(
                         req.getFailureEscalationThreshold() != null ? req.getFailureEscalationThreshold() : 0)
                 .isActive(true)
+                .manualChecksAllowed(!Boolean.FALSE.equals(req.getManualChecksAllowed()))
                 .createdBy(callerId)
                 .build();
 
@@ -161,7 +182,8 @@ public class RandomCheckConfigService {
 
     /**
      * Returns whichever config would actually be applied to this site right now — site override
-     * if one exists (and is active), else the tenant default — the exact same resolution order
+     * if one exists (including an inactive override that explicitly disables the site), else the
+     * tenant default — the exact same resolution order
      * used by ScheduledCheckGeneratorService/ManualCheckService at dispatch time. Added because
      * previously a caller had to GET the site override (handling its 404), then separately GET
      * the tenant default, and replicate this fallback client-side to answer "what config applies
@@ -235,8 +257,10 @@ public class RandomCheckConfigService {
         LocalTime effectiveEnd   = req.getAllowedEndTime()   != null ? req.getAllowedEndTime()   : config.getAllowedEndTime();
         int effectiveChecks   = req.getChecksPerShift()      != null ? req.getChecksPerShift()      : config.getChecksPerShift();
         int effectiveInterval = req.getMinIntervalMinutes()  != null ? req.getMinIntervalMinutes()  : config.getMinIntervalMinutes();
-        validateSchedulingFields(effectiveStart, effectiveEnd, effectiveChecks, effectiveInterval);
-        validateOverlapsSiteShifts(tenantId, config.getSiteId(), effectiveStart, effectiveEnd);
+        String effectiveWindowMode = req.getWindowMode() != null ? req.getWindowMode() : config.getWindowMode();
+        validateSchedulingFields(effectiveWindowMode, effectiveStart, effectiveEnd, effectiveChecks, effectiveInterval);
+        validateShiftCoverage(tenantId, config.getSiteId(), effectiveWindowMode, effectiveStart,
+                effectiveEnd, effectiveChecks, effectiveInterval);
 
         Map<String, Object> oldValue = configSnapshot(config);
 
@@ -244,11 +268,13 @@ public class RandomCheckConfigService {
         if (req.getMinIntervalMinutes() != null) config.setMinIntervalMinutes(req.getMinIntervalMinutes());
         if (req.getAllowedStartTime() != null) config.setAllowedStartTime(req.getAllowedStartTime());
         if (req.getAllowedEndTime() != null) config.setAllowedEndTime(req.getAllowedEndTime());
+        if (req.getWindowMode() != null) config.setWindowMode(req.getWindowMode());
         if (req.getCheckMode() != null) config.setCheckMode(req.getCheckMode());
         if (req.getApplicableRoles() != null) config.setApplicableRoles(toRolesString(req.getApplicableRoles()));
         if (req.getResponseWindowSeconds() != null) config.setResponseWindowSeconds(req.getResponseWindowSeconds());
         if (req.getIsActive() != null) config.setActive(req.getIsActive());
         if (req.getFailureEscalationThreshold() != null) config.setFailureEscalationThreshold(req.getFailureEscalationThreshold());
+        if (req.getManualChecksAllowed() != null) config.setManualChecksAllowed(req.getManualChecksAllowed());
 
         config = configRepository.save(config);
         log.info("Updated random check config id={} tenantId={} updatedBy={}", configId, tenantId, callerId);
@@ -325,13 +351,17 @@ public class RandomCheckConfigService {
                 HttpRequestUtils.currentRequestId(), null, null);
     }
 
-    private void validateSchedulingFields(LocalTime startTime, LocalTime endTime,
+    private void validateSchedulingFields(String windowMode, LocalTime startTime, LocalTime endTime,
                                           int checksPerShift, int minIntervalMinutes) {
-        if (!endTime.isAfter(startTime)) {
-            throw new IllegalArgumentException(
-                    "allowed_end_time must be after allowed_start_time");
+        if (!"full_shift".equals(windowMode) && !"custom_window".equals(windowMode)) {
+            throw new IllegalArgumentException("window_mode must be full_shift or custom_window");
         }
-        long windowMinutes = java.time.Duration.between(startTime, endTime).toMinutes();
+        if ("full_shift".equals(windowMode)) return;
+        if (startTime == null || endTime == null) {
+            throw new IllegalArgumentException(
+                    "custom_window requires both allowed_start_time and allowed_end_time");
+        }
+        long windowMinutes = minutesBetweenPossiblyOvernight(startTime, endTime);
         // checks_per_shift checks need (checks_per_shift - 1) intervals between them
         long minWindowNeeded = (long) (checksPerShift - 1) * minIntervalMinutes;
         if (minIntervalMinutes > 0 && checksPerShift > 1 && windowMinutes < minWindowNeeded) {
@@ -341,51 +371,80 @@ public class RandomCheckConfigService {
         }
     }
 
-    /** Found via support case (2026-08-22): a tenant set a site's random-check window to
-     *  15:00-17:00 while the site's only shift ran 14:25-14:35 — zero overlap. Nothing broke or
-     *  errored anywhere; {@link com.fams.modules.randomcheck.service.ScheduledCheckGeneratorService
-     *  #resolveEffectiveWindow} (intersects config window with each assignment's actual shift
-     *  hours, on purpose, so checks are never scheduled outside real working hours) silently
-     *  produced an empty intersection every single day, so the config "existed" but never
-     *  generated a single check — indistinguishable from the feature being broken, purely from
-     *  the admin UI's perspective. This check surfaces that mismatch AT CONFIG SAVE TIME instead
-     *  of silently, for the same reason validateSchedulingFields already does for the
-     *  checks/interval-vs-window feasibility case.
-     *
-     *  Only meaningful for a SITE-level config, not the tenant-wide default (siteId == null) —
-     *  a tenant default is deliberately shift-agnostic, applying across every site/shift that
-     *  doesn't have its own override, so there is no single set of shift hours to validate
-     *  against. Only checked against shifts that actually exist yet (a site created before any
-     *  shift has nothing to overlap-check against) and skips overnight shifts (same as
-     *  resolveEffectiveWindow — a window spanning midnight needs handling this simple same-day
-     *  overlap test doesn't attempt). Warns (does not block) if the site has shifts but ALL of
-     *  them are overnight, since this check genuinely cannot evaluate that case either way. */
-    private void validateOverlapsSiteShifts(UUID tenantId, UUID siteId, LocalTime start, LocalTime end) {
-        if (siteId == null) return;
+    /** Reject a policy that would silently leave any inherited shift uncovered or unable to fit
+     * the requested number of checks. A disabled shift is an explicit exclusion and is skipped. */
+    private void validateShiftCoverage(UUID tenantId, UUID siteId, String windowMode,
+                                       LocalTime start, LocalTime end,
+                                       int checksPerShift, int minIntervalMinutes) {
+        List<Shift> shifts = siteId == null
+                ? shiftRepository.findByTenantIdAndStatusAndDeletedAtIsNullOrderByStartTimeAsc(tenantId, "active")
+                : shiftRepository.findBySiteIdAndStatusAndDeletedAtIsNullOrderByStartTimeAsc(siteId, "active");
+        long required = (long) (checksPerShift - 1) * minIntervalMinutes;
+        List<String> invalid = shifts.stream()
+                .filter(s -> !"disabled".equals(s.getRandomCheckPolicy()))
+                .filter(s -> siteId != null || configRepository.findBySite(tenantId, s.getSiteId()).isEmpty())
+                .filter(s -> effectiveWindowMinutes(s, windowMode, start, end) < required)
+                .map(s -> String.format("%s (%s–%s%s)", s.getName(), s.getStartTime(), s.getEndTime(),
+                        s.isAllowOvernight() ? ", qua đêm" : ""))
+                .toList();
+        if (!invalid.isEmpty()) {
+            throw new IllegalArgumentException(String.format(
+                    "Policy cannot fit %d checks with %d-minute spacing in these shifts: %s. "
+                            + "Use full_shift, reduce checks/spacing, adjust the custom window, or explicitly disable random checks for those shifts.",
+                    checksPerShift, minIntervalMinutes, String.join(", ", invalid)));
+        }
+    }
 
-        List<Shift> shifts = shiftRepository.findBySiteIdAndStatusAndDeletedAtIsNullOrderByStartTimeAsc(
-                siteId, "active");
-        if (shifts.isEmpty()) return;
+    private long effectiveWindowMinutes(Shift shift, String mode, LocalTime start, LocalTime end) {
+        LocalDate base = LocalDate.of(2000, 1, 1);
+        LocalDateTime shiftStart = base.atTime(shift.getStartTime());
+        LocalDateTime shiftEnd = base.atTime(shift.getEndTime());
+        if (shift.isAllowOvernight() || !shiftEnd.isAfter(shiftStart)) shiftEnd = shiftEnd.plusDays(1);
+        if ("full_shift".equals(mode)) return Duration.between(shiftStart, shiftEnd).toMinutes();
 
-        List<Shift> comparable = shifts.stream().filter(s -> !s.isAllowOvernight()).collect(Collectors.toList());
-        if (comparable.isEmpty()) {
-            log.warn("Random check window validation skipped tenantId={} siteId={} — every active "
-                    + "shift at this site crosses midnight, cannot overlap-check", tenantId, siteId);
+        LocalDateTime configStart = base.atTime(start);
+        LocalDateTime configEnd = base.atTime(end);
+        if (!configEnd.isAfter(configStart)) configEnd = configEnd.plusDays(1);
+        LocalDateTime overlapStart = shiftStart.isAfter(configStart) ? shiftStart : configStart;
+        LocalDateTime overlapEnd = shiftEnd.isBefore(configEnd) ? shiftEnd : configEnd;
+        return overlapEnd.isAfter(overlapStart) ? Duration.between(overlapStart, overlapEnd).toMinutes() : -1;
+    }
+
+    /** Prevent shift creation/editing from invalidating an already-valid random-check policy. */
+    @Transactional(readOnly = true)
+    public void assertShiftCompatible(UUID tenantId, Shift shift) {
+        if (!"active".equals(shift.getStatus()) || "disabled".equals(shift.getRandomCheckPolicy())) {
+            return;
+        }
+        Optional<RandomCheckConfig> configOpt = configRepository.findBySite(tenantId, shift.getSiteId());
+        if (configOpt.isEmpty()) configOpt = configRepository.findTenantDefault(tenantId);
+        if (configOpt.isEmpty()) {
+            if ("enabled".equals(shift.getRandomCheckPolicy())) {
+                throw new IllegalArgumentException(
+                        "This shift explicitly enables random checks but its site/company has no random-check config");
+            }
             return;
         }
 
-        boolean overlapsAny = comparable.stream()
-                .anyMatch(s -> start.isBefore(s.getEndTime()) && end.isAfter(s.getStartTime()));
-        if (!overlapsAny) {
-            String shiftSummary = comparable.stream()
-                    .map(s -> String.format("\"%s\" (%s–%s)", s.getName(), s.getStartTime(), s.getEndTime()))
-                    .collect(Collectors.joining(", "));
+        RandomCheckConfig config = configOpt.get();
+        if (!config.isActive() && !"enabled".equals(shift.getRandomCheckPolicy())) return;
+        long required = (long) (config.getChecksPerShift() - 1) * config.getMinIntervalMinutes();
+        long available = effectiveWindowMinutes(shift, config.getWindowMode(),
+                config.getAllowedStartTime(), config.getAllowedEndTime());
+        if (available < required) {
             throw new IllegalArgumentException(String.format(
-                    "Allowed window (%s–%s) does not overlap any active shift at this site: %s. "
-                            + "Random checks will never be generated for those shifts with this "
-                            + "window — adjust either the window or the shift hours so they overlap.",
-                    start, end, shiftSummary));
+                    "Shift '%s' would leave a random-check coverage gap: available=%d minutes, "
+                            + "required=%d minutes. Adjust the shift/config or explicitly disable random checks for this shift.",
+                    shift.getName(), Math.max(0, available), required));
         }
+    }
+
+    private long minutesBetweenPossiblyOvernight(LocalTime start, LocalTime end) {
+        LocalDate base = LocalDate.of(2000, 1, 1);
+        LocalDateTime from = base.atTime(start);
+        LocalDateTime to = base.atTime(end);
+        if (!to.isAfter(from)) to = to.plusDays(1);
+        return Duration.between(from, to).toMinutes();
     }
 
     private void checkPermission(UUID callerId, UUID tenantId, boolean callerIsPlatformAdmin) {
@@ -417,11 +476,13 @@ public class RandomCheckConfigService {
         map.put("minIntervalMinutes", c.getMinIntervalMinutes());
         map.put("allowedStartTime", String.valueOf(c.getAllowedStartTime()));
         map.put("allowedEndTime", String.valueOf(c.getAllowedEndTime()));
+        map.put("windowMode", c.getWindowMode());
         map.put("checkMode", c.getCheckMode());
         map.put("applicableRoles", c.getApplicableRoles());
         map.put("responseWindowSeconds", c.getResponseWindowSeconds());
         map.put("failureEscalationThreshold", c.getFailureEscalationThreshold());
         map.put("isActive", c.isActive());
+        map.put("manualChecksAllowed", c.isManualChecksAllowed());
         return map;
     }
 
@@ -446,11 +507,13 @@ public class RandomCheckConfigService {
                 .minIntervalMinutes(c.getMinIntervalMinutes())
                 .allowedStartTime(c.getAllowedStartTime())
                 .allowedEndTime(c.getAllowedEndTime())
+                .windowMode(c.getWindowMode())
                 .checkMode(c.getCheckMode())
                 .applicableRoles(roles)
                 .responseWindowSeconds(c.getResponseWindowSeconds())
                 .failureEscalationThreshold(c.getFailureEscalationThreshold())
                 .isActive(c.isActive())
+                .manualChecksAllowed(c.isManualChecksAllowed())
                 .createdBy(c.getCreatedBy())
                 .createdAt(c.getCreatedAt())
                 .updatedAt(c.getUpdatedAt())
