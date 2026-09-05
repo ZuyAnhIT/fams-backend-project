@@ -104,6 +104,8 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/login/totp").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/login/google").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/refresh-token").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/payments/payos/webhook").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v1/plans", "/api/v1/plans/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/invitations/validate").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/invitations/accept").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v1/platform-invitations/validate").permitAll()

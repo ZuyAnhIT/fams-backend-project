@@ -45,9 +45,14 @@ public final class ScheduledJobCatalog {
                     3 * 60),
             new ScheduledJobInfo(
                     "RandomCheckSchedulerJob",
-                    "Generates the day's scheduled random checks for every active assignment.",
-                    ScheduleType.CRON, "0 1 0 * * *", null,
-                    26 * 60),
+                    "Continuously ensures each site's current local day has random-check schedules, including safe restart catch-up.",
+                    ScheduleType.FIXED_RATE, null, 60_000L,
+                    10),
+            new ScheduledJobInfo(
+                    "CheckinSessionExpirationJob",
+                    "Closes open sessions whose immutable checkout deadline passed without checkout evidence.",
+                    ScheduleType.FIXED_RATE, null, 30_000L,
+                    10),
             new ScheduledJobInfo(
                     "RandomCheckDispatchJob",
                     "Polls the Redis dispatch queue and sends due random-check notifications.",
@@ -77,7 +82,12 @@ public final class ScheduledJobCatalog {
                     "SubscriptionExpirationJob",
                     "Daily sweep that expires subscriptions past their expiresAt and suspends the tenant.",
                     ScheduleType.CRON, "0 0 0 * * *", null,
-                    26 * 60)
+                    26 * 60),
+            new ScheduledJobInfo(
+                    "BillingReconciliationJob",
+                    "Rechecks pending payOS orders so a delayed or missed webhook cannot strand a paid customer.",
+                    ScheduleType.FIXED_RATE, null, 300_000L,
+                    15)
     );
 
     public record ScheduledJobInfo(

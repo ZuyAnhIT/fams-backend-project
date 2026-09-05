@@ -11,17 +11,35 @@ import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.data.domain.Pageable;
 
 public interface CheckinRepository extends JpaRepository<CheckinRecord, UUID>, JpaSpecificationExecutor<CheckinRecord> {
 
-    /** Open session = no checkout yet for this assignment. */
-    Optional<CheckinRecord> findByAssignmentIdAndCheckOutAtIsNullAndDeletedAtIsNull(UUID assignmentId);
+    /** Open session = no checkout evidence and no logical missing-checkout closure. */
+    Optional<CheckinRecord> findByAssignmentIdAndCheckOutAtIsNullAndSessionClosedAtIsNullAndDeletedAtIsNull(
+            UUID assignmentId);
 
     /** An employee physically cannot be checked in at two places at once, even across different
      *  assignments/sites — used to block a new check-in while any prior session (any site) is
      *  still open, instead of only checking the one assignment being checked into. */
-    Optional<CheckinRecord> findByTenantIdAndEmployeeIdAndCheckOutAtIsNullAndDeletedAtIsNull(
+    Optional<CheckinRecord> findByTenantIdAndEmployeeIdAndCheckOutAtIsNullAndSessionClosedAtIsNullAndDeletedAtIsNull(
             UUID tenantId, UUID employeeId);
+
+    /** Bounded oldest-first batch used by the proactive expiration job. */
+    @Query("SELECT c FROM CheckinRecord c WHERE c.checkOutAt IS NULL AND c.sessionClosedAt IS NULL " +
+           "AND c.sessionExpiresAt IS NOT NULL AND c.sessionExpiresAt <= :now AND c.deletedAt IS NULL " +
+           "ORDER BY c.sessionExpiresAt ASC")
+    List<CheckinRecord> findDueOpenSessions(@Param("now") OffsetDateTime now, Pageable pageable);
+
+    /** Atomically closes a forgotten checkout without racing a real checkout submitted at the
+     *  same instant. A full-entity save here could overwrite checkout evidence written by the
+     *  employee between the scheduler's SELECT and UPDATE. */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("UPDATE CheckinRecord c SET c.sessionClosedAt = :closedAt, " +
+           "c.sessionCloseReason = 'missing_checkout' WHERE c.id = :id " +
+           "AND c.checkOutAt IS NULL AND c.sessionClosedAt IS NULL")
+    int closeAsMissingCheckoutIfOpen(@Param("id") UUID id,
+                                      @Param("closedAt") OffsetDateTime closedAt);
 
 
     Optional<CheckinRecord> findByIdAndTenantIdAndDeletedAtIsNull(UUID id, UUID tenantId);
@@ -60,6 +78,7 @@ public interface CheckinRepository extends JpaRepository<CheckinRecord, UUID>, J
      *  this bound, a single forgotten checkout would silently and permanently inflate every
      *  "currently on-site" count shown to HR/supervisors (audit 2026-08-04). */
     @Query("SELECT COUNT(c) FROM CheckinRecord c WHERE c.tenantId = :tenantId AND c.checkOutAt IS NULL " +
+           "AND c.sessionClosedAt IS NULL " +
            "AND c.checkInAt >= :since AND (:siteId IS NULL OR c.siteId = :siteId) AND c.deletedAt IS NULL")
     long countOpenSessions(@Param("tenantId") UUID tenantId, @Param("since") OffsetDateTime since, @Param("siteId") UUID siteId);
 
@@ -72,10 +91,21 @@ public interface CheckinRepository extends JpaRepository<CheckinRecord, UUID>, J
     /** Open check-in sessions for a specific site, opened on-or-after {@code since} — same
      *  stale-session guard as {@link #countOpenSessions}, see its javadoc. */
     @Query("SELECT c FROM CheckinRecord c WHERE c.tenantId = :tenantId AND c.siteId = :siteId " +
-           "AND c.checkOutAt IS NULL AND c.checkInAt >= :since AND c.deletedAt IS NULL ORDER BY c.checkInAt ASC")
+           "AND c.checkOutAt IS NULL AND c.sessionClosedAt IS NULL " +
+           "AND c.checkInAt >= :since AND c.deletedAt IS NULL ORDER BY c.checkInAt ASC")
     List<CheckinRecord> findOpenSessionsBySite(@Param("tenantId") UUID tenantId,
                                                 @Param("siteId") UUID siteId,
                                                 @Param("since") OffsetDateTime since);
+
+    /** Open sessions that can still receive an immediate presence check. Unlike the dashboard
+     * query above, this deliberately includes an overnight shift opened before midnight. */
+    @Query("SELECT c FROM CheckinRecord c WHERE c.tenantId = :tenantId AND c.siteId = :siteId " +
+           "AND c.checkOutAt IS NULL AND c.sessionClosedAt IS NULL " +
+           "AND (c.sessionExpiresAt IS NULL OR c.sessionExpiresAt > :now) " +
+           "AND c.deletedAt IS NULL ORDER BY c.checkInAt ASC")
+    List<CheckinRecord> findUnexpiredOpenSessionsBySite(@Param("tenantId") UUID tenantId,
+                                                        @Param("siteId") UUID siteId,
+                                                        @Param("now") OffsetDateTime now);
 
     /** All non-deleted checkins whose check_in_at falls within the given UTC range, across EVERY
      *  tenant — intentionally unscoped, used only by the nightly AttendanceSummaryJob batch (a
@@ -99,9 +129,12 @@ public interface CheckinRepository extends JpaRepository<CheckinRecord, UUID>, J
 
     Optional<CheckinRecord> findByEmployeeIdAndClientNonceAndDeletedAtIsNull(UUID employeeId, UUID clientNonce);
 
-    /** Finds any non-deleted record for the assignment where the given timestamp falls inside the session. */
+    /** Finds any non-deleted record for the assignment where the given timestamp falls inside
+     *  the actual checkout interval, or the logical interval of a missing-checkout session. */
     @Query("SELECT c FROM CheckinRecord c WHERE c.assignmentId = :assignmentId AND c.deletedAt IS NULL " +
-           "AND c.checkInAt <= :checkinAt AND (c.checkOutAt IS NULL OR c.checkOutAt >= :checkinAt)")
+           "AND c.checkInAt <= :checkinAt " +
+           "AND (COALESCE(c.checkOutAt, c.sessionClosedAt) IS NULL " +
+           "OR COALESCE(c.checkOutAt, c.sessionClosedAt) >= :checkinAt)")
     Optional<CheckinRecord> findOverlappingSession(@Param("assignmentId") UUID assignmentId,
                                                     @Param("checkinAt") OffsetDateTime checkinAt);
 
@@ -133,11 +166,14 @@ public interface CheckinRepository extends JpaRepository<CheckinRecord, UUID>, J
     // reverted to NULL by a fast-arriving face-result callback) and applies equally to the
     // check-in side, which had the identical latent risk.
 
-    @Modifying
-    @Query("UPDATE CheckinRecord c SET c.checkOutAt = :checkOutAt, c.checkOutLat = :checkOutLat, "
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("UPDATE CheckinRecord c SET c.checkOutAt = :checkOutAt, "
+            + "c.sessionClosedAt = :checkOutAt, c.sessionCloseReason = 'checkout', "
+            + "c.checkOutLat = :checkOutLat, "
             + "c.checkOutLon = :checkOutLon, c.checkOutAccuracy = :checkOutAccuracy, "
             + "c.checkOutInsideGeofence = :checkOutInsideGeofence, c.workMinutes = :workMinutes "
-            + "WHERE c.id = :id")
+            + "WHERE c.id = :id AND c.checkOutAt IS NULL AND c.sessionClosedAt IS NULL "
+            + "AND (c.sessionExpiresAt IS NULL OR c.sessionExpiresAt > :checkOutAt)")
     int applyCheckout(@Param("id") UUID id,
                        @Param("checkOutAt") OffsetDateTime checkOutAt,
                        @Param("checkOutLat") Double checkOutLat,

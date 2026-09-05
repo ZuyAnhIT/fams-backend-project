@@ -26,10 +26,10 @@ public class PlanResponse {
     @Schema(description = "Plan description")
     private String description;
 
-    @Schema(description = "Monthly price", example = "49.99")
+    @Schema(description = "Monthly price in VND", example = "20000")
     private BigDecimal priceMonthly;
 
-    @Schema(description = "Yearly price", example = "499.99")
+    @Schema(description = "Yearly price in VND", example = "200000")
     private BigDecimal priceYearly;
 
     @Schema(description = "Display sort order (ascending)", example = "2")

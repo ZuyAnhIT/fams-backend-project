@@ -99,8 +99,8 @@ public class FirebasePhoneLoginService {
 
         List<UserRole> roles = userRoleRepository.findAllActiveByUserId(user.getId());
         UserRole primary = com.fams.modules.rbac.util.PrimaryRoleResolver.pickPrimary(roles);
-        UUID primaryTenantId = primary == null ? null : primary.getTenantId();
-        String primaryRole = primary == null ? null : primary.getRole().getName();
+        UUID primaryTenantId = user.isPlatformAdmin() || primary == null ? null : primary.getTenantId();
+        String primaryRole = user.isPlatformAdmin() || primary == null ? null : primary.getRole().getName();
 
         // #133 (2026-08-19): the only one of the 4 login paths without this check — a suspended
         // tenant's user could still get a token here (though JwtAuthFilter blocks the very next

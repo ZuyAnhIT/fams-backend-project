@@ -37,12 +37,14 @@ public class SubscriptionExpirationJob {
     // shown up as NEVER_RUN forever (masking a genuine misconfiguration as indistinguishable
     // from "running fine, just not reported") the moment the new job catalog shipped.
     @Scheduled(cron = "0 0 0 * * *")
+    @Transactional
     public void expireSubscriptions() {
         long startedAt = System.currentTimeMillis();
         try {
             OffsetDateTime now = OffsetDateTime.now();
             List<TenantSubscription> expired =
-                    subscriptionRepository.findAllByStatusAndExpiresAtBefore(SubscriptionStatus.ACTIVE, now);
+                    subscriptionRepository.findAllByStatusInAndExpiresAtBefore(
+                            List.of(SubscriptionStatus.TRIAL, SubscriptionStatus.ACTIVE), now);
 
             log.info("SubscriptionExpirationJob: found {} subscription(s) to expire", expired.size());
 

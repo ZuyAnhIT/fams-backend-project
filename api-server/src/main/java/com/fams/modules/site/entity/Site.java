@@ -6,6 +6,8 @@ import lombok.*;
 import java.time.OffsetDateTime;
 import java.util.UUID;
 
+import com.fams.shared.time.VietnamTime;
+
 @Getter
 @Setter
 @Builder
@@ -73,7 +75,7 @@ public class Site {
         OffsetDateTime now = OffsetDateTime.now();
         if (createdAt == null) createdAt = now;
         if (updatedAt == null) updatedAt = now;
-        if (timezone == null) timezone = "UTC";
+        if (timezone == null) timezone = VietnamTime.ID;
         if (status == null) status = "active";
         if (checkinPolicy == null) checkinPolicy = "gps_only";
     }

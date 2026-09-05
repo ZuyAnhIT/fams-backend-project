@@ -151,6 +151,12 @@ public class UserRoleService {
      */
     @Transactional
     public void selfHealOwnerRoles(UUID userId) {
+        User owner = userRepository.findByIdAndDeletedAtIsNull(userId).orElse(null);
+        if (owner == null || owner.isPlatformAdmin()) {
+            // Platform administration and company membership are separate security scopes.
+            // Never recreate a tenant role for an internal admin account from legacy data.
+            return;
+        }
         List<Tenant> ownedTenants = tenantRepository.findAllByOwnerIdAndDeletedAtIsNull(userId);
         if (ownedTenants.isEmpty()) {
             return;
@@ -343,8 +349,13 @@ public class UserRoleService {
             }
         }
 
-        userRepository.findByIdAndDeletedAtIsNull(targetUserId)
+        User targetUser = userRepository.findByIdAndDeletedAtIsNull(targetUserId)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found: " + targetUserId));
+        if (targetUser.isPlatformAdmin()) {
+            throw new IllegalArgumentException(
+                    "A Platform Admin account cannot be assigned a company role. "
+                            + "Use a separate company user account.");
+        }
 
         Role role = roleRepository.findByIdAndDeletedAtIsNull(roleId)
                 .orElseThrow(() -> new ResourceNotFoundException("Role not found: " + roleId));

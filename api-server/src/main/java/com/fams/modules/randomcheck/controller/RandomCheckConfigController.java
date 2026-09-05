@@ -113,7 +113,8 @@ public class RandomCheckConfigController {
     @Operation(
         summary = "Get the effective (resolved) random check configuration for a site",
         description = "Returns whichever config actually applies to this site right now — the site override "
-                      + "if one exists and is active, otherwise the tenant default — the exact same resolution "
+                      + "if one exists (including an inactive override used as an explicit site-level off switch), "
+                      + "otherwise the tenant default — the exact same resolution "
                       + "order the daily generator and manual-check dispatch use. Unlike GET /sites/{siteId}, "
                       + "this never 404s just because there's no site-specific override (it falls through to "
                       + "the tenant default); it only 404s if NEITHER exists. The response's resolvedFrom field "

@@ -16,9 +16,11 @@ import com.fams.modules.shift.repository.ShiftRepository;
 import com.fams.modules.site.repository.SiteRepository;
 import com.fams.modules.tenant.repository.TenantRepository;
 import com.fams.shared.exception.DuplicateResourceException;
+import com.fams.shared.exception.BusinessException;
 import com.fams.shared.exception.ResourceNotFoundException;
 import com.fams.shared.pagination.PageResponse;
 import com.fams.shared.security.HttpRequestUtils;
+import com.fams.shared.time.VietnamTime;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -26,6 +28,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -145,6 +148,26 @@ public class AssignmentService {
         assertNoTimeOverlap(tenantId, siteId, shiftId, startDate, endDate, daysOfWeekBitmask, sameSiteConflicts, false);
     }
 
+    /** Revalidates every active assignment that references a Shift after its hours change.
+     *  Assignment creation/update already invokes the same invariant; without this reverse
+     *  check, editing a shared Shift could silently create double bookings after the fact. */
+    @Transactional(readOnly = true)
+    public void assertShiftUpdateKeepsAssignmentsConflictFree(UUID tenantId, UUID shiftId) {
+        List<Assignment> affected = assignmentRepository
+                .findByTenantIdAndShiftIdAndStatusAndDeletedAtIsNull(tenantId, shiftId, "active");
+        for (Assignment assignment : affected) {
+            assertNoConflicts(
+                    tenantId,
+                    assignment.getEmployeeId(),
+                    assignment.getSiteId(),
+                    assignment.getId(),
+                    shiftId,
+                    assignment.getStartDate(),
+                    assignment.getEndDate(),
+                    assignment.getDaysOfWeek());
+        }
+    }
+
     private void assertNoTimeOverlap(UUID tenantId, UUID siteId, UUID shiftId,
                                      LocalDate startDate, LocalDate endDate, Short daysOfWeekBitmask,
                                      List<Assignment> coarseConflicts, boolean crossSite) {
@@ -180,11 +203,19 @@ public class AssignmentService {
                                 .findByIdAndTenantIdAndDeletedAtIsNull(other.getSiteId(), tenantId)
                                 .map(com.fams.modules.site.entity.Site::getName)
                                 .orElse(other.getSiteId().toString());
-                        throw new DuplicateResourceException(
+                        throw new BusinessException(
+                                "ASSIGNMENT_TIME_CONFLICT",
+                                "Nhân viên đã có ca trùng giờ tại địa điểm '" + otherSiteName
+                                        + "'. Vui lòng điều chỉnh thời gian ca hoặc phân công.",
+                                HttpStatus.CONFLICT,
                                 "Employee already has an overlapping active assignment at site '" + otherSiteName
                                         + "' during this period — the shift hours overlap");
                     } else {
-                        throw new DuplicateResourceException(
+                        throw new BusinessException(
+                                "ASSIGNMENT_TIME_CONFLICT",
+                                "Nhân viên đã có một ca khác trùng giờ tại địa điểm này. "
+                                        + "Vui lòng điều chỉnh thời gian ca hoặc phân công.",
+                                HttpStatus.CONFLICT,
                                 "Employee already has an overlapping active assignment at this site during this "
                                         + "period — the shift hours overlap with an existing assignment");
                     }
@@ -211,7 +242,7 @@ public class AssignmentService {
     private Instant[] resolveTimeWindow(UUID siteId, UUID shiftId, LocalDate onDate) {
         String timezone = siteRepository.findById(siteId)
                 .map(com.fams.modules.site.entity.Site::getTimezone)
-                .orElse("UTC");
+                .orElse(VietnamTime.ID);
         ZoneId zone = ZoneId.of(timezone);
 
         if (shiftId == null) {
@@ -277,20 +308,61 @@ public class AssignmentService {
         return result;
     }
 
-    /** Same resolution as {@link #resolveAvailableAssignmentsNow}, narrowed to one site — used
-     *  by submitCheckin, which already knows which site the employee is trying to check into. */
+    /** Resolve the exact assignment selected by the employee app. A site alone is not a
+     * sufficient key: an employee may legitimately have several shifts at the same site on
+     * the same day. Keeping the assignment ID in the submit contract prevents a completed
+     * earlier shift from being selected accidentally.
+     *
+     * During a mobile rolling upgrade an already-opened web bundle can still submit the old
+     * contract without assignmentId. That request is accepted only when the site has exactly
+     * one relevant assignment, or exactly one assignment whose check-in window is open now.
+     * We deliberately return empty for every ambiguous case instead of reviving the former
+     * unsafe "first assignment at the site" behaviour. */
     @Transactional(readOnly = true)
-    public Optional<AssignmentAvailability> resolveAvailableAssignmentForSiteNow(
-            UUID tenantId, UUID employeeId, UUID siteId) {
-        return resolveAvailableAssignmentsNow(tenantId, employeeId).stream()
-                .filter(av -> av.assignment().getSiteId().equals(siteId))
-                .findFirst();
+    public Optional<AssignmentAvailability> resolveAvailableAssignmentNow(
+            UUID tenantId, UUID employeeId, UUID siteId, UUID assignmentId) {
+        if (assignmentId == null) {
+            Instant now = Instant.now();
+            List<AssignmentAvailability> atSite = resolveAvailableAssignmentsNow(tenantId, employeeId).stream()
+                    .filter(availability -> siteId.equals(availability.assignment().getSiteId()))
+                    .toList();
+
+            if (atSite.size() == 1) {
+                log.warn("Legacy check-in request without assignmentId resolved unambiguously: "
+                                + "tenantId={} employeeId={} siteId={} assignmentId={}",
+                        tenantId, employeeId, siteId, atSite.get(0).assignment().getId());
+                return Optional.of(atSite.get(0));
+            }
+
+            List<AssignmentAvailability> openNow = atSite.stream()
+                    .filter(availability -> availability.shiftStartInstant() == null
+                            || (!now.isBefore(availability.checkinAllowedFrom())
+                            && now.isBefore(availability.checkinAllowedUntil())))
+                    .toList();
+            if (openNow.size() == 1) {
+                log.warn("Legacy check-in request without assignmentId matched the only open shift: "
+                                + "tenantId={} employeeId={} siteId={} assignmentId={}",
+                        tenantId, employeeId, siteId, openNow.get(0).assignment().getId());
+                return Optional.of(openNow.get(0));
+            }
+
+            log.warn("Rejected ambiguous legacy check-in request without assignmentId: "
+                            + "tenantId={} employeeId={} siteId={} relevantAssignments={} openAssignments={}",
+                    tenantId, employeeId, siteId, atSite.size(), openNow.size());
+            return Optional.empty();
+        }
+
+        return assignmentRepository.findByIdAndTenantIdAndDeletedAtIsNull(assignmentId, tenantId)
+                .filter(a -> employeeId.equals(a.getEmployeeId()))
+                .filter(a -> siteId.equals(a.getSiteId()))
+                .filter(a -> "active".equals(a.getStatus()))
+                .flatMap(a -> resolveIfRelevantNow(a, Instant.now()));
     }
 
     private Optional<AssignmentAvailability> resolveIfRelevantNow(Assignment a, Instant now) {
         String timezone = siteRepository.findById(a.getSiteId())
                 .map(com.fams.modules.site.entity.Site::getTimezone)
-                .orElse("UTC");
+                .orElse(VietnamTime.ID);
         ZoneId zone = ZoneId.of(timezone);
         LocalDate siteToday = now.atZone(zone).toLocalDate();
 

@@ -15,6 +15,7 @@ services:
       POSTGRES_DB: ${DB_NAME}
       POSTGRES_USER: ${DB_USER}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
+      TZ: Asia/Ho_Chi_Minh
     volumes:
       - fams_postgres_data:/var/lib/postgresql/data
       - ./docker/postgres/init-postgis.sql:/docker-entrypoint-initdb.d/init-postgis.sql:ro
@@ -62,6 +63,7 @@ services:
       REDIS_HOST: fams-redis
       REDIS_PORT: "6379"
       JAVA_API_INTERNAL_URL: http://fams-api:8080
+      TZ: Asia/Ho_Chi_Minh
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "5000", "--reload", "--log-level", "info"]
     volumes:
       - ./ai-service/storage:/app/storage   # host-mounted: photos are visible on host filesystem
@@ -92,6 +94,7 @@ services:
       DB_PORT: 5432
       REDIS_HOST: fams-redis
       REDIS_PORT: 6379
+      TZ: Asia/Ho_Chi_Minh
     ports:
       - "${API_EXPOSE_PORT:-8080}:8080"
     networks:

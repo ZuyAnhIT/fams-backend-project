@@ -173,8 +173,10 @@ public class AuthService {
         userRoleService.selfHealOwnerRoles(user.getId());
         List<UserRole> roles = userRoleRepository.findAllActiveByUserId(user.getId());
         UserRole primary = com.fams.modules.rbac.util.PrimaryRoleResolver.pickPrimary(roles);
-        UUID primaryTenantId = primary == null ? null : primary.getTenantId();
-        String primaryRole   = primary == null ? null : primary.getRole().getName();
+        // Platform administration is a separate workspace. Even if legacy/test data leaves a
+        // company role behind, it must never leak a tenant context into a Platform Admin token.
+        UUID primaryTenantId = user.isPlatformAdmin() || primary == null ? null : primary.getTenantId();
+        String primaryRole   = user.isPlatformAdmin() || primary == null ? null : primary.getRole().getName();
 
         // ── 8. Block nếu primary tenant bị suspend ──────────────────────────────
         if (!user.isPlatformAdmin() && primaryTenantId != null) {
@@ -318,6 +320,11 @@ public class AuthService {
     public LoginResponse switchTenant(UUID callerUserId, UUID targetTenantId, String rawRefreshToken) {
         User user = userRepository.findByIdAndDeletedAtIsNull(callerUserId)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+
+        if (user.isPlatformAdmin()) {
+            throw new AccessDeniedException(
+                    "Platform Admin accounts cannot enter a company workspace. Use a separate company account.");
+        }
 
         String hash = jwtProvider.hashToken(rawRefreshToken);
         RefreshToken stored = refreshTokenRepository.findByTokenHash(hash)

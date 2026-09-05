@@ -33,6 +33,7 @@ import com.fams.shared.exception.ResourceNotFoundException;
 import com.fams.shared.pagination.PageResponse;
 import com.fams.shared.security.HttpRequestUtils;
 import com.fams.shared.storage.ExplanationEvidenceStorageService;
+import com.fams.shared.time.VietnamTime;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -179,19 +180,29 @@ public class CheckinService {
                     "Site status is '" + site.getStatus() + "', not active");
         }
 
-        // Same site-timezone-aware resolution used by getAvailableSites, so the App can never
-        // see a site listed as available and then have submitCheckin disagree about it.
+        // Resolve the exact assignment chosen in available-sites. A site may contain several
+        // assignments/shifts for the same employee on the same date; selecting the first one
+        // by site caused a later shift to be rejected against an earlier completed shift. An
+        // old already-loaded mobile bundle may omit assignmentId during a rolling upgrade; the
+        // resolver accepts that only when it can prove a single unambiguous current assignment.
         AssignmentService.AssignmentAvailability availability = assignmentService
-                .resolveAvailableAssignmentForSiteNow(tenantId, employee.getId(), request.getSiteId())
+                .resolveAvailableAssignmentNow(tenantId, employee.getId(), request.getSiteId(),
+                        request.getAssignmentId())
                 .orElseThrow(() -> new ResourceNotFoundException(
-                        "No active assignment found for this employee at site " + request.getSiteId() + " today"));
+                        "Không xác định được duy nhất ca cần chấm công. Vui lòng tải lại ứng dụng "
+                                + "và chọn lại đúng ca trong danh sách."));
         Assignment assignment = availability.assignment();
+
+        // A forgotten checkout from a completed shift remains audit evidence (checkOutAt stays
+        // null), but it is logically closed before applying the one-current-session invariant.
+        // This prevents one old missing checkout from blocking every future workday.
+        expireStaleOpenSession(tenantId, employee.getId(), callerUserId);
 
         // Prevent a duplicate open check-in for this EMPLOYEE — across any assignment/site, not
         // just the one being checked into now, since an employee cannot physically be checked in
         // at two places at once (P0-3). A unique partial index (V73) backs this at the DB level
         // too, for the race window between this check and the insert below.
-        checkinRepository.findByTenantIdAndEmployeeIdAndCheckOutAtIsNullAndDeletedAtIsNull(
+        checkinRepository.findByTenantIdAndEmployeeIdAndCheckOutAtIsNullAndSessionClosedAtIsNullAndDeletedAtIsNull(
                         tenantId, employee.getId())
                 .ifPresent(existing -> {
                     throw new DuplicateResourceException(
@@ -236,6 +247,7 @@ public class CheckinService {
         double riskScore = computeRiskScore(request.getGpsAccuracy(), insideGeofence);
         String status = insideGeofence ? "valid" : "pending_review";
 
+        OffsetDateTime checkInAt = OffsetDateTime.now();
         CheckinRecord record = CheckinRecord.builder()
                 .tenantId(tenantId)
                 .siteId(request.getSiteId())
@@ -251,7 +263,7 @@ public class CheckinService {
                 .shiftMaxOtMinutesPerDay(resolvedShift != null ? resolvedShift.getMaxOtMinutesPerDay() : null)
                 .shiftMaxOtMinutesPerWeek(resolvedShift != null ? resolvedShift.getMaxOtMinutesPerWeek() : null)
                 .status(status)
-                .checkInAt(OffsetDateTime.now())
+                .checkInAt(checkInAt)
                 .checkInLat(request.getLatitude())
                 .checkInLon(request.getLongitude())
                 .checkInAccuracy(request.getGpsAccuracy())
@@ -261,6 +273,7 @@ public class CheckinService {
                 .effectiveCheckinPolicy(effectivePolicy)
                 .source("online")
                 .build();
+        record.setSessionExpiresAt(calculateSessionCutoff(record, safeSiteZone(site)));
 
         try {
             checkinRepository.save(record);
@@ -343,6 +356,25 @@ public class CheckinService {
                     "Already checked out at " + record.getCheckOutAt());
         }
 
+        if (record.getSessionClosedAt() != null) {
+            throw new BusinessException(
+                    "CHECKIN_SESSION_CLOSED",
+                    "Ca này đã được đóng do thiếu chấm công ra. Vui lòng liên hệ HR nếu cần điều chỉnh.",
+                    HttpStatus.CONFLICT,
+                    "Session was logically closed at " + record.getSessionClosedAt()
+                            + " with reason " + record.getSessionCloseReason());
+        }
+
+        OffsetDateTime checkoutAttemptedAt = OffsetDateTime.now();
+        OffsetDateTime sessionDeadline = resolveSessionCutoff(record);
+        if (!checkoutAttemptedAt.isBefore(sessionDeadline)) {
+            throw new BusinessException(
+                    "CHECKIN_SESSION_EXPIRED",
+                    "Đã quá hạn chấm công ra của ca này. Hệ thống sẽ ghi nhận thiếu check-out; vui lòng liên hệ HR nếu cần điều chỉnh.",
+                    HttpStatus.CONFLICT,
+                    "Checkout attempted after immutable session deadline " + sessionDeadline);
+        }
+
         Site site = siteRepository.findByIdAndTenantIdAndDeletedAtIsNull(record.getSiteId(), tenantId)
                 .orElse(null);
         Shift shift = record.getShiftId() != null && site != null
@@ -378,7 +410,7 @@ public class CheckinService {
                     polygonWkt, geofence.getBufferMeters());
         }
 
-        OffsetDateTime checkOutAt = OffsetDateTime.now();
+        OffsetDateTime checkOutAt = checkoutAttemptedAt;
 
         // Task 73: apply late-checkout cap using the shift snapshot captured at check-in time
         // (never a live re-fetch — see CheckinRecord field comment) so a Shift edit made after
@@ -395,9 +427,19 @@ public class CheckinService {
         // reverted to NULL during testing). Writing only the checkout-specific columns here means
         // a concurrent callback writing only ITS columns can never clobber this write or vice
         // versa, regardless of which transaction commits first. See CheckinRepository javadoc.
-        checkinRepository.applyCheckout(record.getId(), checkOutAt, request.getLatitude(), request.getLongitude(),
+        int checkoutApplied = checkinRepository.applyCheckout(
+                record.getId(), checkOutAt, request.getLatitude(), request.getLongitude(),
                 request.getGpsAccuracy(), insideGeofence, workMinutes);
+        if (checkoutApplied == 0) {
+            throw new BusinessException(
+                    "CHECKIN_SESSION_EXPIRED",
+                    "Ca đã được đóng hoặc đã quá hạn chấm công ra. Vui lòng gửi giải trình hoặc liên hệ HR.",
+                    HttpStatus.CONFLICT,
+                    "Checkout lost the race with session expiry for check-in " + record.getId());
+        }
         record.setCheckOutAt(checkOutAt);
+        record.setSessionClosedAt(checkOutAt);
+        record.setSessionCloseReason("checkout");
         record.setCheckOutLat(request.getLatitude());
         record.setCheckOutLon(request.getLongitude());
         record.setCheckOutAccuracy(request.getGpsAccuracy());
@@ -452,6 +494,123 @@ public class CheckinService {
         }
 
         return toCheckinResponse(record, employee, site);
+    }
+
+    /**
+     * Returns the employee's one genuinely open session. A session whose configured checkout
+     * window has passed is first closed logically as missing_checkout; no checkout timestamp or
+     * GPS evidence is fabricated.
+     */
+    @Transactional
+    public CheckinResponse getOpenSession(UUID tenantId, UUID callerUserId) {
+        Employee employee = resolveEmployee(tenantId, callerUserId);
+        Optional<CheckinRecord> open = expireStaleOpenSession(tenantId, employee.getId(), callerUserId);
+        if (open.isEmpty()) {
+            return null;
+        }
+        Site site = siteRepository.findByIdAndTenantIdAndDeletedAtIsNull(open.get().getSiteId(), tenantId)
+                .orElse(null);
+        return toCheckinResponse(open.get(), employee, site);
+    }
+
+    private Optional<CheckinRecord> expireStaleOpenSession(UUID tenantId, UUID employeeId, UUID actorId) {
+        Optional<CheckinRecord> result = checkinRepository
+                .findByTenantIdAndEmployeeIdAndCheckOutAtIsNullAndSessionClosedAtIsNullAndDeletedAtIsNull(
+                        tenantId, employeeId);
+        if (result.isEmpty()) {
+            return result;
+        }
+
+        CheckinRecord record = result.get();
+        OffsetDateTime cutoff = resolveSessionCutoff(record);
+        OffsetDateTime now = OffsetDateTime.now();
+        if (now.isBefore(cutoff)) {
+            return result;
+        }
+
+        if (closeAsMissingCheckout(record, cutoff, actorId)) {
+            return Optional.empty();
+        }
+        return checkinRepository
+                .findByTenantIdAndEmployeeIdAndCheckOutAtIsNullAndSessionClosedAtIsNullAndDeletedAtIsNull(
+                        tenantId, employeeId);
+    }
+
+    /** Proactive safety net used by the scheduled job. Sessions are closed even when the
+     *  employee leaves the app open or never opens it again after shift end. */
+    @Transactional
+    public int expireDueOpenSessions(OffsetDateTime now) {
+        List<CheckinRecord> due = checkinRepository.findDueOpenSessions(now, PageRequest.of(0, 500));
+        int closed = 0;
+        for (CheckinRecord record : due) {
+            if (closeAsMissingCheckout(record, record.getSessionExpiresAt(), null)) {
+                closed++;
+            }
+        }
+        return closed;
+    }
+
+    private boolean closeAsMissingCheckout(CheckinRecord record, OffsetDateTime cutoff, UUID actorId) {
+        if (checkinRepository.closeAsMissingCheckoutIfOpen(record.getId(), cutoff) == 0) {
+            return false;
+        }
+        record.setSessionClosedAt(cutoff);
+        record.setSessionCloseReason("missing_checkout");
+        recordAudit(record.getTenantId(), actorId, record.getId(), "checkin_session_auto_closed", Map.of(
+                "sessionClosedAt", cutoff.toString(),
+                "reason", "missing_checkout"));
+        try {
+            attendanceSummaryService.recomputeForCheckin(record);
+        } catch (Exception e) {
+            log.warn("Failed to recompute attendance after closing stale session {}: {}",
+                    record.getId(), e.getMessage());
+        }
+        log.info("Stale check-in session closed: id={} employeeId={} cutoff={}",
+                record.getId(), record.getEmployeeId(), cutoff);
+        return true;
+    }
+
+    /** Resolves the last legitimate checkout instant exclusively from check-in-time snapshots. */
+    private OffsetDateTime resolveSessionCutoff(CheckinRecord record) {
+        if (record.getSessionExpiresAt() != null) {
+            return record.getSessionExpiresAt();
+        }
+        Site site = siteRepository.findById(record.getSiteId()).orElse(null);
+        return calculateSessionCutoff(record, safeSiteZone(site));
+    }
+
+    private static ZoneId safeSiteZone(Site site) {
+        try {
+            return ZoneId.of(site != null && site.getTimezone() != null ? site.getTimezone() : VietnamTime.ID);
+        } catch (java.time.DateTimeException ignored) {
+            return VietnamTime.ZONE;
+        }
+    }
+
+    static OffsetDateTime calculateSessionCutoff(CheckinRecord record, ZoneId zone) {
+        OffsetDateTime shiftEnd = calculateShiftEnd(record, zone);
+        if (shiftEnd == null) {
+            ZonedDateTime localCheckin = record.getCheckInAt().atZoneSameInstant(zone);
+            return localCheckin.toLocalDate().plusDays(1).atStartOfDay(zone).toOffsetDateTime();
+        }
+        int lateMinutes = Math.max(0, Optional.ofNullable(record.getShiftLateCheckoutMinutes()).orElse(0));
+        return shiftEnd.plusMinutes(lateMinutes);
+    }
+
+    static OffsetDateTime calculateShiftEnd(CheckinRecord record, ZoneId zone) {
+        ZonedDateTime localCheckin = record.getCheckInAt().atZoneSameInstant(zone);
+        if (record.getShiftEndTime() == null) {
+            return null;
+        }
+
+        LocalDate occurrenceDate = localCheckin.toLocalDate();
+        boolean overnight = Boolean.TRUE.equals(record.getShiftAllowOvernight());
+        if (overnight && localCheckin.toLocalTime().isBefore(record.getShiftEndTime())) {
+            occurrenceDate = occurrenceDate.minusDays(1);
+        }
+        LocalDate endDate = overnight ? occurrenceDate.plusDays(1) : occurrenceDate;
+        return ZonedDateTime.of(endDate, record.getShiftEndTime(), zone)
+                .toOffsetDateTime();
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -947,6 +1106,12 @@ public class CheckinService {
                 .checkInAccuracy(r.getCheckInAccuracy())
                 .checkInInsideGeofence(r.isCheckInInsideGeofence())
                 .checkOutAt(r.getCheckOutAt())
+                .sessionClosedAt(r.getSessionClosedAt())
+                .sessionCloseReason(r.getSessionCloseReason())
+                .sessionExpiresAt(r.getSessionExpiresAt())
+                .shiftEndsAt(resolveSnapshottedShiftEnd(r))
+                .overtimeAllowed(Boolean.TRUE.equals(r.getShiftAllowOvertime()))
+                .sessionOpen(isSessionOpen(r))
                 .checkOutLat(r.getCheckOutLat())
                 .checkOutLon(r.getCheckOutLon())
                 .checkOutAccuracy(r.getCheckOutAccuracy())
@@ -998,6 +1163,12 @@ public class CheckinService {
                 .checkInAccuracy(r.getCheckInAccuracy())
                 .checkInInsideGeofence(r.isCheckInInsideGeofence())
                 .checkOutAt(r.getCheckOutAt())
+                .sessionClosedAt(r.getSessionClosedAt())
+                .sessionCloseReason(r.getSessionCloseReason())
+                .sessionExpiresAt(r.getSessionExpiresAt())
+                .shiftEndsAt(resolveSnapshottedShiftEnd(r))
+                .overtimeAllowed(Boolean.TRUE.equals(r.getShiftAllowOvertime()))
+                .sessionOpen(isSessionOpen(r))
                 .checkOutLat(r.getCheckOutLat())
                 .checkOutLon(r.getCheckOutLon())
                 .checkOutAccuracy(r.getCheckOutAccuracy())
@@ -1019,6 +1190,22 @@ public class CheckinService {
                 .employeeNote(r.getEmployeeNote())
                 .employeePhotoUrl(toEvidenceUrl(r))
                 .build();
+    }
+
+    private boolean isSessionOpen(CheckinRecord record) {
+        return record.getCheckOutAt() == null
+                && record.getSessionClosedAt() == null
+                && (record.getSessionExpiresAt() == null
+                    || OffsetDateTime.now().isBefore(record.getSessionExpiresAt()));
+    }
+
+    private OffsetDateTime resolveSnapshottedShiftEnd(CheckinRecord record) {
+        if (record.getShiftEndTime() == null || record.getSessionExpiresAt() == null) {
+            return null;
+        }
+        int checkoutWindow = Math.max(0,
+                Optional.ofNullable(record.getShiftLateCheckoutMinutes()).orElse(0));
+        return record.getSessionExpiresAt().minusMinutes(checkoutWindow);
     }
 
     /** Same mapping, plus batch-resolved display names — avoids a client-side N+1 lookup for
@@ -1074,6 +1261,9 @@ public class CheckinService {
     // success/pending path they see every single day (not just on error, like every other
     // friendly message here).
     private String resolveDisplayMessage(CheckinRecord r) {
+        if ("missing_checkout".equals(r.getSessionCloseReason())) {
+            return "Ca làm đã kết thúc nhưng chưa có chấm công ra. Vui lòng gửi giải trình hoặc liên hệ HR.";
+        }
         boolean checkedOut = r.getCheckOutAt() != null;
         return switch (r.getStatus()) {
             case "valid" -> checkedOut

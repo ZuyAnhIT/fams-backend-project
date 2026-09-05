@@ -87,6 +87,22 @@ public class CheckinRecord {
     @Column(name = "check_out_at")
     private OffsetDateTime checkOutAt;
 
+    /**
+     * Logical session closure. For a normal checkout this equals checkOutAt. For a forgotten
+     * checkout it stores the scheduled cutoff while checkOutAt deliberately remains null, so
+     * attendance/audit screens can still distinguish missing evidence from a real checkout.
+     */
+    @Column(name = "session_closed_at")
+    private OffsetDateTime sessionClosedAt;
+
+    @Column(name = "session_close_reason", length = 30)
+    private String sessionCloseReason;
+
+    /** Immutable checkout deadline calculated from the shift snapshot at check-in. This makes
+     *  proactive expiry queryable and keeps later Shift edits from changing an open session. */
+    @Column(name = "session_expires_at")
+    private OffsetDateTime sessionExpiresAt;
+
     @Column(name = "check_out_lat")
     private Double checkOutLat;
 

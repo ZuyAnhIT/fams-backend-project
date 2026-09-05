@@ -2,6 +2,8 @@ package com.fams.modules.randomcheck.service;
 
 import com.fams.modules.employee.entity.Employee;
 import com.fams.modules.employee.repository.EmployeeRepository;
+import com.fams.modules.checkin.entity.CheckinRecord;
+import com.fams.modules.checkin.repository.CheckinRepository;
 import com.fams.modules.notification.dto.response.NotificationResponse;
 import com.fams.modules.notification.service.NotificationService;
 import com.fams.modules.randomcheck.constant.RandomCheckEventTypes;
@@ -33,14 +35,17 @@ public class RandomCheckDispatchService {
     private final ScheduledCheckRepository scheduledCheckRepository;
     private final EmployeeRepository employeeRepository;
     private final NotificationService notificationService;
+    private final CheckinRepository checkinRepository;
 
     public RandomCheckDispatchService(
             ScheduledCheckRepository scheduledCheckRepository,
             EmployeeRepository employeeRepository,
-            @Lazy NotificationService notificationService) {
+            @Lazy NotificationService notificationService,
+            CheckinRepository checkinRepository) {
         this.scheduledCheckRepository = scheduledCheckRepository;
         this.employeeRepository = employeeRepository;
         this.notificationService = notificationService;
+        this.checkinRepository = checkinRepository;
     }
 
     @Transactional
@@ -59,8 +64,27 @@ public class RandomCheckDispatchService {
             return;
         }
 
+        OffsetDateTime now = OffsetDateTime.now();
+        CheckinRecord openSession = checkinRepository
+                .findByTenantIdAndEmployeeIdAndCheckOutAtIsNullAndSessionClosedAtIsNullAndDeletedAtIsNull(
+                        check.getTenantId(), check.getEmployeeId())
+                .orElse(null);
+        boolean sameWorkingSession = openSession != null
+                && check.getSiteId().equals(openSession.getSiteId())
+                && check.getAssignmentId().equals(openSession.getAssignmentId())
+                && (openSession.getSessionExpiresAt() == null || openSession.getSessionExpiresAt().isAfter(now));
+        if (!sameWorkingSession) {
+            check.setStatus("cancelled");
+            check.setCancelledAt(now);
+            check.setCancelledReason("employee_not_in_active_session");
+            scheduledCheckRepository.save(check);
+            log.info("Cancelled due random check id={} — employee has no matching open session",
+                    scheduledCheckId);
+            return;
+        }
+
         check.setStatus("sent");
-        check.setSentAt(OffsetDateTime.now());
+        check.setSentAt(now);
         scheduledCheckRepository.save(check);
 
         log.info("Dispatched random check id={} employeeId={} siteId={}",

@@ -70,6 +70,14 @@ public class Shift {
     @Column(name = "checkin_policy_override", length = 20)
     private String checkinPolicyOverride;
 
+    /** inherit | enabled | disabled. Controls automatic random checks for this shift. */
+    @Column(name = "random_check_policy", nullable = false, length = 20)
+    private String randomCheckPolicy;
+
+    /** inherit | enabled | disabled. Controls immediate HR-triggered checks independently. */
+    @Column(name = "manual_check_policy", nullable = false, length = 20)
+    private String manualCheckPolicy;
+
     @Column(nullable = false, length = 20)
     private String status;
 
@@ -97,6 +105,8 @@ public class Shift {
         if (createdAt == null) createdAt = now;
         if (updatedAt == null) updatedAt = now;
         if (status == null) status = "active";
+        if (randomCheckPolicy == null) randomCheckPolicy = "inherit";
+        if (manualCheckPolicy == null) manualCheckPolicy = "inherit";
     }
 
     @PreUpdate

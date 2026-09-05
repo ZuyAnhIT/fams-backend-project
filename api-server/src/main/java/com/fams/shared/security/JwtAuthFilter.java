@@ -86,6 +86,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
             "/api/v1/auth/resend-verification", "/api/v1/auth/otp/verify",
             "/api/v1/auth/forgot-password", "/api/v1/auth/reset-password",
             "/api/v1/auth/login/totp", "/api/v1/auth/login/google", "/api/v1/auth/refresh-token",
+            "/api/v1/payments/payos/webhook",
             "/api/v1/invitations/validate", "/api/v1/invitations/accept",
             "/api/v1/platform-invitations/validate", "/api/v1/platform-invitations/accept",
             "/google-login-test.html", "/actuator/health", "/actuator/info"
@@ -100,6 +101,13 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         if (PUBLIC_EXACT_PATHS.contains(path) || "/swagger-ui.html".equals(path)) {
             return true;
         }
+        // The plan catalogue is public for checkout, but plan administration is not.
+        // Skipping every HTTP method here would prevent JWT authentication on POST/PATCH
+        // and make authenticated Platform Admin writes fail with 401.
+        if ("GET".equalsIgnoreCase(request.getMethod())
+                && ("/api/v1/plans".equals(path) || path.startsWith("/api/v1/plans/"))) {
+            return true;
+        }
         for (String prefix : PUBLIC_PATH_PREFIXES) {
             if (path.startsWith(prefix)) {
                 return true;
@@ -111,6 +119,11 @@ public class JwtAuthFilter extends OncePerRequestFilter {
     private boolean isTenantSuspended(String tenantId) {
         if (tenantId == null || tenantId.isEmpty()) return false;
         return Boolean.TRUE.equals(redis.hasKey(TenantService.TENANT_SUSPENDED_PREFIX + tenantId));
+    }
+
+    private boolean isBillingRecoveryPath(HttpServletRequest request) {
+        return request.getServletPath().matches(
+                "/api/v1/tenants/[^/]+/(?:billing-orders(?:/.*)?|subscription)");
     }
 
     private Set<String> loadPlatformAdminPermissions() {
@@ -230,7 +243,8 @@ public class JwtAuthFilter extends OncePerRequestFilter {
                 String tenantId = claims.get("tenantId", String.class);
                 String role = claims.get("role", String.class);
 
-                if (!Boolean.TRUE.equals(isPlatformAdmin) && isTenantSuspended(tenantId)) {
+                if (!Boolean.TRUE.equals(isPlatformAdmin) && isTenantSuspended(tenantId)
+                        && !isBillingRecoveryPath(request)) {
                     log.debug("Rejecting request — tenant {} is suspended", tenantId);
                     response.setStatus(HttpServletResponse.SC_FORBIDDEN);
                     response.setContentType("application/json;charset=UTF-8");

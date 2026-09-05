@@ -34,6 +34,9 @@ public class RandomCheckConfigResponse {
     @Schema(description = "Latest allowed check time", example = "17:00")
     private LocalTime allowedEndTime;
 
+    @Schema(description = "full_shift or custom_window", example = "full_shift")
+    private String windowMode;
+
     @Schema(description = "Verification mode", example = "location_only")
     private String checkMode;
 
@@ -49,6 +52,8 @@ public class RandomCheckConfigResponse {
 
     @Schema(description = "Whether the config is active", example = "true")
     private boolean isActive;
+
+    private boolean manualChecksAllowed;
 
     @Schema(description = "UUID of the user who created this config")
     private UUID createdBy;

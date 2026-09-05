@@ -87,8 +87,8 @@ public class RefreshTokenService {
         if (activeRole == null) {
             activeRole = com.fams.modules.rbac.util.PrimaryRoleResolver.pickPrimary(roles);
         }
-        UUID primaryTenantId = activeRole != null ? activeRole.getTenantId() : null;
-        String primaryRole = activeRole != null ? activeRole.getRole().getName() : null;
+        UUID primaryTenantId = user.isPlatformAdmin() || activeRole == null ? null : activeRole.getTenantId();
+        String primaryRole = user.isPlatformAdmin() || activeRole == null ? null : activeRole.getRole().getName();
 
         if (!user.isPlatformAdmin() && primaryTenantId != null) {
             tenantRepository.findByIdAndDeletedAtIsNull(primaryTenantId).ifPresent(tenant -> {

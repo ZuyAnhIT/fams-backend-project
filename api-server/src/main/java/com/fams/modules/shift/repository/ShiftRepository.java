@@ -19,4 +19,6 @@ public interface ShiftRepository extends JpaRepository<Shift, UUID>, JpaSpecific
     Optional<Shift> findBySiteIdAndIsDefaultTrueAndDeletedAtIsNull(UUID siteId);
 
     List<Shift> findBySiteIdAndStatusAndDeletedAtIsNullOrderByStartTimeAsc(UUID siteId, String status);
+
+    List<Shift> findByTenantIdAndStatusAndDeletedAtIsNullOrderByStartTimeAsc(UUID tenantId, String status);
 }
