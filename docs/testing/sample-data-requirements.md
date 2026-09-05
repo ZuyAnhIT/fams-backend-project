@@ -1,4 +1,4 @@
-> **[ĐÃ TRIỂN KHAI 01/08/2026]** Toàn bộ mục `[CẦN THÊM]` và `[ĐỀ XUẤT MỚI]` trong tài liệu này đã được implement vào `scripts/seed.sh` + `scripts/seed_historical.sql`, test sống bằng reseed sạch từ đầu (0 lỗi) + regression 31/31 pass. 1 mục cố ý KHÔNG làm: **case sync offline bị từ chối do conflict** (mục 2.6) — fake dữ liệu tĩnh cho case này rủi ro sai lệch với logic thật của `OfflineSyncService`, nên để lại test trực tiếp qua API khi cần thay vì seed. Chi tiết xem báo cáo triển khai cuối phiên làm việc.
+> **Tài liệu lịch sử của seed v1/v2.** Bộ seed chức năng hiện hành là v3 và được mô tả tại `docs/testing/demo-seed-data.md`. Không dùng các số lượng, tenant hoặc tài khoản trong tài liệu này làm dữ liệu mặc định nữa.
 >
 > **[SUPERSEDED 01/08/2026]** Tài liệu này được thay thế bởi bản yêu cầu đầy đủ và chi tiết hơn tại **`docs/testing/sample-data-requirements-v2.md`** — viết lại theo bộ yêu cầu chuyên nghiệp do người dùng cung cấp (22 mục, đối chiếu kỹ hơn với cấu trúc DB thật, có bảng "không hỗ trợ/không áp dụng" rõ ràng). Giữ file này lại để tham khảo lịch sử, không dùng làm spec triển khai tiếp theo.
 

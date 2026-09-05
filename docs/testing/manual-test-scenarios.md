@@ -2,7 +2,7 @@
 
 > Tài liệu này là **kịch bản test case chi tiết**, khác với `feature-test-guide.md` (chỉ tra cứu nhanh account/dữ liệu). Ở đây mỗi tính năng có ≥1 case thành công (TH1) + ≥1 case lỗi/validation (TH2...) + case ngoại lệ/biên nếu có, cùng với việc phân loại **Độc lập vs Luồng** và **Tự động vs Thủ công**.
 >
-> Base URL: `http://localhost:8080`. Mật khẩu chung mọi tài khoản mẫu: `Admin@1234`. Toàn bộ tài khoản/dữ liệu tham chiếu trong tài liệu này đã có sẵn sau khi chạy `scripts/seed.sh` (18 tenant sạch).
+> Base URL: `http://localhost:8080`. Mật khẩu chung mọi tài khoản mẫu: `Admin@1234`. Danh sách tài khoản seed v3 hiện hành nằm tại `docs/testing/demo-seed-data.md`. Các email seed v2 còn xuất hiện ở những kịch bản cũ chỉ mang tính lịch sử và cần được thay bằng tài khoản có role tương ứng trong seed v3.
 
 ## 0. Quy ước đọc tài liệu
 
@@ -17,7 +17,7 @@
 | TH2, TH3... | Trường hợp **lỗi/validation** |
 | THx (biên) | Trường hợp **ngoại lệ/biên** |
 
-**Cách chạy toàn bộ script tự động sẵn có**: `bash tests/run_all.sh` (chạy hết ~140 script). **CẢNH BÁO đã ghi trong `feature-test-guide.md`**: chạy xong bộ test tự động sẽ để lại tenant rác do test tự tạo (không set `ownerEmail`) — phải `bash scripts/seed.sh` lại (sau khi xóa volume Postgres/Redis) nếu muốn quay về đúng 18 tenant demo sạch để tiếp tục test tay.
+**Cách chạy toàn bộ script tự động sẵn có**: `bash tests/run_all.sh`. Một số script tích hợp tự tạo dữ liệu tạm; chạy lại `bash scripts/seed.sh` để khôi phục ba tenant demo chuẩn. Seed chỉ lưu trữ các tenant demo v2 đã biết và không xóa tenant do người dùng tự tạo.
 
 ---
 

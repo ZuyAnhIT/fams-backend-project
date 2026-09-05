@@ -2,7 +2,7 @@
 -- Dọn dẹp bộ dữ liệu hiệu năng (scripts/seed_perf.sql)
 -- ============================================================
 -- Xóa toàn bộ tenant/user do seed_perf.sql sinh ra, đưa database về lại trạng thái chỉ còn
--- bộ demo chức năng sạch (18 tenant từ scripts/seed.sh). An toàn: chỉ động tới dữ liệu có
+-- bộ demo chức năng sạch (3 tenant từ scripts/seed.sh). An toàn: chỉ động tới dữ liệu có
 -- slug/email bắt đầu bằng "perf-"/"perf." — không đụng tới bất kỳ tenant demo nào khác.
 
 BEGIN;

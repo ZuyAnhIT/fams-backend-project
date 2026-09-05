@@ -2,8 +2,8 @@
 -- FAMS Performance/Load Test Dataset (scripts/seed_perf.sql)
 -- ============================================================
 -- Bộ dữ liệu HIỆU NĂNG — TÁCH BIỆT HOÀN TOÀN khỏi bộ demo chức năng
--- (scripts/seed.sh + scripts/seed_historical.sql), đúng theo
--- docs/testing/sample-data-requirements-v2.md mục 20.4.
+-- (scripts/seed.sh + scripts/seed_demo.sql). Đây là bộ tải riêng, không thuộc
+-- bộ demo chức năng nhỏ được mô tả tại docs/testing/demo-seed-data.md.
 --
 -- CẢNH BÁO QUAN TRỌNG:
 --   - Script này insert THẲNG bằng SQL (KHÔNG qua API), nên KHÔNG đi qua bất kỳ business
@@ -32,7 +32,7 @@
 -- An toàn khi chạy lại nhiều lần: dùng ON CONFLICT DO NOTHING / NOT EXISTS ở những chỗ có
 -- unique constraint tự nhiên (slug, email); các bảng không có unique tự nhiên (checkins,
 -- assignments) sẽ SINH TRÙNG nếu chạy lại — do đó chỉ nên chạy 1 LẦN trên 1 database sạch,
--- không thiết kế idempotent như seed.sh/seed_historical.sql (mục đích khác nhau: đây là nạp
+-- không thiết kế idempotent như seed.sh/seed_demo.sql (mục đích khác nhau: đây là nạp
 -- volume 1 lần cho 1 đợt test hiệu năng, không phải dataset tái sử dụng liên tục).
 -- ============================================================
 
@@ -211,7 +211,7 @@ FROM perf_assignments;
 
 -- ── 9. Checkins — khối lượng chính của bộ dữ liệu hiệu năng ─────────────────────
 -- Mỗi nhân viên: N ngày làm việc gần nhất (mega=90 ngày, thường=60 ngày), bỏ qua T7/CN,
--- giờ vào/ra lệch nhẹ quanh giờ ca (cùng công thức biến thiên đã dùng ở seed_historical.sql).
+-- giờ vào/ra lệch nhẹ quanh giờ ca (cùng nguyên tắc biến thiên của seed_demo.sql).
 INSERT INTO checkins (
   id, tenant_id, site_id, employee_id, assignment_id, shift_id, status,
   check_in_at, check_in_lat, check_in_lon, check_in_accuracy, check_in_inside_geofence,
