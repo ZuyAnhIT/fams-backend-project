@@ -23,7 +23,7 @@ Test giả định `admin@fams.com` "chưa có tenant nào" trước khi test �
 
 ### 4. Bước fetch avatar công khai không route được từ sandbox (`test_profile_fields_and_avatar.sh`)
 
-`S3_PUBLIC_URL` trỏ tới 1 IP LAN thật (`192.168.1.11`) — đúng mục đích để điện thoại/thiết bị thật trong buổi dev truy cập được, **không đổi cấu hình thật**. Chỉ thêm 1 hàm nhỏ trong test để quy đổi URL sang `localhost:9000` (cùng MinIO, chỉ khác đường vào) khi thực hiện bước "kiểm tra file có tải được không" — cách ly đúng phần môi trường-sandbox-specific khỏi phần logic nghiệp vụ thật.
+`S3_PUBLIC_URL` trỏ tới 1 IP LAN thật (`192.168.1.13`) — đúng mục đích để điện thoại/thiết bị thật trong buổi dev truy cập được, **không đổi cấu hình thật**. Chỉ thêm 1 hàm nhỏ trong test để quy đổi URL sang `localhost:9000` (cùng MinIO, chỉ khác đường vào) khi thực hiện bước "kiểm tra file có tải được không" — cách ly đúng phần môi trường-sandbox-specific khỏi phần logic nghiệp vụ thật.
 
 ### 5. Ô nhiễm dữ liệu plan toàn nền tảng (2 vấn đề nghiêm trọng nhất tìm thấy)
 

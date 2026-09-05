@@ -1,6 +1,6 @@
 # Hướng dẫn test tính năng bằng dữ liệu mẫu — FAMS
 
-> Áp dụng cho DB vừa reseed sạch (18 tenant, 146 nhân viên — xem `docs/testing/sample-data-requirements.md`). Mật khẩu mặc định cho **MỌI** tài khoản mẫu: **`Admin@1234`**. Base URL dev: `http://localhost:8080`, Swagger UI: `http://localhost:8080/swagger-ui.html`.
+> **Lưu ý:** phần tra cứu tài khoản bên dưới là hồ sơ kiểm thử lịch sử của seed v2 và không còn là nguồn dữ liệu mặc định. Seed v3 hiện có 3 tenant, trong đó `demo-an-phat` có 15 thành viên. Dùng danh sách tài khoản hiện hành tại `docs/testing/demo-seed-data.md`. Mật khẩu mặc định: **`Admin@1234`**. Base URL dev: `http://localhost:8080`.
 >
 > Tài liệu chia 2 phần: **Phần A** — tra cứu nhanh tài khoản/dữ liệu theo từng tính năng đơn lẻ (đối chiếu đúng thứ tự checklist 99 mục bạn đưa). **Phần B** — các kịch bản kiểm thử theo luồng nghiệp vụ nhiều bước.
 >
