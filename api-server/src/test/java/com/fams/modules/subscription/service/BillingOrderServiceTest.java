@@ -5,9 +5,14 @@ import com.fams.modules.auth.repository.UserRepository;
 import com.fams.modules.subscription.entity.BillingOrder;
 import com.fams.modules.subscription.entity.BillingOrder.BillingOrderStatus;
 import com.fams.modules.subscription.entity.BillingOrder.BillingInvoiceStatus;
+import com.fams.modules.subscription.entity.Plan;
+import com.fams.modules.subscription.entity.TenantSubscription;
 import com.fams.modules.subscription.entity.TenantSubscription.BillingCycle;
 import com.fams.modules.subscription.repository.BillingOrderRepository;
 import com.fams.modules.subscription.repository.PlanRepository;
+import com.fams.modules.subscription.repository.TenantSubscriptionRepository;
+import com.fams.modules.subscription.dto.request.CreateBillingOrderRequest;
+import com.fams.modules.tenant.entity.Tenant;
 import com.fams.modules.tenant.repository.TenantRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -30,6 +35,7 @@ class BillingOrderServiceTest {
 
     @Mock BillingOrderRepository orderRepository;
     @Mock PlanRepository planRepository;
+    @Mock TenantSubscriptionRepository tenantSubscriptionRepository;
     @Mock TenantRepository tenantRepository;
     @Mock UserRepository userRepository;
     @Mock PaymentGateway paymentGateway;
@@ -40,7 +46,7 @@ class BillingOrderServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new BillingOrderService(orderRepository, planRepository, tenantRepository,
+        service = new BillingOrderService(orderRepository, planRepository, tenantSubscriptionRepository, tenantRepository,
                 userRepository, paymentGateway, subscriptionService, auditLogService,
                 "http://localhost:3000", 30);
     }
@@ -115,6 +121,70 @@ class BillingOrderServiceTest {
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> BillingOrderService.buildPayOsDescription(2_821_109_907_456L))
                 .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void activeEffectiveSubscriptionCannotPurchaseTheSamePlanAgain() {
+        UUID tenantId = UUID.randomUUID();
+        UUID ownerId = UUID.randomUUID();
+        UUID planId = UUID.randomUUID();
+        Tenant tenant = Tenant.builder().id(tenantId).ownerId(ownerId).status("active").build();
+        Plan plan = Plan.builder().id(planId).displayName("Doanh nghiệp").isActive(true).build();
+        TenantSubscription subscription = TenantSubscription.builder()
+                .tenantId(tenantId)
+                .planId(planId)
+                .status(TenantSubscription.SubscriptionStatus.ACTIVE)
+                .expiresAt(OffsetDateTime.now().plusDays(5))
+                .build();
+        CreateBillingOrderRequest request = new CreateBillingOrderRequest();
+        request.setPlanId(planId);
+        request.setBillingCycle(BillingCycle.MONTHLY);
+
+        when(tenantRepository.findByIdAndDeletedAtIsNull(tenantId)).thenReturn(Optional.of(tenant));
+        when(orderRepository.existsByTenantIdAndStatusIn(eq(tenantId), any())).thenReturn(false);
+        when(planRepository.findByIdAndDeletedAtIsNull(planId)).thenReturn(Optional.of(plan));
+        when(tenantSubscriptionRepository.findByTenantId(tenantId)).thenReturn(Optional.of(subscription));
+
+        assertThatThrownBy(() -> service.createOrder(tenantId, request, ownerId, false))
+                .isInstanceOf(SubscriptionPurchaseConflictException.class)
+                .hasMessageContaining("effective active subscription");
+
+        verify(orderRepository, never()).nextOrderCode();
+        verifyNoInteractions(paymentGateway);
+    }
+
+    @Test
+    void expiredSubscriptionMayPurchaseTheSamePlanAgain() {
+        UUID tenantId = UUID.randomUUID();
+        UUID ownerId = UUID.randomUUID();
+        UUID planId = UUID.randomUUID();
+        Tenant tenant = Tenant.builder().id(tenantId).ownerId(ownerId).status("active").name("Công ty A").build();
+        Plan plan = Plan.builder().id(planId).name("starter").displayName("Khởi đầu")
+                .priceMonthly(java.math.BigDecimal.valueOf(10_000)).isActive(true).build();
+        TenantSubscription subscription = TenantSubscription.builder()
+                .tenantId(tenantId)
+                .planId(planId)
+                .status(TenantSubscription.SubscriptionStatus.ACTIVE)
+                .expiresAt(OffsetDateTime.now().minusSeconds(1))
+                .build();
+        CreateBillingOrderRequest request = new CreateBillingOrderRequest();
+        request.setPlanId(planId);
+        request.setBillingCycle(BillingCycle.MONTHLY);
+
+        when(tenantRepository.findByIdAndDeletedAtIsNull(tenantId)).thenReturn(Optional.of(tenant));
+        when(orderRepository.existsByTenantIdAndStatusIn(eq(tenantId), any())).thenReturn(false);
+        when(planRepository.findByIdAndDeletedAtIsNull(planId)).thenReturn(Optional.of(plan));
+        when(tenantSubscriptionRepository.findByTenantId(tenantId)).thenReturn(Optional.of(subscription));
+        when(orderRepository.nextOrderCode()).thenReturn(1_700_000_000_000L);
+        when(userRepository.findByIdAndDeletedAtIsNull(ownerId)).thenReturn(Optional.of(
+                com.fams.modules.auth.entity.User.builder().id(ownerId).email("owner@example.com").build()));
+        when(paymentGateway.createPaymentLink(any())).thenReturn(
+                new PaymentGateway.CreatedLink("link-new", "https://pay.payos.vn/new", "qr", "PENDING"));
+
+        var result = service.createOrder(tenantId, request, ownerId, false);
+
+        assertThat(result.getStatus()).isEqualTo(BillingOrderStatus.PENDING);
+        verify(paymentGateway).createPaymentLink(any());
     }
 
     @Test
