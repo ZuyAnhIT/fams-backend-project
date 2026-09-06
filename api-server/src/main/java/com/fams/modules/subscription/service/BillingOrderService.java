@@ -13,6 +13,7 @@ import com.fams.modules.subscription.entity.Plan;
 import com.fams.modules.subscription.entity.TenantSubscription.BillingCycle;
 import com.fams.modules.subscription.repository.BillingOrderRepository;
 import com.fams.modules.subscription.repository.PlanRepository;
+import com.fams.modules.subscription.repository.TenantSubscriptionRepository;
 import com.fams.modules.subscription.specification.BillingOrderSpecification;
 import com.fams.modules.tenant.entity.Tenant;
 import com.fams.modules.tenant.repository.TenantRepository;
@@ -61,6 +62,7 @@ public class BillingOrderService {
 
     private final BillingOrderRepository orderRepository;
     private final PlanRepository planRepository;
+    private final TenantSubscriptionRepository subscriptionRepository;
     private final TenantRepository tenantRepository;
     private final UserRepository userRepository;
     private final PaymentGateway paymentGateway;
@@ -71,6 +73,7 @@ public class BillingOrderService {
 
     public BillingOrderService(BillingOrderRepository orderRepository,
                                PlanRepository planRepository,
+                               TenantSubscriptionRepository subscriptionRepository,
                                TenantRepository tenantRepository,
                                UserRepository userRepository,
                                PaymentGateway paymentGateway,
@@ -80,6 +83,7 @@ public class BillingOrderService {
                                @Value("${app.billing.payment-link-expiry-minutes:30}") long paymentLinkExpiryMinutes) {
         this.orderRepository = orderRepository;
         this.planRepository = planRepository;
+        this.subscriptionRepository = subscriptionRepository;
         this.tenantRepository = tenantRepository;
         this.userRepository = userRepository;
         this.paymentGateway = paymentGateway;
@@ -108,6 +112,17 @@ public class BillingOrderService {
         Plan plan = planRepository.findByIdAndDeletedAtIsNull(request.getPlanId())
                 .orElseThrow(() -> new ResourceNotFoundException("Plan not found: " + request.getPlanId()));
         if (!plan.isActive()) throw new IllegalStateException("This plan is not available for purchase");
+
+        OffsetDateTime now = OffsetDateTime.now();
+        subscriptionRepository.findByTenantId(tenantId)
+                .filter(subscription -> subscription.getStatus()
+                        == com.fams.modules.subscription.entity.TenantSubscription.SubscriptionStatus.ACTIVE)
+                .filter(subscription -> subscription.getExpiresAt() == null
+                        || subscription.getExpiresAt().isAfter(now))
+                .filter(subscription -> plan.getId().equals(subscription.getPlanId()))
+                .ifPresent(subscription -> {
+                    throw new SubscriptionPurchaseConflictException(plan.getDisplayName());
+                });
 
         long amount = toVndAmount(request.getBillingCycle() == com.fams.modules.subscription.entity.TenantSubscription.BillingCycle.YEARLY
                 ? plan.getPriceYearly() : plan.getPriceMonthly());
@@ -152,8 +167,11 @@ public class BillingOrderService {
         } catch (RuntimeException ex) {
             order.setStatus(BillingOrderStatus.FAILED);
             order.setProviderStatus("CREATE_FAILED");
-            order.setFailureReason(trim(ex.getMessage(), 500));
+            String failure = providerFailureReason(ex);
+            order.setFailureReason(trim(failure, 500));
             orderRepository.save(order);
+            log.warn("Checkout creation failed for orderCode={} tenantId={}: {}",
+                    orderCode, tenantId, failure, ex);
             throw ex;
         }
     }
@@ -462,5 +480,15 @@ public class BillingOrderService {
     private String trim(String value, int max) {
         if (value == null || value.length() <= max) return value;
         return value.substring(0, max);
+    }
+
+    private String providerFailureReason(Throwable error) {
+        Throwable current = error;
+        String detail = null;
+        while (current != null) {
+            if (StringUtils.hasText(current.getMessage())) detail = current.getMessage().trim();
+            current = current.getCause();
+        }
+        return StringUtils.hasText(detail) ? detail : error.getClass().getSimpleName();
     }
 }

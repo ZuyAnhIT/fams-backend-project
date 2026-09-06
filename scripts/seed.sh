@@ -3,12 +3,12 @@
 #
 # The seed is intentionally small and deterministic:
 #   - 1 standalone Platform Admin (created by Flyway; never owns/joins a tenant)
-#   - 3 active companies
+#   - 5 companies across Active/Trial/Expired/Cancelled lifecycle states
 #   - 1 fully populated company with exactly 15 authenticated members
-#   - September 2026 attendance/random-check history for the primary company
+#   - 15/07–05/09/2026 attendance, random-check and billing history
 #
 # Safe to run repeatedly. It archives the legacy v2 demo tenants, reconciles the
-# deterministic v3 records, then runs database-level integrity assertions.
+# deterministic v4 records, then runs database-level integrity assertions.
 
 set -euo pipefail
 
@@ -50,7 +50,7 @@ run_seed_psql() {
         -U "$SEED_DB_USER" -d "$SEED_DB_NAME" -f "$sql_file"
 }
 
-echo "=== FAMS curated demo seed v3 ==="
+echo "=== FAMS curated demo seed v4 ==="
 echo "Database: $SEED_DB_NAME"
 echo "Loading deterministic demo records..."
 run_seed_psql "$SEED_SQL_FILE"
@@ -87,7 +87,9 @@ Primary company — Công ty CP Xây dựng An Phát:
 Lightweight companies:
   owner.minhlong@fams.test             TENANT_ADMIN — Logistics Minh Long
   owner.saoviet@fams.test              TENANT_ADMIN — Dịch vụ Sao Việt
+  owner.phuchung@fams.test             TENANT_ADMIN — Nội thất Phúc Hưng
+  owner.bacnam@fams.test               TENANT_ADMIN — Cơ điện Bắc Nam
 
-All accounts above are active and email-verified. Business dates start at 01/09/2026.
+All accounts above are active and email-verified. Business history spans 15/07–05/09/2026.
 See docs/testing/demo-seed-data.md for the complete data map.
 SUMMARY

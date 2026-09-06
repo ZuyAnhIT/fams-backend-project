@@ -14,21 +14,23 @@ Hoặc:
 bash scripts/seed.sh
 ```
 
-Seed có tính idempotent: chạy lại sẽ cập nhật đúng các bản ghi demo định danh sẵn, không nhân bản dữ liệu. Sau khi nạp, `scripts/verify_demo_seed.sql` tự kiểm tra số lượng, trạng thái tài khoản, vai trò, tenant isolation và quan hệ nghiệp vụ.
+Seed có tính idempotent: chạy lại sẽ dựng lại đúng các bản ghi demo định danh sẵn, không nhân bản dữ liệu. Lịch sử do seed quản lý được nhận diện bằng UUID ổn định; dữ liệu thử nghiệm được người dùng tự tạo trong tenant demo không bị xóa. Sau khi nạp, `scripts/verify_demo_seed.sql` tự kiểm tra số lượng, trạng thái tài khoản, vai trò, tenant isolation, phân bổ tình huống chấm công và vòng đời thanh toán.
 
 Mật khẩu chung của tài khoản demo: `Admin@1234`.
 
 ## Phạm vi dữ liệu
 
-Chỉ có ba công ty demo đang hoạt động:
+Có năm công ty demo để thể hiện đủ vòng đời khách hàng, nhưng dữ liệu vận hành chi tiết vẫn tập trung ở An Phát:
 
-| Công ty | Slug | Mức dữ liệu | Gói |
+| Công ty | Slug | Mức dữ liệu | Gói/thuê bao |
 |---|---|---|---|
-| Công ty CP Xây dựng An Phát | `demo-an-phat` | Đầy đủ | Doanh nghiệp |
-| Công ty TNHH Logistics Minh Long | `demo-minh-long` | Tối giản | Khởi đầu |
-| Công ty TNHH Dịch vụ Sao Việt | `demo-sao-viet` | Tối giản | Khởi đầu |
+| Công ty CP Xây dựng An Phát | `demo-an-phat` | Đầy đủ | Doanh nghiệp / Active |
+| Công ty TNHH Logistics Minh Long | `demo-minh-long` | Tối giản | Khởi đầu / Active |
+| Công ty TNHH Dịch vụ Sao Việt | `demo-sao-viet` | Tối giản | Chuyên nghiệp / Cancelled |
+| Công ty TNHH Nội thất Phúc Hưng | `demo-phuc-hung` | Tối giản | Dùng thử / Trial |
+| Công ty CP Cơ điện Bắc Nam | `demo-bac-nam` | Tối giản | Cơ bản / Expired |
 
-Tất cả công ty dùng `Asia/Ho_Chi_Minh`, locale `vi-VN`, tiền tệ `VND` và thuê bao đang hoạt động.
+Tất cả công ty dùng `Asia/Ho_Chi_Minh`, locale `vi-VN` và tiền tệ `VND`. Trạng thái tenant/thuê bao được tạo có chủ đích để báo cáo nền tảng thể hiện Active, Trial, Expired và Cancelled.
 
 Các tenant demo v2 cũ được lưu trữ bằng soft delete khi chạy seed v3. Dữ liệu do người dùng tự tạo và tenant không thuộc danh sách demo cũ không bị tác động.
 
@@ -85,34 +87,70 @@ Bốn địa điểm:
 
 Tây Hồ có ca sáng, chiều và qua đêm để kiểm thử nhiều khung giờ. Các địa điểm khác dùng ca hành chính/công trường và đều tuân theo giờ Việt Nam.
 
-## Dữ liệu lịch sử tháng 09/2026
+## Dữ liệu vận hành từ 15/07 đến 05/09/2026
 
-Seed tạo 48 phiên chấm công từ ngày 01–04/09/2026 cho 12 người có phân ca, gồm:
+Seed tạo cố định 524 phiên chấm công cho 12 người có phân ca. Trụ sở làm thứ Hai–thứ Sáu; công trường làm thứ Hai–thứ Bảy. Trong 544 lượt được phân công có 20 lượt vắng mặt thực tế, thể hiện bằng việc không phát sinh phiên chấm công.
 
-- ngày công bình thường;
-- một trường hợp đi muộn;
-- một trường hợp về sớm;
-- một trường hợp OT;
-- một trường hợp quên checkout đã được đóng logic, không để phiên mở treo;
-- kiểm tra ngẫu nhiên thành công, không phản hồi và sai vị trí;
-- hai vi phạm chưa xử lý để HR thử quy trình duyệt;
+Phân bổ dữ liệu hiện có:
+
+- 17 lượt đi muộn sau khi trừ thời gian ân hạn;
+- 8 lượt về sớm;
+- 26 lượt có OT, trong đó có một lượt vượt ngưỡng OT ngày;
+- 3 lượt quên checkout đã được hệ thống đóng đúng nghiệp vụ, không để phiên mở treo;
+- 42 phiên được đồng bộ từ chế độ offline;
+- một phiên `pending_review` và một phiên `rejected` để thử quy trình HR;
+- 20 lượt không đến làm/không chấm công;
+- tổng giờ làm thay đổi theo ca, thời gian đi muộn, về sớm và OT;
+- ngày công bình thường chiếm đa số để tỷ lệ báo cáo không bị méo.
+
+Seed còn tạo 18 lần kiểm tra ngẫu nhiên từ tháng 7 đến tháng 9, gồm:
+
+- kiểm tra tự động và hai kiểm tra thủ công bất chợt;
+- hoàn thành hợp lệ;
+- không phản hồi;
+- sai vị trí;
+- Face ID không khớp;
+- liveness thất bại;
+- AI xác minh khuôn mặt timeout;
+- vi phạm đã xác nhận, chấp nhận giải trình, chưa xử lý và xử lý quá hạn;
+- vi phạm có/không ảnh hưởng bảng công;
 - hồ sơ Face ID demo cho toàn bộ nhân sự vận hành;
-- thông báo phân công và một audit log khởi tạo dữ liệu.
+- thông báo phân công, kiểm tra ngẫu nhiên và thiếu checkout;
+- audit log import nhân viên, cấu hình công trình, random check, phân công và xuất báo cáo.
 
-## Hai công ty tối giản
+## Dữ liệu thanh toán và báo cáo nền tảng
+
+Có 13 đơn thanh toán mẫu, trải từ tháng 7 đến tháng 9 và dùng đúng VND:
+
+| Trạng thái | Số đơn | Ý nghĩa |
+|---|---:|---|
+| `PAID` | 7 | Doanh thu thực thu, có đơn đã xuất hóa đơn và đang chờ xuất |
+| `FAILED` | 2 | Ngân hàng từ chối hoặc không đủ số dư |
+| `CANCELLED` | 1 | Khách hàng chủ động hủy |
+| `EXPIRED` | 1 | Quá thời hạn thanh toán |
+| `UNDERPAID` | 1 | Đã nhận thiếu tiền, cần đối soát và chưa xuất hóa đơn |
+| `PENDING` | 1 | Link thanh toán còn chờ khách hàng thực hiện |
+
+Các bất biến hóa đơn được giữ đúng: chỉ đơn `PAID` mới có trạng thái chờ xuất/đã xuất hóa đơn; đơn chưa thành công chỉ có chi tiết giao dịch. Lịch sử gia hạn của An Phát và Minh Long tạo dữ liệu cho renewal, doanh thu thực thu, MRR và doanh thu theo gói.
+
+Minh Long hết hạn ngày 12/09 và An Phát hết hạn ngày 20/09, vì vậy các bộ lọc thuê bao sắp hết hạn 7, 15 và 30 ngày đều có dữ liệu để kiểm thử.
+
+## Bốn công ty tối giản
 
 | Email | Công ty | Vai trò | Trạng thái |
 |---|---|---|---|
 | `owner.minhlong@fams.test` | Logistics Minh Long | `TENANT_ADMIN` | Hoạt động, email đã xác thực |
 | `owner.saoviet@fams.test` | Dịch vụ Sao Việt | `TENANT_ADMIN` | Hoạt động, email đã xác thực |
+| `owner.phuchung@fams.test` | Nội thất Phúc Hưng | `TENANT_ADMIN` | Hoạt động, email đã xác thực |
+| `owner.bacnam@fams.test` | Cơ điện Bắc Nam | `TENANT_ADMIN` | Hoạt động, email đã xác thực |
 
-Hai công ty này chỉ phục vụ màn hình quản trị nền tảng, thuê bao và kiểm tra tenant isolation; không chứa dữ liệu nhân sự/công trình dư thừa.
+Bốn công ty này phục vụ màn hình quản trị nền tảng, vòng đời thuê bao, thanh toán và kiểm tra tenant isolation; không chứa dữ liệu nhân sự/công trình dư thừa.
 
 ## Các bất biến được kiểm tra tự động
 
 Seed sẽ trả lỗi nếu một trong các điều kiện sau bị vi phạm:
 
-- không đủ đúng 3 tenant demo hoặc 15 thành viên An Phát;
+- không đủ 5 tenant demo hoặc 15 thành viên seed chuẩn của An Phát;
 - tài khoản demo chưa hoạt động/chưa xác thực email;
 - Platform Admin sở hữu, tham gia hoặc có hồ sơ tại công ty;
 - một nhân viên có thiếu hoặc thừa role công ty;
@@ -121,5 +159,9 @@ Seed sẽ trả lỗi nếu một trong các điều kiện sau bị vi phạm:
 - nhân viên thiếu phòng ban chính;
 - assignment tham chiếu nhân viên/site/shift thuộc tenant khác;
 - công ty sai múi giờ Việt Nam, tiền tệ VND hoặc thiếu thuê bao;
-- lịch sử chấm công bắt đầu trước tháng 09/2026;
+- ma trận subscription thiếu Active, Trial, Expired hoặc Cancelled;
+- lịch sử không đủ 524 phiên/20 lượt vắng hoặc không phủ cả tháng 7, 8 và 9;
+- thiếu các trường hợp muộn, về sớm, OT, thiếu checkout, chờ duyệt và từ chối;
+- thiếu 18 random check hoặc không đủ năm nhóm vi phạm;
+- thiếu trạng thái thanh toán, doanh thu ba tháng hoặc sai vòng đời hóa đơn;
 - còn phiên check-in demo mở quá hạn.
