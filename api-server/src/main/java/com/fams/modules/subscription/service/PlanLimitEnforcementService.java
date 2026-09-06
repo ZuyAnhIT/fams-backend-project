@@ -74,13 +74,24 @@ public class PlanLimitEnforcementService {
      *  @param actorUserId who attempted the action, for the denial audit log — may be null. */
     @Transactional(readOnly = true)
     public void assertEmployeeLimit(UUID tenantId, UUID actorUserId) {
+        assertEmployeeCapacity(tenantId, 1, actorUserId);
+    }
+
+    /**
+     * Checks a whole employee batch with one count query. This is used by Excel preflight and
+     * import so bulk creation cannot bypass maxEmployees or issue one count query per row.
+     */
+    @Transactional(readOnly = true)
+    public void assertEmployeeCapacity(UUID tenantId, int additionalEmployees, UUID actorUserId) {
+        if (additionalEmployees <= 0) return;
         PlanLimits limits = resolveLimits(tenantId).orElse(null);
         if (limits == null || limits.getMaxEmployees() == null) return;
 
         long current = employeeRepository.countByTenantIdAndDeletedAtIsNull(tenantId);
-        if (current >= limits.getMaxEmployees()) {
+        long requestedTotal = current + additionalEmployees;
+        if (requestedTotal > limits.getMaxEmployees()) {
             String message = "Employee limit reached: plan allows " + limits.getMaxEmployees()
-                    + ", currently at " + current;
+                    + ", currently at " + current + ", requested additional " + additionalEmployees;
             recordDenied(tenantId, actorUserId, "employee", message);
             throw new PlanLimitExceededException(message);
         }

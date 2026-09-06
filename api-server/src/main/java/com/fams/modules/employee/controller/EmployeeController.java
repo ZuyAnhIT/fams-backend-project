@@ -5,6 +5,7 @@ import com.fams.modules.employee.dto.request.CreateEmployeeRequest;
 import com.fams.modules.employee.dto.request.UpdateEmployeeRequest;
 import com.fams.modules.employee.dto.response.EmployeeDetailResponse;
 import com.fams.modules.employee.dto.response.EmployeeImportResponse;
+import com.fams.modules.employee.dto.response.EmployeeImportValidationResponse;
 import com.fams.modules.employee.dto.response.EmployeeResponse;
 import com.fams.modules.employee.service.EmployeeExportService;
 import com.fams.modules.employee.service.EmployeeService;
@@ -76,8 +77,9 @@ public class EmployeeController {
     @Operation(
         summary = "Import employees from Excel",
         description = "Imports employee HR profiles from an .xlsx file. " +
-                      "Row 1 must be a header with columns (case-insensitive): " +
-                      "firstName, lastName, email, phone, employeeCode, position, department, hiredDate. " +
+                      "Use GET /import/template for the standard Vietnamese workbook, or provide the legacy " +
+                      "case-insensitive headers firstName, lastName, email, phone, employeeCode, position, " +
+                      "department and hiredDate. POST /import/validate checks the file without writing data. " +
                       "Rows with validation errors are skipped and reported; valid rows are created. " +
                       "Requires employees:create permission. Callable by TENANT_ADMIN or HR_MANAGER."
     )
@@ -99,6 +101,50 @@ public class EmployeeController {
         EmployeeImportResponse response = employeeService.importEmployees(
                 tenantId, file, userDetails.getUserId(), userDetails.isPlatformAdmin());
         return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    @Operation(
+        summary = "Validate an employee import workbook without creating data",
+        description = "Checks the Vietnamese/legacy header structure and every non-empty row, " +
+                      "then returns field-level errors without inserting employees. " +
+                      "Requires employees:create permission."
+    )
+    @ApiResponses({
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Validation completed",
+            content = @Content(schema = @Schema(implementation = EmployeeImportValidationResponse.class))),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "File is empty, too large, not .xlsx or unreadable"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "Unauthorized"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "403", description = "Insufficient permissions")
+    })
+    @PreAuthorize("hasAuthority('employees:create')")
+    @PostMapping(value = "/import/validate", consumes = "multipart/form-data")
+    public ResponseEntity<ApiResponse<EmployeeImportValidationResponse>> validateEmployeeImport(
+            @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
+            @Parameter(description = "Excel file (.xlsx, max 5 MB)") @RequestParam("file") MultipartFile file,
+            @AuthenticationPrincipal FamsUserDetails userDetails) {
+        EmployeeImportValidationResponse response = employeeService.validateEmployeesImport(
+                tenantId, file, userDetails.getUserId(), userDetails.isPlatformAdmin());
+        return ResponseEntity.ok(ApiResponse.success(response));
+    }
+
+    @Operation(
+        summary = "Download the standard Vietnamese employee import template",
+        description = "Returns a blank .xlsx workbook with Vietnamese headers and a separate instruction sheet. " +
+                      "Requires employees:create permission."
+    )
+    @PreAuthorize("hasAuthority('employees:create')")
+    @GetMapping("/import/template")
+    public ResponseEntity<byte[]> downloadEmployeeImportTemplate(
+            @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
+            @AuthenticationPrincipal FamsUserDetails userDetails) {
+        byte[] data = employeeService.createEmployeeImportTemplate(
+                tenantId, userDetails.getUserId(), userDetails.isPlatformAdmin());
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        "attachment; filename=\"mau-import-nhan-vien.xlsx\"")
+                .contentType(MediaType.parseMediaType(
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
+                .body(data);
     }
 
     @Operation(
@@ -125,7 +171,8 @@ public class EmployeeController {
         byte[] data = employeeService.exportImportErrors(
                 tenantId, file, userDetails.getUserId(), userDetails.isPlatformAdmin());
         return ResponseEntity.ok()
-                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"import-errors.xlsx\"")
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        "attachment; filename=\"danh-sach-nhan-vien-can-sua.xlsx\"")
                 .contentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
                 .body(data);
     }

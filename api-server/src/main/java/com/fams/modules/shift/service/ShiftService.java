@@ -16,6 +16,7 @@ import com.fams.modules.assignment.service.AssignmentService;
 import com.fams.modules.site.repository.SiteRepository;
 import com.fams.modules.tenant.repository.TenantRepository;
 import com.fams.shared.exception.DuplicateResourceException;
+import com.fams.shared.exception.BusinessException;
 import com.fams.shared.exception.ResourceNotFoundException;
 import com.fams.shared.pagination.PageResponse;
 import com.fams.shared.security.HttpRequestUtils;
@@ -25,6 +26,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -231,7 +233,10 @@ public class ShiftService {
         // would recreate the exact stale "still working" state this setting is meant to avoid;
         // zero minutes would advertise OT while closing it at the scheduled shift end.
         if (shift.isAllowOvertime() && shift.getLateCheckoutMinutes() <= 0) {
-            throw new IllegalArgumentException(
+            throw new BusinessException(
+                    "INVALID_OT_CHECKOUT_WINDOW",
+                    "Khi bật tăng ca, thời hạn cho phép checkout sau giờ kết thúc ca phải lớn hơn 0 phút.",
+                    HttpStatus.BAD_REQUEST,
                     "lateCheckoutMinutes must be greater than 0 when allowOvertime is true");
         }
 

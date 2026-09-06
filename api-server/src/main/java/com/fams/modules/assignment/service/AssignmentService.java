@@ -7,6 +7,7 @@ import com.fams.modules.assignment.entity.Assignment;
 import com.fams.modules.assignment.repository.AssignmentRepository;
 import com.fams.modules.assignment.specification.AssignmentSpecification;
 import com.fams.modules.assignment.util.DayOfWeekBitmask;
+import com.fams.modules.assignment.util.AssignmentLifecycleResolver;
 import com.fams.modules.audit.service.AuditLogService;
 import com.fams.modules.employee.repository.EmployeeRepository;
 import com.fams.modules.randomcheck.service.ScheduledCheckCancelService;
@@ -716,10 +717,29 @@ public class AssignmentService {
         List<Assignment> assignments = assignmentRepository
                 .findByTenantIdAndEmployeeIdAndDeletedAtIsNullOrderByStartDateDesc(tenantId, employee.getId());
 
+        return toResponsesWithContext(assignments);
+    }
+
+    /**
+     * Converts a cross-site assignment collection with site and shift context in two batched
+     * lookups. Employee detail uses this method as well as self-service listings so neither API
+     * falls back to exposing bare UUIDs to the UI.
+     */
+    @Transactional(readOnly = true)
+    public List<AssignmentResponse> toResponsesWithContext(List<Assignment> assignments) {
+        if (assignments == null || assignments.isEmpty()) return List.of();
+
+        List<UUID> employeeIds = assignments.stream()
+                .map(Assignment::getEmployeeId).distinct().toList();
         List<UUID> shiftIds = assignments.stream()
                 .map(Assignment::getShiftId).filter(java.util.Objects::nonNull).distinct().toList();
         List<UUID> siteIds = assignments.stream().map(Assignment::getSiteId).distinct().toList();
 
+        Map<UUID, com.fams.modules.employee.entity.Employee> employeesById = employeeIds.isEmpty()
+                ? Map.of()
+                : employeeRepository.findAllById(employeeIds).stream()
+                        .collect(java.util.stream.Collectors.toMap(
+                                com.fams.modules.employee.entity.Employee::getId, e -> e));
         Map<UUID, com.fams.modules.shift.entity.Shift> shiftsById = shiftIds.isEmpty()
                 ? Map.of()
                 : shiftRepository.findAllById(shiftIds).stream()
@@ -732,7 +752,7 @@ public class AssignmentService {
                                 com.fams.modules.site.entity.Site::getId, s -> s));
 
         return assignments.stream()
-                .map(a -> toResponse(a, employee,
+                .map(a -> toResponse(a, employeesById.get(a.getEmployeeId()),
                         a.getShiftId() != null ? shiftsById.get(a.getShiftId()) : null,
                         sitesById.get(a.getSiteId())))
                 .toList();
@@ -769,6 +789,9 @@ public class AssignmentService {
                 AssignmentResponse.SiteSummary.builder()
                         .id(site.getId())
                         .name(site.getName())
+                        .code(site.getCode())
+                        .address(site.getAddress())
+                        .timezone(site.getTimezone())
                         .build();
 
         AssignmentResponse.EmployeeSummary employeeSummary = employee == null ? null :
@@ -788,6 +811,15 @@ public class AssignmentService {
                         .status(shift.getStatus())
                         .build();
 
+        ZoneId lifecycleZone = VietnamTime.ZONE;
+        if (site != null && StringUtils.hasText(site.getTimezone())) {
+            try {
+                lifecycleZone = ZoneId.of(site.getTimezone());
+            } catch (java.time.DateTimeException ignored) {
+                // VietnamTime is the canonical fallback while FAMS operates only in Vietnam.
+            }
+        }
+
         return AssignmentResponse.builder()
                 .id(a.getId())
                 .tenantId(a.getTenantId())
@@ -802,6 +834,8 @@ public class AssignmentService {
                 .daysOfWeek(DayOfWeekBitmask.fromBitmask(a.getDaysOfWeek()))
                 .role(a.getRole())
                 .status(a.getStatus())
+                .lifecycleStatus(AssignmentLifecycleResolver.resolve(
+                        a, shift, lifecycleZone, Instant.now()))
                 .cancelledBy(a.getCancelledBy())
                 .cancelledAt(a.getCancelledAt())
                 .notes(a.getNotes())

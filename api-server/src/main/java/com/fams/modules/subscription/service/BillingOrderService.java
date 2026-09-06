@@ -8,7 +8,9 @@ import com.fams.modules.subscription.dto.request.CreateBillingOrderRequest;
 import com.fams.modules.subscription.dto.response.BillingOrderResponse;
 import com.fams.modules.subscription.entity.BillingOrder;
 import com.fams.modules.subscription.entity.BillingOrder.BillingOrderStatus;
+import com.fams.modules.subscription.entity.BillingOrder.BillingInvoiceStatus;
 import com.fams.modules.subscription.entity.Plan;
+import com.fams.modules.subscription.entity.TenantSubscription.BillingCycle;
 import com.fams.modules.subscription.repository.BillingOrderRepository;
 import com.fams.modules.subscription.repository.PlanRepository;
 import com.fams.modules.subscription.specification.BillingOrderSpecification;
@@ -18,6 +20,7 @@ import com.fams.shared.exception.DuplicateResourceException;
 import com.fams.shared.exception.ResourceNotFoundException;
 import com.fams.shared.pagination.PageResponse;
 import com.fams.shared.security.HttpRequestUtils;
+import com.fams.shared.time.VietnamTime;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.PageRequest;
@@ -29,6 +32,7 @@ import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.Locale;
@@ -47,6 +51,13 @@ public class BillingOrderService {
     private static final EnumSet<BillingOrderStatus> OPEN_STATUSES = EnumSet.of(
             BillingOrderStatus.CREATING, BillingOrderStatus.PENDING,
             BillingOrderStatus.PROCESSING, BillingOrderStatus.UNDERPAID);
+    private static final Map<String, String> PLATFORM_SORT_FIELDS = Map.of(
+            "createdAt", "createdAt",
+            "amount", "amount",
+            "paidAt", "paidAt",
+            "company", "tenantNameSnapshot",
+            "status", "status",
+            "orderCode", "orderCode");
 
     private final BillingOrderRepository orderRepository;
     private final PlanRepository planRepository;
@@ -106,6 +117,7 @@ public class BillingOrderService {
         BillingOrder order = BillingOrder.builder()
                 .orderCode(orderCode)
                 .tenantId(tenantId)
+                .tenantNameSnapshot(tenant.getName())
                 .planId(plan.getId())
                 .planNameSnapshot(plan.getName())
                 .planDisplaySnapshot(plan.getDisplayName())
@@ -114,6 +126,7 @@ public class BillingOrderService {
                 .amountPaid(0L)
                 .currency("VND")
                 .status(BillingOrderStatus.CREATING)
+                .invoiceStatus(BillingInvoiceStatus.NOT_ELIGIBLE)
                 .providerStatus("CREATING")
                 .createdBy(callerUserId)
                 .expiresAt(expiresAt)
@@ -162,10 +175,17 @@ public class BillingOrderService {
     }
 
     @Transactional(readOnly = true)
-    public PageResponse<BillingOrderResponse> listPlatformOrders(UUID tenantId, BillingOrderStatus status,
+    public PageResponse<BillingOrderResponse> listPlatformOrders(String search, UUID tenantId,
+                                                                  BillingOrderStatus status,
+                                                                  BillingCycle billingCycle,
+                                                                  String sortBy, String sortDir,
                                                                   int page, int size) {
-        var pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
-        return PageResponse.from(orderRepository.findAll(BillingOrderSpecification.build(tenantId, status), pageable)
+        String property = PLATFORM_SORT_FIELDS.getOrDefault(sortBy, "createdAt");
+        Sort.Direction direction = "asc".equalsIgnoreCase(sortDir)
+                ? Sort.Direction.ASC : Sort.Direction.DESC;
+        var pageable = PageRequest.of(page, size, Sort.by(direction, property));
+        return PageResponse.from(orderRepository.findAll(
+                        BillingOrderSpecification.build(search, tenantId, status, billingCycle), pageable)
                 .map(this::toResponse));
     }
 
@@ -272,6 +292,10 @@ public class BillingOrderService {
 
         if (order.getAmountPaid() >= order.getAmount() && "PAID".equalsIgnoreCase(provider.status())) {
             order.setStatus(BillingOrderStatus.PAID);
+            if (order.getInvoiceStatus() == null
+                    || order.getInvoiceStatus() == BillingInvoiceStatus.NOT_ELIGIBLE) {
+                order.setInvoiceStatus(BillingInvoiceStatus.PENDING_ISSUANCE);
+            }
             if (order.getSubscriptionAppliedAt() == null) {
                 OffsetDateTime paidAt = order.getPaidAt() != null ? order.getPaidAt() : OffsetDateTime.now();
                 subscriptionService.activateFromPayment(order.getTenantId(), order.getPlanId(),
@@ -283,6 +307,7 @@ public class BillingOrderService {
             order.setFailureReason(null);
         } else if (order.getAmountPaid() > 0) {
             order.setStatus(BillingOrderStatus.UNDERPAID);
+            order.setInvoiceStatus(BillingInvoiceStatus.PAYMENT_REVIEW);
             order.setFailureReason("Số tiền nhận được chưa đủ để kích hoạt gói");
         } else if ("CANCELLED".equalsIgnoreCase(provider.status())) {
             order.setStatus(BillingOrderStatus.CANCELLED);
@@ -373,8 +398,18 @@ public class BillingOrderService {
     }
 
     private BillingOrderResponse toResponse(BillingOrder order) {
+        boolean receiptAvailable = order.getStatus() == BillingOrderStatus.PAID && order.getPaidAt() != null;
+        BillingInvoiceStatus invoiceStatus = order.getInvoiceStatus();
+        if (invoiceStatus == null) {
+            invoiceStatus = order.getStatus() == BillingOrderStatus.PAID
+                    ? BillingInvoiceStatus.PENDING_ISSUANCE
+                    : order.getAmountPaid() != null && order.getAmountPaid() > 0
+                            ? BillingInvoiceStatus.PAYMENT_REVIEW
+                            : BillingInvoiceStatus.NOT_ELIGIBLE;
+        }
         return BillingOrderResponse.builder()
                 .id(order.getId()).orderCode(order.getOrderCode()).tenantId(order.getTenantId())
+                .tenantName(order.getTenantNameSnapshot())
                 .planId(order.getPlanId()).planName(order.getPlanNameSnapshot())
                 .planDisplayName(order.getPlanDisplaySnapshot()).billingCycle(order.getBillingCycle())
                 .amount(order.getAmount()).amountPaid(order.getAmountPaid()).currency(order.getCurrency())
@@ -384,7 +419,18 @@ public class BillingOrderService {
                 .failureReason(order.getFailureReason()).expiresAt(order.getExpiresAt())
                 .paidAt(order.getPaidAt()).cancelledAt(order.getCancelledAt())
                 .subscriptionAppliedAt(order.getSubscriptionAppliedAt())
+                .paymentReceiptAvailable(receiptAvailable)
+                .paymentReceiptNumber(receiptAvailable ? buildPaymentReceiptNumber(order) : null)
+                .paymentReceiptIssuedAt(receiptAvailable ? order.getPaidAt() : null)
+                .invoiceStatus(invoiceStatus).invoiceNumber(order.getInvoiceNumber())
+                .invoiceIssuedAt(order.getInvoiceIssuedAt()).invoiceLookupUrl(order.getInvoiceLookupUrl())
                 .createdAt(order.getCreatedAt()).updatedAt(order.getUpdatedAt()).build();
+    }
+
+    private String buildPaymentReceiptNumber(BillingOrder order) {
+        String month = order.getPaidAt().atZoneSameInstant(VietnamTime.ZONE)
+                .format(DateTimeFormatter.ofPattern("yyyyMM"));
+        return "PT-" + month + "-" + order.getOrderCode();
     }
 
     private Map<String, Object> snapshot(BillingOrder order) {
@@ -396,6 +442,7 @@ public class BillingOrderService {
         value.put("amountPaid", order.getAmountPaid());
         value.put("currency", order.getCurrency());
         value.put("status", order.getStatus().name());
+        value.put("invoiceStatus", order.getInvoiceStatus() != null ? order.getInvoiceStatus().name() : null);
         value.put("providerStatus", order.getProviderStatus());
         return value;
     }

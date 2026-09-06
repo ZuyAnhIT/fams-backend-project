@@ -4,6 +4,7 @@ import com.fams.modules.subscription.dto.request.CancelBillingOrderRequest;
 import com.fams.modules.subscription.dto.request.CreateBillingOrderRequest;
 import com.fams.modules.subscription.dto.response.BillingOrderResponse;
 import com.fams.modules.subscription.entity.BillingOrder.BillingOrderStatus;
+import com.fams.modules.subscription.entity.TenantSubscription.BillingCycle;
 import com.fams.modules.subscription.service.BillingOrderService;
 import com.fams.shared.pagination.PageResponse;
 import com.fams.shared.response.ApiResponse;
@@ -84,12 +85,17 @@ public class BillingOrderController {
     @GetMapping("/api/v1/billing-orders")
     @PreAuthorize("hasRole('PLATFORM_ADMIN') or hasAuthority('billing:list')")
     public ResponseEntity<ApiResponse<PageResponse<BillingOrderResponse>>> listPlatformOrders(
+            @RequestParam(required = false) String search,
             @RequestParam(required = false) UUID tenantId,
             @RequestParam(required = false) BillingOrderStatus status,
+            @RequestParam(required = false) BillingCycle billingCycle,
+            @RequestParam(defaultValue = "createdAt") String sortBy,
+            @RequestParam(defaultValue = "desc") String sortDir,
             @RequestParam(defaultValue = "0") @Min(0) int page,
             @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
         return ResponseEntity.ok(ApiResponse.success(
-                billingOrderService.listPlatformOrders(tenantId, status, page, size)));
+                billingOrderService.listPlatformOrders(search, tenantId, status, billingCycle,
+                        sortBy, sortDir, page, size)));
     }
 
     @Operation(summary = "Get a billing order for platform operations")

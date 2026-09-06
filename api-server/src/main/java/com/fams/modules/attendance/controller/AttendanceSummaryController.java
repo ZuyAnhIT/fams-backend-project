@@ -19,6 +19,7 @@ import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
@@ -231,7 +232,7 @@ public class AttendanceSummaryController {
                       "every date, not just past ones (2026-08-12: corrected, this previously and " +
                       "incorrectly said only past-date adjustments were protected). Use " +
                       "POST .../unlock-and-recompute to clear the adjustment and let automatic " +
-                      "recompute resume for this record. Requires attendance:list permission."
+                      "recompute resume for this record. Requires attendance:adjust permission."
     )
     @ApiResponses({
         @io.swagger.v3.oas.annotations.responses.ApiResponse(
@@ -243,11 +244,12 @@ public class AttendanceSummaryController {
             description = "Validation error — invalid field values or missing reason"),
         @io.swagger.v3.oas.annotations.responses.ApiResponse(
             responseCode = "403",
-            description = "Missing attendance:list permission"),
+            description = "Missing attendance:adjust permission"),
         @io.swagger.v3.oas.annotations.responses.ApiResponse(
             responseCode = "404",
             description = "Attendance summary not found")
     })
+    @PreAuthorize("hasAuthority('attendance:adjust')")
     @PatchMapping("/{summaryId}/adjust")
     public ResponseEntity<ApiResponse<AttendanceSummaryResponse>> adjustSummary(
             @PathVariable UUID tenantId,
@@ -270,7 +272,7 @@ public class AttendanceSummaryController {
                       "should be released back to normal automatic aggregation. Clears the adjustment, re-runs " +
                       "the standard recompute for that employee/site/date, and records an audit log entry " +
                       "(before/after totalWorkMinutes, previous adjustment reason, unlock reason). " +
-                      "A reason is required. Requires attendance:list permission."
+                      "A reason is required. Requires attendance:adjust permission."
     )
     @ApiResponses({
         @io.swagger.v3.oas.annotations.responses.ApiResponse(
@@ -282,11 +284,12 @@ public class AttendanceSummaryController {
             description = "Validation error — missing reason"),
         @io.swagger.v3.oas.annotations.responses.ApiResponse(
             responseCode = "403",
-            description = "Missing attendance:list permission or site not allowed"),
+            description = "Missing attendance:adjust permission or site not allowed"),
         @io.swagger.v3.oas.annotations.responses.ApiResponse(
             responseCode = "404",
             description = "Attendance summary not found")
     })
+    @PreAuthorize("hasAuthority('attendance:adjust')")
     @PostMapping("/{summaryId}/unlock-and-recompute")
     public ResponseEntity<ApiResponse<AttendanceSummaryResponse>> unlockAndRecompute(
             @PathVariable UUID tenantId,
@@ -306,7 +309,7 @@ public class AttendanceSummaryController {
         description = "Recomputes attendance summaries for all sessions whose attendance date equals the given date. " +
                       "Idempotent — safe to call multiple times. Use this to backfill missing_checkout flags " +
                       "or re-run calculations after manual data corrections. " +
-                      "Requires attendance:list permission."
+                      "Requires attendance:adjust permission."
     )
     @ApiResponses({
         @io.swagger.v3.oas.annotations.responses.ApiResponse(
@@ -314,8 +317,9 @@ public class AttendanceSummaryController {
         @io.swagger.v3.oas.annotations.responses.ApiResponse(
             responseCode = "401", description = "Unauthorized — valid JWT required"),
         @io.swagger.v3.oas.annotations.responses.ApiResponse(
-            responseCode = "403", description = "Forbidden — attendance:list permission required")
+            responseCode = "403", description = "Forbidden — attendance:adjust permission required")
     })
+    @PreAuthorize("hasAuthority('attendance:adjust')")
     @PostMapping("/recompute")
     public ResponseEntity<ApiResponse<String>> recomputeForDate(
             @PathVariable UUID tenantId,

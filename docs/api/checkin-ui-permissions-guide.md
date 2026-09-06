@@ -94,7 +94,7 @@ Tương tự 3 field check-in đã có sẵn (`faceVerified`/`livenessVerified`/
 |---|---|---|---|
 | Xem danh sách chấm công toàn tenant | ✅ (`checkins:list`) | ✅ (chỉ site được giao — tự động lọc theo site-scope) | ❌ |
 | Xem chi tiết 1 lượt chấm công | ✅ (`checkins:list`) | ✅ (chỉ site được giao) | ❌ (chỉ xem của chính mình qua `checkins:read`) |
-| Override trạng thái 1 lượt chấm công | ✅ (`checkins:list`) | ✅ (chỉ site được giao) | ❌ |
+| Override trạng thái 1 lượt chấm công | ✅ (`checkins:review`) | ✅ (cần `checkins:review`, chỉ site được giao) | ❌ |
 | Cấu hình `checkinPolicy` của Site | ✅ | ❌ (không có quyền sửa site) | ❌ |
 | Cấu hình `checkinPolicyOverride` của Shift | ✅ | ❌ | ❌ |
 | Chấm công (check-in/check-out) của chính mình | ✅ (nếu có hồ sơ nhân viên) | ✅ | ✅ |

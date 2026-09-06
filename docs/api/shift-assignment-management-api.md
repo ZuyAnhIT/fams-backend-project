@@ -264,10 +264,13 @@ FE đề xuất thêm 1 endpoint liệt kê Assignment trên toàn bộ tenant (
   "startDate": "2026-07-01", "endDate": "2026-12-31 | null",
   "daysOfWeek": ["MONDAY","WEDNESDAY","FRIDAY"] | null,
   "role": "worker | supervisor", "status": "active | cancelled",
+  "lifecycleStatus": "upcoming | effective | completed | cancelled",
   "notes": "...", "createdBy": "uuid", "createdAt": "...", "updatedAt": "..."
 }
 ```
 Lưu ý: `shiftSummary.status` phản ánh trạng thái **hiện tại** của ca (có thể đã `inactive` dù phân công vẫn `active` — deactivate không hủy phân công đang dùng nó, xem mục 2.2). `shiftSummary.startTime`/`endTime` là giờ ca **hiện tại**, không phải snapshot lúc tạo phân công — để xem đúng giờ đã snapshot lúc chấm công thực tế (phục vụ payroll/audit), xem field `shiftStartTime`/`shiftEndTime` trên từng bản ghi check-in (module Checkin), không phải ở đây.
+
+`status` là trạng thái quản trị của **bản ghi phân công**: `active` chỉ có nghĩa bản ghi chưa bị hủy. Không được dịch `active` thành “Đang làm việc”. `lifecycleStatus` mới là trạng thái theo thời gian site/Việt Nam: `upcoming` = sắp bắt đầu, `effective` = đang hiệu lực, `completed` = đã qua lần làm cuối cùng, `cancelled` = đã hủy. Muốn khẳng định nhân viên thực sự đang làm việc phải dựa vào phiên check-in còn mở, không dựa vào assignment.
 
 **Mã lỗi cần bắt trong form** (mới bổ sung so với trước, đánh dấu **MỚI**):
 | HTTP | Khi nào | Message mẫu |

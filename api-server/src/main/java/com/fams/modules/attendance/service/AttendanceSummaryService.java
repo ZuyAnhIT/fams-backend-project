@@ -224,7 +224,7 @@ public class AttendanceSummaryService {
      * HR/Admin-facing entry point for POST .../attendance/recompute — properly scoped to the
      * calling tenant (and, for a site-restricted caller, to their allowed site(s)). Found via
      * audit (2026-07-31): the endpoint previously called the tenant-agnostic recomputeForDate(
-     * LocalDate) above directly, so any HR/Admin (or site-scoped Supervisor with attendance:list)
+     * LocalDate) above directly, so any HR/Admin with attendance:adjust
      * in ANY tenant could trigger a recompute that silently touched every OTHER tenant's
      * attendance data for that date — a real cross-tenant data-isolation violation, not just a
      * permission-check gap, since recompute() itself had no tenant filter in its query.
@@ -234,7 +234,7 @@ public class AttendanceSummaryService {
                                   UUID callerUserId, boolean callerIsPlatformAdmin) {
         if (!callerIsPlatformAdmin) {
             Set<String> perms = userRoleRepository.findPermissionNamesByUserIdAndTenantId(callerUserId, tenantId);
-            if (!perms.contains("attendance:list")) {
+            if (!perms.contains("attendance:adjust")) {
                 throw new AccessDeniedException("You do not have permission to trigger attendance recompute");
             }
         }
@@ -596,19 +596,30 @@ public class AttendanceSummaryService {
     @Transactional(readOnly = true)
     public AttendanceSummaryResponse getSummary(UUID tenantId, UUID summaryId,
                                                  UUID callerUserId, boolean callerIsPlatformAdmin) {
+        boolean canListTenantAttendance = callerIsPlatformAdmin;
         if (!callerIsPlatformAdmin) {
             Set<String> perms = userRoleRepository
                     .findPermissionNamesByUserIdAndTenantId(callerUserId, tenantId);
             if (!perms.contains("attendance:read")) {
                 throw new AccessDeniedException("You do not have permission to view this attendance summary");
             }
+            canListTenantAttendance = perms.contains("attendance:list");
         }
 
         AttendanceSummary summary = summaryRepository
                 .findByIdAndTenantIdAndDeletedAtIsNull(summaryId, tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Attendance summary not found: " + summaryId));
 
-        if (!siteScopeService.isSiteAllowed(callerUserId, tenantId, summary.getSiteId(), callerIsPlatformAdmin)) {
+        if (!canListTenantAttendance) {
+            Employee callerEmployee = employeeRepository
+                    .findByUserIdAndTenantIdAndDeletedAtIsNull(callerUserId, tenantId)
+                    .orElseThrow(() -> new AccessDeniedException(
+                            "You may only view your own attendance summary"));
+            if (!summary.getEmployeeId().equals(callerEmployee.getId())) {
+                throw new AccessDeniedException("You may only view your own attendance summary");
+            }
+        } else if (!siteScopeService.isSiteAllowed(
+                callerUserId, tenantId, summary.getSiteId(), callerIsPlatformAdmin)) {
             throw new AccessDeniedException("You do not have permission to view this attendance summary");
         }
 
@@ -800,7 +811,7 @@ public class AttendanceSummaryService {
         if (!callerIsPlatformAdmin) {
             Set<String> perms = userRoleRepository
                     .findPermissionNamesByUserIdAndTenantId(callerUserId, tenantId);
-            if (!perms.contains("attendance:list")) {
+            if (!perms.contains("attendance:adjust")) {
                 throw new AccessDeniedException("You do not have permission to adjust attendance summaries");
             }
         }
@@ -877,7 +888,7 @@ public class AttendanceSummaryService {
         if (!callerIsPlatformAdmin) {
             Set<String> perms = userRoleRepository
                     .findPermissionNamesByUserIdAndTenantId(callerUserId, tenantId);
-            if (!perms.contains("attendance:list")) {
+            if (!perms.contains("attendance:adjust")) {
                 throw new AccessDeniedException("You do not have permission to unlock attendance summaries");
             }
         }

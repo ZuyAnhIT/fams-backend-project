@@ -31,7 +31,10 @@ import java.util.stream.Collectors;
 @Component
 public class JwtAuthFilter extends OncePerRequestFilter {
 
-    public static final String PERMS_CACHE_PREFIX = "auth:perms:";
+    // Bump the namespace whenever a migration changes system-role grants. V124 separates
+    // list/view from review/adjust, so reusing the old cached set would temporarily preserve
+    // stale privilege until TTL expiry after a deployment.
+    public static final String PERMS_CACHE_PREFIX = "auth:perms:v124:";
     static final String PLATFORM_ADMIN_PERMS_KEY = PERMS_CACHE_PREFIX + "platform_admin";
     private static final long PERMS_CACHE_TTL_SECONDS = 300; // 5 min
 

@@ -134,7 +134,7 @@ public class CheckinController {
         summary = "List check-ins (HR/Admin)",
         description = "Returns a paginated, filterable, sortable list of all check-in records in the tenant. " +
                       "Requires checkins:list permission (platform admins bypass the check). " +
-                      "Filter by employeeId, siteId, status, and/or check-in date range. " +
+                      "Filter by employeeId, siteId, workspaceId, shiftId, status, and/or check-in date range. " +
                       "Sort by: checkInAt (default), checkOutAt, status, siteId, employeeId, createdAt."
     )
     @ApiResponses({
@@ -154,6 +154,10 @@ public class CheckinController {
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
             @Parameter(description = "Filter by employee UUID") @RequestParam(required = false) UUID employeeId,
             @Parameter(description = "Filter by site UUID")     @RequestParam(required = false) UUID siteId,
+            @Parameter(description = "Filter by employee workspace/department UUID")
+                @RequestParam(required = false) UUID workspaceId,
+            @Parameter(description = "Filter by shift UUID")
+                @RequestParam(required = false) UUID shiftId,
             @Parameter(description = "Filter by status (valid | pending_review | rejected)")
                 @RequestParam(required = false) String status,
             @Parameter(description = "Filter: check-in from (inclusive, ISO-8601)")
@@ -170,10 +174,10 @@ public class CheckinController {
                 @RequestParam(defaultValue = "20") int size,
             @AuthenticationPrincipal FamsUserDetails userDetails) {
         size = Math.min(size, 100);
-        log.info("HR checkin list tenantId={} employeeId={} siteId={} status={} page={} size={}",
-                tenantId, employeeId, siteId, status, page, size);
+        log.info("HR checkin list tenantId={} employeeId={} siteId={} workspaceId={} shiftId={} status={} page={} size={}",
+                tenantId, employeeId, siteId, workspaceId, shiftId, status, page, size);
         PageResponse<CheckinResponse> result = checkinService.listCheckins(
-                tenantId, employeeId, siteId, status, from, to,
+                tenantId, employeeId, siteId, workspaceId, shiftId, status, from, to,
                 sortBy, sortDir, page, size,
                 userDetails.getUserId(), userDetails.isPlatformAdmin());
         return ResponseEntity.ok(ApiResponse.success(result));
@@ -366,7 +370,7 @@ public class CheckinController {
                       "GPS was outside the geofence but attendance was legitimate. " +
                       "A reason is required and stored on the record for auditing. " +
                       "Triggers attendance summary recomputation for the affected day. " +
-                      "Requires checkins:list permission."
+                      "Requires checkins:review permission."
     )
     @ApiResponses({
         @io.swagger.v3.oas.annotations.responses.ApiResponse(
@@ -378,12 +382,12 @@ public class CheckinController {
             description = "Validation error, or check-in is already in the requested status"),
         @io.swagger.v3.oas.annotations.responses.ApiResponse(
             responseCode = "403",
-            description = "Missing checkins:list permission"),
+            description = "Missing checkins:review permission"),
         @io.swagger.v3.oas.annotations.responses.ApiResponse(
             responseCode = "404",
             description = "Check-in record not found")
     })
-    @PreAuthorize("hasAuthority('checkins:list')")
+    @PreAuthorize("hasAuthority('checkins:review')")
     @PatchMapping("/{checkinId}/override")
     public ResponseEntity<ApiResponse<CheckinResponse>> overrideCheckin(
             @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
