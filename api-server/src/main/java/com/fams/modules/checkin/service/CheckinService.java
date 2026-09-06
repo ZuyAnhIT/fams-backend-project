@@ -798,7 +798,8 @@ public class CheckinService {
 
         PageRequest pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "checkInAt"));
         Specification<CheckinRecord> spec =
-                CheckinSpecification.build(tenantId, employee.getId(), siteId, status, from, to);
+                CheckinSpecification.build(tenantId, employee.getId(), siteId,
+                        null, null, status, from, to);
         Page<CheckinRecord> resultPage = checkinRepository.findAll(spec, pageable);
 
         log.info("Check-in history: tenantId={} employeeId={} siteId={} from={} to={} total={}",
@@ -811,7 +812,8 @@ public class CheckinService {
 
     @Transactional(readOnly = true)
     public PageResponse<CheckinResponse> listCheckins(UUID tenantId,
-                                                       UUID employeeId, UUID siteId, String status,
+                                                       UUID employeeId, UUID siteId,
+                                                       UUID workspaceId, UUID shiftId, String status,
                                                        OffsetDateTime from, OffsetDateTime to,
                                                        String sortBy, String sortDir,
                                                        int page, int size,
@@ -854,12 +856,13 @@ public class CheckinService {
         PageRequest pageable = PageRequest.of(page, size, Sort.by(dir, resolvedSort));
 
         Specification<CheckinRecord> spec =
-                CheckinSpecification.build(tenantId, employeeId, effectiveSiteFilter, status, from, to);
+                CheckinSpecification.build(tenantId, employeeId, effectiveSiteFilter,
+                        workspaceId, shiftId, status, from, to);
 
         Page<CheckinRecord> resultPage = checkinRepository.findAll(spec, pageable);
 
-        log.info("HR checkin list: tenantId={} employeeId={} siteId={} status={} total={}",
-                tenantId, employeeId, siteId, status, resultPage.getTotalElements());
+        log.info("HR checkin list: tenantId={} employeeId={} siteId={} workspaceId={} shiftId={} status={} total={}",
+                tenantId, employeeId, siteId, workspaceId, shiftId, status, resultPage.getTotalElements());
 
         return toPageResponse(resultPage, toCheckinResponsesBatch(resultPage.getContent()));
     }
@@ -981,7 +984,7 @@ public class CheckinService {
                                             UUID callerUserId, boolean callerIsPlatformAdmin) {
         if (!callerIsPlatformAdmin) {
             Set<String> perms = userRoleRepository.findPermissionNamesByUserIdAndTenantId(callerUserId, tenantId);
-            if (!perms.contains("checkins:list")) {
+            if (!perms.contains("checkins:review")) {
                 throw new AccessDeniedException("You do not have permission to override check-ins in this tenant");
             }
         }

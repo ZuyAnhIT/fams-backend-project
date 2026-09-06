@@ -55,7 +55,7 @@ class UserProfileServiceTest {
                 userRoleRepository,
                 tenantRepository,
                 auditLogService,
-                "http://192.168.1.135:3000");
+                "http://192.168.1.125:3000");
 
         service.requestEmailChange(userId, "NEW@example.com");
 
@@ -64,6 +64,6 @@ class UserProfileServiceTest {
                 org.mockito.ArgumentMatchers.eq("new@example.com"),
                 url.capture());
         assertThat(url.getValue()).isEqualTo(
-                "http://192.168.1.135:3000/verify-email?token=change-token&mode=email-change");
+                "http://192.168.1.125:3000/verify-email?token=change-token&mode=email-change");
     }
 }

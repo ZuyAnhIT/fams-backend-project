@@ -25,6 +25,10 @@ public class BillingOrder {
     @Column(name = "tenant_id", nullable = false)
     private UUID tenantId;
 
+    /** Buyer name frozen at checkout time so historical payment documents remain stable. */
+    @Column(name = "tenant_name_snapshot", nullable = false, length = 255)
+    private String tenantNameSnapshot;
+
     @Column(name = "plan_id", nullable = false)
     private UUID planId;
 
@@ -85,6 +89,19 @@ public class BillingOrder {
     @Column(name = "subscription_applied_at")
     private OffsetDateTime subscriptionAppliedAt;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "invoice_status", nullable = false, length = 30)
+    private BillingInvoiceStatus invoiceStatus;
+
+    @Column(name = "invoice_number", length = 100)
+    private String invoiceNumber;
+
+    @Column(name = "invoice_issued_at")
+    private OffsetDateTime invoiceIssuedAt;
+
+    @Column(name = "invoice_lookup_url", columnDefinition = "TEXT")
+    private String invoiceLookupUrl;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
 
@@ -97,6 +114,7 @@ public class BillingOrder {
         if (currency == null) currency = "VND";
         if (amountPaid == null) amountPaid = 0L;
         if (status == null) status = BillingOrderStatus.CREATING;
+        if (invoiceStatus == null) invoiceStatus = BillingInvoiceStatus.NOT_ELIGIBLE;
         if (createdAt == null) createdAt = now;
         if (updatedAt == null) updatedAt = now;
     }
@@ -115,5 +133,16 @@ public class BillingOrder {
 
     public enum BillingOrderStatus {
         CREATING, PENDING, PROCESSING, UNDERPAID, PAID, CANCELLED, EXPIRED, FAILED
+    }
+
+    public enum BillingInvoiceStatus {
+        /** No money was confirmed, therefore no invoice is created for this order. */
+        NOT_ELIGIBLE,
+        /** Money was received but the order is underpaid and needs accounting review. */
+        PAYMENT_REVIEW,
+        /** Payment succeeded; waiting for a licensed e-invoice provider to issue the tax invoice. */
+        PENDING_ISSUANCE,
+        ISSUED,
+        FAILED
     }
 }

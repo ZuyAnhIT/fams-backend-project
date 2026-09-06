@@ -6,6 +6,7 @@ import com.fams.modules.employee.dto.request.UpdateEmployeeRequest;
 import com.fams.modules.employee.dto.response.EmployeeDetailResponse;
 import com.fams.modules.employee.dto.response.EmployeeImportError;
 import com.fams.modules.employee.dto.response.EmployeeImportResponse;
+import com.fams.modules.employee.dto.response.EmployeeImportValidationResponse;
 import com.fams.modules.employee.dto.response.EmployeeResponse;
 import com.fams.modules.employee.dto.response.FaceIdStatusDto;
 import com.fams.modules.employee.entity.Employee;
@@ -45,7 +46,9 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.IOException;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
+import java.time.format.ResolverStyle;
 import java.util.*;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -551,11 +554,9 @@ public class EmployeeService {
                 .avatarUrl(employee.getAvatarUrl())
                 .roles(roles)
                 .workspaces(resolveWorkspaceMemberships(employee.getId(), tenantId))
-                .assignments(assignmentRepository
-                        .findByTenantIdAndEmployeeIdAndDeletedAtIsNullOrderByStartDateDesc(tenantId, employee.getId())
-                        .stream()
-                        .map(assignmentService::toResponse)
-                        .toList())
+                .assignments(assignmentService.toResponsesWithContext(assignmentRepository
+                        .findByTenantIdAndEmployeeIdAndDeletedAtIsNullOrderByStartDateDesc(
+                                tenantId, employee.getId())))
                 .faceId(faceProfileRepository
                         .findByEmployeeIdAndTenantId(employee.getId(), tenantId)
                         .map(FaceIdService::toDto)
@@ -611,14 +612,185 @@ public class EmployeeService {
     }
 
     private static final Pattern EMAIL_PATTERN = Pattern.compile("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$");
-    private static final Pattern CODE_PATTERN  = Pattern.compile("^[A-Za-z0-9\\-_]+$");
+    private static final Pattern CODE_PATTERN = Pattern.compile("^[A-Za-z0-9\\-_]+$");
+    private static final Pattern PHONE_PATTERN = Pattern.compile("^[+0-9() .-]+$");
+    private static final long MAX_IMPORT_FILE_SIZE = 5L * 1024 * 1024;
+    private static final DateTimeFormatter VIETNAMESE_DATE_FORMAT =
+            DateTimeFormatter.ofPattern("d/M/uuuu").withResolverStyle(ResolverStyle.STRICT);
+    private static final String[] IMPORT_TEMPLATE_HEADERS = {
+            "Mã nhân viên", "Họ và tên đệm", "Tên", "Email", "Số điện thoại",
+            "Chức vụ", "Phòng ban", "Ngày vào làm"
+    };
+    private static final Set<String> REQUIRED_IMPORT_HEADERS = Set.of("firstname", "lastname");
+
+    private record ImportRowData(
+            String firstName,
+            String lastName,
+            String email,
+            String phone,
+            String employeeCode,
+            String position,
+            String department,
+            String hiredDateText,
+            LocalDate hiredDate) {
+    }
+
+    private record AnalyzedImportRow(
+            int rowNumber,
+            ImportRowData data,
+            List<EmployeeImportError> errors) {
+    }
+
+    private record ImportAnalysis(
+            int totalRows,
+            List<AnalyzedImportRow> rows,
+            List<EmployeeImportError> structureErrors) {
+
+        private List<EmployeeImportError> allErrors() {
+            List<EmployeeImportError> all = new ArrayList<>(structureErrors);
+            rows.forEach(row -> all.addAll(row.errors()));
+            return all;
+        }
+
+        private int validRows() {
+            if (!structureErrors.isEmpty()) return 0;
+            return (int) rows.stream().filter(row -> row.errors().isEmpty()).count();
+        }
+
+        private int invalidRows() {
+            if (!structureErrors.isEmpty()) return totalRows;
+            return totalRows - validRows();
+        }
+    }
 
     @Transactional
     public EmployeeImportResponse importEmployees(UUID tenantId, MultipartFile file,
                                                   UUID callerUserId, boolean callerIsPlatformAdmin) {
+        assertImportAccess(tenantId, callerUserId, callerIsPlatformAdmin);
+        ImportAnalysis analysis = analyzeImportFile(tenantId, file);
+        int successCount = 0;
+
+        if (analysis.structureErrors().isEmpty()) {
+            // Validate the whole batch in one query and keep import atomic for a plan-level
+            // failure. Row-level validation remains partial for backward API compatibility.
+            planLimitEnforcementService.assertEmployeeCapacity(
+                    tenantId, analysis.validRows(), callerUserId);
+            for (AnalyzedImportRow analyzedRow : analysis.rows()) {
+                if (!analyzedRow.errors().isEmpty()) continue;
+                ImportRowData row = analyzedRow.data();
+                Employee employee = Employee.builder()
+                        .tenantId(tenantId)
+                        .firstName(row.firstName().trim())
+                        .lastName(row.lastName().trim())
+                        .email(normalizedOrNull(row.email(), true))
+                        .phone(normalizedOrNull(row.phone(), false))
+                        .employeeCode(normalizedOrNull(row.employeeCode(), false))
+                        .position(normalizedOrNull(row.position(), false))
+                        .department(normalizedOrNull(row.department(), false))
+                        .hiredDate(row.hiredDate())
+                        .status("active")
+                        .build();
+                employeeRepository.save(employee);
+                successCount++;
+            }
+        }
+
+        int failedCount = analysis.totalRows() - successCount;
+        log.info("Employee import: tenantId={} total={} success={} failed={} by={}",
+                tenantId, analysis.totalRows(), successCount, failedCount, callerUserId);
+        return EmployeeImportResponse.builder()
+                .totalRows(analysis.totalRows())
+                .successCount(successCount)
+                .failedCount(failedCount)
+                .errors(analysis.allErrors())
+                .build();
+    }
+
+    @Transactional(readOnly = true)
+    public EmployeeImportValidationResponse validateEmployeesImport(
+            UUID tenantId, MultipartFile file, UUID callerUserId, boolean callerIsPlatformAdmin) {
+        assertImportAccess(tenantId, callerUserId, callerIsPlatformAdmin);
+        ImportAnalysis analysis = analyzeImportFile(tenantId, file);
+        List<EmployeeImportError> errors = analysis.allErrors();
+        if (errors.isEmpty()) {
+            planLimitEnforcementService.assertEmployeeCapacity(
+                    tenantId, analysis.validRows(), callerUserId);
+        }
+        return EmployeeImportValidationResponse.builder()
+                .valid(errors.isEmpty() && analysis.totalRows() > 0)
+                .totalRows(analysis.totalRows())
+                .validRows(analysis.validRows())
+                .invalidRows(analysis.invalidRows())
+                .errors(errors)
+                .build();
+    }
+
+    @Transactional(readOnly = true)
+    public byte[] createEmployeeImportTemplate(
+            UUID tenantId, UUID callerUserId, boolean callerIsPlatformAdmin) {
+        assertImportAccess(tenantId, callerUserId, callerIsPlatformAdmin);
+        try (Workbook workbook = new XSSFWorkbook()) {
+            Sheet dataSheet = workbook.createSheet("Danh sách nhân viên");
+            dataSheet.createFreezePane(0, 1);
+            dataSheet.setAutoFilter(new org.apache.poi.ss.util.CellRangeAddress(
+                    0, 0, 0, IMPORT_TEMPLATE_HEADERS.length - 1));
+
+            CellStyle headerStyle = workbook.createCellStyle();
+            headerStyle.setFillForegroundColor(IndexedColors.ROYAL_BLUE.getIndex());
+            headerStyle.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+            headerStyle.setAlignment(HorizontalAlignment.CENTER);
+            Font headerFont = workbook.createFont();
+            headerFont.setBold(true);
+            headerFont.setColor(IndexedColors.WHITE.getIndex());
+            headerStyle.setFont(headerFont);
+
+            Row header = dataSheet.createRow(0);
+            for (int i = 0; i < IMPORT_TEMPLATE_HEADERS.length; i++) {
+                Cell cell = header.createCell(i);
+                cell.setCellValue(IMPORT_TEMPLATE_HEADERS[i]);
+                cell.setCellStyle(headerStyle);
+                dataSheet.setColumnWidth(i, switch (i) {
+                    case 1, 3, 6 -> 26 * 256;
+                    case 4, 5 -> 20 * 256;
+                    default -> 18 * 256;
+                });
+            }
+
+            Sheet guideSheet = workbook.createSheet("Hướng dẫn");
+            String[][] guideRows = {
+                    {"Cột", "Bắt buộc", "Định dạng / quy tắc", "Ví dụ"},
+                    {"Mã nhân viên", "Không", "Tối đa 50 ký tự; chỉ chữ, số, dấu - và _; không trùng trong công ty", "NV-001"},
+                    {"Họ và tên đệm", "Có", "Tối đa 100 ký tự", "Nguyễn Văn"},
+                    {"Tên", "Có", "Tối đa 100 ký tự", "An"},
+                    {"Email", "Không", "Đúng định dạng email; tối đa 255 ký tự", "an.nguyen@example.com"},
+                    {"Số điện thoại", "Không", "Tối đa 30 ký tự; chỉ số và các ký tự + ( ) . -", "0901234567"},
+                    {"Chức vụ", "Không", "Nội dung văn bản; tối đa 100 ký tự", "Kỹ sư hiện trường"},
+                    {"Phòng ban", "Không", "Tên phòng ban hiển thị trên hồ sơ; tối đa 100 ký tự", "Kỹ thuật"},
+                    {"Ngày vào làm", "Không", "dd/MM/yyyy hoặc yyyy-MM-dd", "01/09/2026"}
+            };
+            for (int r = 0; r < guideRows.length; r++) {
+                Row row = guideSheet.createRow(r);
+                for (int c = 0; c < guideRows[r].length; c++) {
+                    Cell cell = row.createCell(c);
+                    cell.setCellValue(guideRows[r][c]);
+                    if (r == 0) cell.setCellStyle(headerStyle);
+                }
+            }
+            guideSheet.createFreezePane(0, 1);
+            guideSheet.setColumnWidth(0, 24 * 256);
+            guideSheet.setColumnWidth(1, 14 * 256);
+            guideSheet.setColumnWidth(2, 72 * 256);
+            guideSheet.setColumnWidth(3, 30 * 256);
+            workbook.setActiveSheet(0);
+            return toBytes(workbook);
+        } catch (IOException e) {
+            throw new IllegalStateException("Không thể tạo file Excel mẫu", e);
+        }
+    }
+
+    private void assertImportAccess(UUID tenantId, UUID callerUserId, boolean callerIsPlatformAdmin) {
         tenantRepository.findByIdAndDeletedAtIsNull(tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Tenant not found: " + tenantId));
-
         if (!callerIsPlatformAdmin) {
             Set<String> permissions = userRoleRepository
                     .findPermissionNamesByUserIdAndTenantId(callerUserId, tenantId);
@@ -626,128 +798,161 @@ public class EmployeeService {
                 throw new AccessDeniedException("You do not have permission to create employees in this tenant");
             }
         }
+    }
 
-        List<EmployeeImportError> errors = new ArrayList<>();
-        int successCount = 0;
-        int totalRows = 0;
-        Set<String> codesSeenInBatch = new HashSet<>();
-
+    private ImportAnalysis analyzeImportFile(UUID tenantId, MultipartFile file) {
+        validateImportFile(file);
         try (Workbook workbook = new XSSFWorkbook(file.getInputStream())) {
+            if (workbook.getNumberOfSheets() == 0) {
+                return new ImportAnalysis(0, List.of(),
+                        List.of(err(1, "file", "File Excel không có trang dữ liệu")));
+            }
             Sheet sheet = workbook.getSheetAt(0);
             Row header = sheet.getRow(0);
-            if (header == null) {
-                return EmployeeImportResponse.builder()
-                        .totalRows(0).successCount(0).failedCount(0).errors(List.of()).build();
+            if (header == null || isRowBlank(header)) {
+                return new ImportAnalysis(countDataRows(sheet), List.of(),
+                        List.of(err(1, "header", "Dòng đầu tiên phải là tiêu đề cột")));
             }
 
             Map<String, Integer> colIndex = new HashMap<>();
+            List<EmployeeImportError> structureErrors = new ArrayList<>();
             for (Cell cell : header) {
-                String name = cell.getStringCellValue().trim().toLowerCase();
-                colIndex.putIfAbsent(canonicalImportHeader(name), cell.getColumnIndex());
+                String raw = DATA_FORMATTER.formatCellValue(cell).trim();
+                if (raw.isEmpty()) continue;
+                String canonical = canonicalImportHeader(raw.toLowerCase(Locale.ROOT));
+                Integer previous = colIndex.putIfAbsent(canonical, cell.getColumnIndex());
+                if (previous != null) {
+                    structureErrors.add(err(1, canonical,
+                            "Cột ‘" + raw + "’ bị lặp trong dòng tiêu đề"));
+                }
+            }
+            for (String required : REQUIRED_IMPORT_HEADERS) {
+                if (!colIndex.containsKey(required)) {
+                    structureErrors.add(err(1, required,
+                            "Thiếu cột bắt buộc ‘" + importFieldLabel(required) + "’"));
+                }
             }
 
+            int totalRows = countDataRows(sheet);
+            if (totalRows == 0) {
+                structureErrors.add(err(2, "file", "File chưa có dòng dữ liệu nhân viên"));
+            }
+            if (!structureErrors.isEmpty()) {
+                return new ImportAnalysis(totalRows, List.of(), structureErrors);
+            }
+
+            List<AnalyzedImportRow> rows = new ArrayList<>();
+            Set<String> codesSeenInBatch = new HashSet<>();
             for (int i = 1; i <= sheet.getLastRowNum(); i++) {
                 Row row = sheet.getRow(i);
                 if (row == null || isRowBlank(row)) continue;
-                totalRows++;
                 int displayRow = i + 1;
-
-                String firstName  = str(row, colIndex.get("firstname"));
-                String lastName   = str(row, colIndex.get("lastname"));
-                String email      = str(row, colIndex.get("email"));
-                String phone      = str(row, colIndex.get("phone"));
-                String code       = str(row, colIndex.get("employeecode"));
-                String position   = str(row, colIndex.get("position"));
-                String department = str(row, colIndex.get("department"));
-                String hiredDateStr = str(row, colIndex.get("hireddate"));
-
-                List<EmployeeImportError> rowErrors = validateImportRow(tenantId, displayRow,
-                        firstName, lastName, email, phone, code, hiredDateStr, codesSeenInBatch);
-
-                LocalDate hiredDate = null;
-                if (hiredDateStr != null && !hiredDateStr.isBlank()) {
-                    try {
-                        hiredDate = LocalDate.parse(hiredDateStr);
-                    } catch (DateTimeParseException ignored) {
-                        // already recorded as a rowError above
-                    }
+                String hiredDateText = dateStr(row, colIndex.get("hireddate"));
+                LocalDate hiredDate = parseImportDate(hiredDateText);
+                ImportRowData data = new ImportRowData(
+                        str(row, colIndex.get("firstname")),
+                        str(row, colIndex.get("lastname")),
+                        str(row, colIndex.get("email")),
+                        str(row, colIndex.get("phone")),
+                        str(row, colIndex.get("employeecode")),
+                        str(row, colIndex.get("position")),
+                        str(row, colIndex.get("department")),
+                        hiredDateText,
+                        hiredDate);
+                List<EmployeeImportError> rowErrors = validateImportRow(
+                        tenantId, displayRow, data, codesSeenInBatch);
+                if (rowErrors.isEmpty() && data.employeeCode() != null) {
+                    codesSeenInBatch.add(data.employeeCode());
                 }
-
-                if (!rowErrors.isEmpty()) {
-                    errors.addAll(rowErrors);
-                    continue;
-                }
-
-                if (code != null && !code.isBlank()) codesSeenInBatch.add(code);
-
-                Employee employee = Employee.builder()
-                        .tenantId(tenantId)
-                        .firstName(firstName.trim())
-                        .lastName(lastName.trim())
-                        .email(email != null && !email.isBlank() ? email.trim().toLowerCase() : null)
-                        .phone(phone != null && !phone.isBlank() ? phone.trim() : null)
-                        .employeeCode(code != null && !code.isBlank() ? code : null)
-                        .position(position != null && !position.isBlank() ? position : null)
-                        .department(department != null && !department.isBlank() ? department : null)
-                        .hiredDate(hiredDate)
-                        .status("active")
-                        .build();
-                employeeRepository.save(employee);
-                successCount++;
+                rows.add(new AnalyzedImportRow(displayRow, data, rowErrors));
             }
-        } catch (IOException e) {
-            throw new IllegalArgumentException("Failed to read Excel file: " + e.getMessage());
+            return new ImportAnalysis(totalRows, rows, structureErrors);
+        } catch (IOException | RuntimeException e) {
+            if (e instanceof IllegalArgumentException invalidFile
+                    && invalidFile.getMessage() != null
+                    && invalidFile.getMessage().startsWith("File ")) {
+                throw invalidFile;
+            }
+            throw new IllegalArgumentException(
+                    "Không thể đọc file Excel. Hãy tải lại file mẫu và lưu đúng định dạng .xlsx", e);
         }
-
-        int failedCount = totalRows - successCount;
-        log.info("Employee import: tenantId={} total={} success={} failed={} by={}",
-                tenantId, totalRows, successCount, failedCount, callerUserId);
-        return EmployeeImportResponse.builder()
-                .totalRows(totalRows)
-                .successCount(successCount)
-                .failedCount(failedCount)
-                .errors(errors)
-                .build();
     }
 
-    private List<EmployeeImportError> validateImportRow(UUID tenantId, int displayRow,
-            String firstName, String lastName, String email, String phone, String code,
-            String hiredDateStr, Set<String> codesSeenInBatch) {
+    private void validateImportFile(MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            throw new IllegalArgumentException("File Excel không được để trống");
+        }
+        if (file.getSize() > MAX_IMPORT_FILE_SIZE) {
+            throw new IllegalArgumentException("File Excel vượt quá dung lượng tối đa 5 MB");
+        }
+        String filename = file.getOriginalFilename();
+        if (filename == null || !filename.toLowerCase(Locale.ROOT).endsWith(".xlsx")) {
+            throw new IllegalArgumentException("Chỉ hỗ trợ file Excel định dạng .xlsx");
+        }
+    }
+
+    private int countDataRows(Sheet sheet) {
+        int count = 0;
+        for (int i = 1; i <= sheet.getLastRowNum(); i++) {
+            Row row = sheet.getRow(i);
+            if (row != null && !isRowBlank(row)) count++;
+        }
+        return count;
+    }
+
+    private List<EmployeeImportError> validateImportRow(
+            UUID tenantId, int displayRow, ImportRowData data, Set<String> codesSeenInBatch) {
+        String firstName = data.firstName();
+        String lastName = data.lastName();
+        String email = data.email();
+        String phone = data.phone();
+        String code = data.employeeCode();
         List<EmployeeImportError> rowErrors = new ArrayList<>();
 
         if (firstName == null || firstName.isBlank())
-            rowErrors.add(err(displayRow, "firstName", "First name is required"));
+            rowErrors.add(err(displayRow, "firstName", "Tên là trường bắt buộc"));
         else if (firstName.length() > 100)
-            rowErrors.add(err(displayRow, "firstName", "First name must be 100 characters or fewer"));
+            rowErrors.add(err(displayRow, "firstName", "Tên không được vượt quá 100 ký tự"));
 
         if (lastName == null || lastName.isBlank())
-            rowErrors.add(err(displayRow, "lastName", "Last name is required"));
+            rowErrors.add(err(displayRow, "lastName", "Họ và tên đệm là trường bắt buộc"));
         else if (lastName.length() > 100)
-            rowErrors.add(err(displayRow, "lastName", "Last name must be 100 characters or fewer"));
+            rowErrors.add(err(displayRow, "lastName", "Họ và tên đệm không được vượt quá 100 ký tự"));
 
         if (email != null && !email.isBlank() && !EMAIL_PATTERN.matcher(email).matches())
-            rowErrors.add(err(displayRow, "email", "Must be a valid email address"));
+            rowErrors.add(err(displayRow, "email", "Email không đúng định dạng"));
+        else if (email != null && email.length() > 255)
+            rowErrors.add(err(displayRow, "email", "Email không được vượt quá 255 ký tự"));
 
-        if (phone != null && phone.length() > 30)
-            rowErrors.add(err(displayRow, "phone", "Phone must be 30 characters or fewer"));
+        if (phone != null && !phone.isBlank()) {
+            if (phone.length() > 30)
+                rowErrors.add(err(displayRow, "phone", "Số điện thoại không được vượt quá 30 ký tự"));
+            else if (!PHONE_PATTERN.matcher(phone).matches())
+                rowErrors.add(err(displayRow, "phone", "Số điện thoại chứa ký tự không hợp lệ"));
+        }
 
         if (code != null && !code.isBlank()) {
             if (code.length() > 50)
-                rowErrors.add(err(displayRow, "employeeCode", "Employee code must be 50 characters or fewer"));
+                rowErrors.add(err(displayRow, "employeeCode", "Mã nhân viên không được vượt quá 50 ký tự"));
             else if (!CODE_PATTERN.matcher(code).matches())
-                rowErrors.add(err(displayRow, "employeeCode", "Employee code may only contain letters, digits, hyphens, and underscores"));
+                rowErrors.add(err(displayRow, "employeeCode", "Mã nhân viên chỉ được chứa chữ, số, dấu gạch ngang và gạch dưới"));
             else if (codesSeenInBatch.contains(code))
-                rowErrors.add(err(displayRow, "employeeCode", "Duplicate employee code in this import file"));
+                rowErrors.add(err(displayRow, "employeeCode", "Mã nhân viên bị trùng trong file import"));
             else if (employeeRepository.existsByTenantIdAndEmployeeCodeAndDeletedAtIsNull(tenantId, code))
-                rowErrors.add(err(displayRow, "employeeCode", "Employee code '" + code + "' already exists in this tenant"));
+                rowErrors.add(err(displayRow, "employeeCode", "Mã nhân viên ‘" + code + "’ đã tồn tại trong công ty"));
         }
 
-        if (hiredDateStr != null && !hiredDateStr.isBlank()) {
-            try {
-                LocalDate.parse(hiredDateStr);
-            } catch (DateTimeParseException e) {
-                rowErrors.add(err(displayRow, "hiredDate", "Date must be in YYYY-MM-DD format"));
-            }
+        if (data.hiredDateText() != null && data.hiredDate() == null) {
+            rowErrors.add(err(displayRow, "hiredDate",
+                    "Ngày vào làm phải theo định dạng dd/MM/yyyy hoặc yyyy-MM-dd"));
+        }
+
+        if (data.position() != null && data.position().length() > 100) {
+            rowErrors.add(err(displayRow, "position", "Chức vụ không được vượt quá 100 ký tự"));
+        }
+
+        if (data.department() != null && data.department().length() > 100) {
+            rowErrors.add(err(displayRow, "department", "Phòng ban không được vượt quá 100 ký tự"));
         }
 
         return rowErrors;
@@ -763,81 +968,50 @@ public class EmployeeService {
      */
     public byte[] exportImportErrors(UUID tenantId, MultipartFile file,
                                       UUID callerUserId, boolean callerIsPlatformAdmin) {
-        tenantRepository.findByIdAndDeletedAtIsNull(tenantId)
-                .orElseThrow(() -> new ResourceNotFoundException("Tenant not found: " + tenantId));
+        assertImportAccess(tenantId, callerUserId, callerIsPlatformAdmin);
+        ImportAnalysis analysis = analyzeImportFile(tenantId, file);
 
-        if (!callerIsPlatformAdmin) {
-            Set<String> permissions = userRoleRepository
-                    .findPermissionNamesByUserIdAndTenantId(callerUserId, tenantId);
-            if (!permissions.contains("employees:create")) {
-                throw new AccessDeniedException("You do not have permission to create employees in this tenant");
-            }
-        }
-
-        try (Workbook in = new XSSFWorkbook(file.getInputStream());
-             Workbook out = new XSSFWorkbook()) {
-            Sheet sheet = in.getSheetAt(0);
-            Row header = sheet.getRow(0);
-            Sheet outSheet = out.createSheet("Errors");
-            String[] cols = {"row", "firstName", "lastName", "email", "phone", "employeeCode",
-                    "position", "department", "hiredDate", "errors"};
+        try (Workbook out = new XSSFWorkbook()) {
+            Sheet outSheet = out.createSheet("Dòng cần sửa");
+            String[] cols = {"Dòng", "Mã nhân viên", "Họ và tên đệm", "Tên", "Email",
+                    "Số điện thoại", "Chức vụ", "Phòng ban", "Ngày vào làm", "Chi tiết lỗi"};
             Row outHeader = outSheet.createRow(0);
             for (int c = 0; c < cols.length; c++) outHeader.createCell(c).setCellValue(cols[c]);
 
-            if (header == null) {
-                return toBytes(out);
-            }
-
-            Map<String, Integer> colIndex = new HashMap<>();
-            for (Cell cell : header) {
-                colIndex.putIfAbsent(canonicalImportHeader(cell.getStringCellValue().trim().toLowerCase()), cell.getColumnIndex());
-            }
-
-            Set<String> codesSeenInBatch = new HashSet<>();
             int outRowNum = 1;
-            for (int i = 1; i <= sheet.getLastRowNum(); i++) {
-                Row row = sheet.getRow(i);
-                if (row == null || isRowBlank(row)) continue;
-                int displayRow = i + 1;
-
-                String firstName  = str(row, colIndex.get("firstname"));
-                String lastName   = str(row, colIndex.get("lastname"));
-                String email      = str(row, colIndex.get("email"));
-                String phone      = str(row, colIndex.get("phone"));
-                String code       = str(row, colIndex.get("employeecode"));
-                String position   = str(row, colIndex.get("position"));
-                String department = str(row, colIndex.get("department"));
-                String hiredDateStr = str(row, colIndex.get("hireddate"));
-
-                List<EmployeeImportError> rowErrors = validateImportRow(tenantId, displayRow,
-                        firstName, lastName, email, phone, code, hiredDateStr, codesSeenInBatch);
-
-                if (rowErrors.isEmpty()) {
-                    if (code != null && !code.isBlank()) codesSeenInBatch.add(code);
-                    continue;
-                }
-
-                String joinedErrors = rowErrors.stream()
-                        .map(e -> e.getField() + ": " + e.getMessage())
+            for (EmployeeImportError structureError : analysis.structureErrors()) {
+                Row outRow = outSheet.createRow(outRowNum++);
+                outRow.createCell(0).setCellValue(structureError.getRow());
+                outRow.createCell(9).setCellValue(structureError.getMessage());
+            }
+            for (AnalyzedImportRow analyzedRow : analysis.rows()) {
+                if (analyzedRow.errors().isEmpty()) continue;
+                ImportRowData data = analyzedRow.data();
+                String joinedErrors = analyzedRow.errors().stream()
+                        .map(e -> importFieldLabel(e.getField()) + ": " + e.getMessage())
                         .collect(java.util.stream.Collectors.joining("; "));
 
                 Row outRow = outSheet.createRow(outRowNum++);
                 int c = 0;
-                outRow.createCell(c++).setCellValue(displayRow);
-                outRow.createCell(c++).setCellValue(firstName == null ? "" : firstName);
-                outRow.createCell(c++).setCellValue(lastName == null ? "" : lastName);
-                outRow.createCell(c++).setCellValue(email == null ? "" : email);
-                outRow.createCell(c++).setCellValue(phone == null ? "" : phone);
-                outRow.createCell(c++).setCellValue(code == null ? "" : code);
-                outRow.createCell(c++).setCellValue(position == null ? "" : position);
-                outRow.createCell(c++).setCellValue(department == null ? "" : department);
-                outRow.createCell(c++).setCellValue(hiredDateStr == null ? "" : hiredDateStr);
+                outRow.createCell(c++).setCellValue(analyzedRow.rowNumber());
+                outRow.createCell(c++).setCellValue(nullToEmpty(data.employeeCode()));
+                outRow.createCell(c++).setCellValue(nullToEmpty(data.lastName()));
+                outRow.createCell(c++).setCellValue(nullToEmpty(data.firstName()));
+                outRow.createCell(c++).setCellValue(nullToEmpty(data.email()));
+                outRow.createCell(c++).setCellValue(nullToEmpty(data.phone()));
+                outRow.createCell(c++).setCellValue(nullToEmpty(data.position()));
+                outRow.createCell(c++).setCellValue(nullToEmpty(data.department()));
+                outRow.createCell(c++).setCellValue(nullToEmpty(data.hiredDateText()));
                 outRow.createCell(c).setCellValue(joinedErrors);
+            }
+
+            for (int c = 0; c < cols.length; c++) {
+                outSheet.setColumnWidth(c, c == 9 ? 70 * 256 : 20 * 256);
             }
 
             return toBytes(out);
         } catch (IOException e) {
-            throw new IllegalArgumentException("Failed to read Excel file: " + e.getMessage());
+            throw new IllegalStateException("Không thể tạo file tổng hợp lỗi import", e);
         }
     }
 
@@ -873,6 +1047,55 @@ public class EmployeeService {
         if (cell == null) return null;
         String val = DATA_FORMATTER.formatCellValue(cell).trim();
         return val.isEmpty() ? null : val;
+    }
+
+    private String dateStr(Row row, Integer colIdx) {
+        if (colIdx == null) return null;
+        Cell cell = row.getCell(colIdx, Row.MissingCellPolicy.RETURN_BLANK_AS_NULL);
+        if (cell == null) return null;
+        if (cell.getCellType() == CellType.NUMERIC && DateUtil.isCellDateFormatted(cell)) {
+            return cell.getLocalDateTimeCellValue().toLocalDate().toString();
+        }
+        return str(row, colIdx);
+    }
+
+    private LocalDate parseImportDate(String value) {
+        if (value == null || value.isBlank()) return null;
+        try {
+            return LocalDate.parse(value);
+        } catch (DateTimeParseException ignored) {
+            try {
+                return LocalDate.parse(value, VIETNAMESE_DATE_FORMAT);
+            } catch (DateTimeParseException ignoredAgain) {
+                return null;
+            }
+        }
+    }
+
+    private String normalizedOrNull(String value, boolean lowercase) {
+        if (value == null || value.isBlank()) return null;
+        String normalized = value.trim();
+        return lowercase ? normalized.toLowerCase(Locale.ROOT) : normalized;
+    }
+
+    private String nullToEmpty(String value) {
+        return value == null ? "" : value;
+    }
+
+    private String importFieldLabel(String field) {
+        return switch (field) {
+            case "employeecode", "employeeCode" -> "Mã nhân viên";
+            case "lastname", "lastName" -> "Họ và tên đệm";
+            case "firstname", "firstName" -> "Tên";
+            case "email" -> "Email";
+            case "phone" -> "Số điện thoại";
+            case "position" -> "Chức vụ";
+            case "department" -> "Phòng ban";
+            case "hireddate", "hiredDate" -> "Ngày vào làm";
+            case "header" -> "Dòng tiêu đề";
+            case "file" -> "File Excel";
+            default -> field;
+        };
     }
 
     private boolean isRowBlank(Row row) {

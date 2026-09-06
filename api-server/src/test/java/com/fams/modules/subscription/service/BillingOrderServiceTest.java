@@ -4,6 +4,7 @@ import com.fams.modules.audit.service.AuditLogService;
 import com.fams.modules.auth.repository.UserRepository;
 import com.fams.modules.subscription.entity.BillingOrder;
 import com.fams.modules.subscription.entity.BillingOrder.BillingOrderStatus;
+import com.fams.modules.subscription.entity.BillingOrder.BillingInvoiceStatus;
 import com.fams.modules.subscription.entity.TenantSubscription.BillingCycle;
 import com.fams.modules.subscription.repository.BillingOrderRepository;
 import com.fams.modules.subscription.repository.PlanRepository;
@@ -60,6 +61,13 @@ class BillingOrderServiceTest {
         assertThat(order.getStatus()).isEqualTo(BillingOrderStatus.PAID);
         assertThat(order.getAmountPaid()).isEqualTo(500_000);
         assertThat(order.getSubscriptionAppliedAt()).isNotNull();
+        assertThat(order.getInvoiceStatus()).isEqualTo(BillingInvoiceStatus.PENDING_ISSUANCE);
+        when(orderRepository.findById(order.getId())).thenReturn(Optional.of(order));
+        var response = service.getPlatformOrder(order.getId());
+        assertThat(response.getTenantName()).isEqualTo("Công ty FOFO");
+        assertThat(response.isPaymentReceiptAvailable()).isTrue();
+        assertThat(response.getPaymentReceiptNumber()).startsWith("PT-").endsWith("-100001");
+        assertThat(response.getInvoiceNumber()).isNull();
         verify(subscriptionService, times(1)).activateFromPayment(
                 eq(order.getTenantId()), eq(order.getPlanId()), eq(BillingCycle.MONTHLY),
                 any(OffsetDateTime.class), eq(order.getId()));
@@ -109,11 +117,43 @@ class BillingOrderServiceTest {
                 .isInstanceOf(IllegalStateException.class);
     }
 
+    @Test
+    void unfinishedOrderHasDetailsButNoReceiptOrInvoice() {
+        BillingOrder order = pendingOrder();
+        when(orderRepository.findById(order.getId())).thenReturn(Optional.of(order));
+
+        var response = service.getPlatformOrder(order.getId());
+
+        assertThat(response.getTenantName()).isEqualTo("Công ty FOFO");
+        assertThat(response.isPaymentReceiptAvailable()).isFalse();
+        assertThat(response.getPaymentReceiptNumber()).isNull();
+        assertThat(response.getInvoiceStatus()).isEqualTo(BillingInvoiceStatus.NOT_ELIGIBLE);
+    }
+
+    @Test
+    void underpaidOrderIsFlaggedForAccountingReviewWithoutActivatingPlan() {
+        BillingOrder order = pendingOrder();
+        Map<String, Object> payload = Map.of("signature", "signed");
+        when(paymentGateway.verifyWebhook(payload)).thenReturn(
+                new PaymentGateway.VerifiedWebhook(100001, 100_000, "VND", "link-1", "bank-ref-1", "00"));
+        when(orderRepository.findByOrderCodeForUpdate(100001L)).thenReturn(Optional.of(order));
+        when(paymentGateway.getPayment(100001L)).thenReturn(
+                new PaymentGateway.ProviderPayment(100001, 500_000, 100_000, "link-1", "PENDING", "bank-ref-1"));
+
+        service.processWebhook(payload);
+
+        assertThat(order.getStatus()).isEqualTo(BillingOrderStatus.UNDERPAID);
+        assertThat(order.getInvoiceStatus()).isEqualTo(BillingInvoiceStatus.PAYMENT_REVIEW);
+        assertThat(order.getFailureReason()).contains("chưa đủ");
+        verifyNoInteractions(subscriptionService);
+    }
+
     private BillingOrder pendingOrder() {
         return BillingOrder.builder()
                 .id(UUID.randomUUID())
                 .orderCode(100001L)
                 .tenantId(UUID.randomUUID())
+                .tenantNameSnapshot("Công ty FOFO")
                 .planId(UUID.randomUUID())
                 .planNameSnapshot("pro")
                 .planDisplaySnapshot("Pro")

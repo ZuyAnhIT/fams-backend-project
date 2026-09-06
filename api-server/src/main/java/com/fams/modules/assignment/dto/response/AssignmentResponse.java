@@ -31,8 +31,8 @@ public class AssignmentResponse {
     @Schema(description = "Shift template UUID, or null if not linked to a specific shift")
     private UUID shiftId;
 
-    @Schema(description = "Brief site details — only populated on cross-site listings (e.g. GET .../assignments/me) " +
-            "where the site isn't already implied by the request path; null on the site-scoped list endpoint",
+    @Schema(description = "Brief site details for cross-site listings and employee detail responses; " +
+            "null only when the site is already implied by a site-scoped request",
             nullable = true)
     private SiteSummary siteSummary;
 
@@ -57,8 +57,13 @@ public class AssignmentResponse {
     @Schema(description = "Employee's role at the site: worker or supervisor", example = "worker")
     private String role;
 
-    @Schema(description = "Status: active or cancelled", example = "active")
+    @Schema(description = "Administrative record status: active (not cancelled) or cancelled. " +
+            "This does not mean the employee is currently working.", example = "active")
     private String status;
+
+    @Schema(description = "Time-aware lifecycle for UI: upcoming, effective, completed or cancelled", example = "completed",
+            allowableValues = {"upcoming", "effective", "completed", "cancelled"})
+    private String lifecycleStatus;
 
     @Schema(description = "UUID of the user who cancelled this assignment, null if never cancelled")
     private UUID cancelledBy;
@@ -87,6 +92,15 @@ public class AssignmentResponse {
 
         @Schema(description = "Site name", example = "Công trình Quận 1")
         private String name;
+
+        @Schema(description = "Human-readable internal site code", example = "CT-Q1")
+        private String code;
+
+        @Schema(description = "Physical site address", example = "123 Nguyễn Huệ, Quận 1, TP.HCM")
+        private String address;
+
+        @Schema(description = "IANA timezone used by the site", example = "Asia/Ho_Chi_Minh")
+        private String timezone;
     }
 
     @Data

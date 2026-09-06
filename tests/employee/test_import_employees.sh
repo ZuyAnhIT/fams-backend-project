@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Tests for POST /api/v1/tenants/{tenantId}/employees/import
+# Tests for the employee import template, non-mutating validation and import endpoints.
+# The temporary tenant always has a separate verified owner; Platform Admin only provisions
+# it and must not be assigned a company role as a side effect of this test.
 # Usage: BASE_URL=http://localhost:8080 bash test_import_employees.sh
 
 set -euo pipefail
@@ -10,6 +12,7 @@ FAIL=0
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FIXTURES="$SCRIPT_DIR/fixtures"
+source "$SCRIPT_DIR/../lib/test_helpers.sh"
 
 echo "=== Import Employees Tests ==="
 echo "Target: $BASE_URL"
@@ -31,14 +34,25 @@ ADMIN_TOKEN=$(echo "$login_body" | grep -o '"accessToken":"[^"]*"' | head -1 | c
 echo "Admin token obtained."
 echo ""
 
+TS=$(date +%s)
+# A Platform Admin provisions the tenant but must never become its company owner/member.
+echo "--- Setup: Register a separate company owner ---"
+OWNER_EMAIL="import_owner_${TS}_$$@fams.test"
+OWNER_TOKEN=$(register_verified_test_user_token "$BASE_URL" "Import Test Owner" "$OWNER_EMAIL")
+if [ -z "$OWNER_TOKEN" ]; then
+    echo "SETUP FAILED: Could not create a verified company owner"
+    exit 1
+fi
+echo "Verified owner account created."
+echo ""
+
 # Setup: create tenant
 echo "--- Setup: Create test tenant ---"
-TS=$(date +%s)
 t_resp=$(curl -s -w "\n%{http_code}" \
     -X POST "$BASE_URL/api/v1/tenants" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $ADMIN_TOKEN" \
-    -d "{\"name\":\"Import Corp\",\"slug\":\"import-corp-${TS}\",\"ownerEmail\":\"admin@fams.com\"}")
+    -d "{\"name\":\"Import Corp\",\"slug\":\"import-corp-${TS}-$$\",\"ownerEmail\":\"$OWNER_EMAIL\"}")
 t_body=$(echo "$t_resp" | head -n -1)
 if [ "$(echo "$t_resp" | tail -n 1)" -ne 201 ]; then
     echo "SETUP FAILED: Could not create tenant"
@@ -49,8 +63,55 @@ EMP_URL="$BASE_URL/api/v1/tenants/$TENANT_ID/employees"
 echo "Tenant created: id=$TENANT_ID"
 echo ""
 
-# Test 1: Happy path — 3 valid rows all succeed
-echo "--- Test 1: Import 3 valid employees ---"
+# Test 1: Download the standard Vietnamese template
+echo "--- Test 1: Download Vietnamese import template ---"
+template_file=$(mktemp)
+template_headers=$(mktemp)
+template_status=$(curl -s -o "$template_file" -D "$template_headers" -w "%{http_code}" \
+    -X GET "$EMP_URL/import/template" \
+    -H "Authorization: Bearer $ADMIN_TOKEN")
+template_disposition=$(tr -d '\r' < "$template_headers" | grep -i '^content-disposition:' || true)
+if [ "$template_status" -eq 200 ] \
+        && echo "$template_disposition" | grep -q 'mau-import-nhan-vien.xlsx' \
+        && unzip -tqq "$template_file"; then
+    echo "PASS: Template is a valid .xlsx with the expected Vietnamese filename"
+    PASS=$((PASS + 1))
+else
+    echo "FAIL: Template download/format invalid (HTTP $template_status, disposition=$template_disposition)"
+    FAIL=$((FAIL + 1))
+fi
+rm -f "$template_file" "$template_headers"
+
+# Test 2: Validate field errors without writing employee data
+echo ""
+echo "--- Test 2: Preflight validation is non-mutating ---"
+before_count=$(curl -s "$EMP_URL?size=1" -H "Authorization: Bearer $ADMIN_TOKEN" \
+    | grep -o '"totalElements":[0-9]*' | head -1 | cut -d: -f2 || true)
+resp=$(curl -s -w "\n%{http_code}" \
+    -X POST "$EMP_URL/import/validate" \
+    -H "Authorization: Bearer $ADMIN_TOKEN" \
+    -F "file=@$FIXTURES/mixed_employees.xlsx")
+body=$(echo "$resp" | head -n -1)
+status=$(echo "$resp" | tail -n 1)
+after_count=$(curl -s "$EMP_URL?size=1" -H "Authorization: Bearer $ADMIN_TOKEN" \
+    | grep -o '"totalElements":[0-9]*' | head -1 | cut -d: -f2 || true)
+valid_rows=$(echo "$body" | grep -o '"validRows":[0-9]*' | cut -d: -f2 || true)
+invalid_rows=$(echo "$body" | grep -o '"invalidRows":[0-9]*' | cut -d: -f2 || true)
+if [ "$status" -eq 200 ] && [ "$valid_rows" = "1" ] && [ "$invalid_rows" = "2" ] \
+        && [ "$before_count" = "$after_count" ] \
+        && echo "$body" | grep -q '"field":"email"' \
+        && echo "$body" | grep -q '"field":"firstName"'; then
+    echo "PASS: Validation reports field errors and leaves employee count unchanged ($before_count)"
+    PASS=$((PASS + 1))
+else
+    echo "FAIL: Validation contract/non-mutation failed (HTTP $status, before=$before_count, after=$after_count)"
+    echo "Body: $body"
+    FAIL=$((FAIL + 1))
+fi
+
+# Test 3: Happy path — 3 valid rows all succeed
+echo ""
+echo "--- Test 3: Import 3 valid employees ---"
 resp=$(curl -s -w "\n%{http_code}" \
     -X POST "$EMP_URL/import" \
     -H "Authorization: Bearer $ADMIN_TOKEN" \
@@ -75,9 +136,9 @@ else
     FAIL=$((FAIL + 1))
 fi
 
-# Test 2: Mixed file — 1 valid, 2 invalid (bad email + missing firstName)
+# Test 4: Mixed file — 1 valid, 2 invalid (bad email + missing firstName)
 echo ""
-echo "--- Test 2: Mixed file (1 valid, 2 invalid) ---"
+echo "--- Test 4: Mixed file (1 valid, 2 invalid) ---"
 resp=$(curl -s -w "\n%{http_code}" \
     -X POST "$EMP_URL/import" \
     -H "Authorization: Bearer $ADMIN_TOKEN" \
@@ -102,9 +163,9 @@ else
     FAIL=$((FAIL + 1))
 fi
 
-# Test 3: Duplicate code within same file → second row fails
+# Test 5: Duplicate code within same file → second row fails
 echo ""
-echo "--- Test 3: Duplicate code within import file ---"
+echo "--- Test 5: Duplicate code within import file ---"
 resp=$(curl -s -w "\n%{http_code}" \
     -X POST "$EMP_URL/import" \
     -H "Authorization: Bearer $ADMIN_TOKEN" \
@@ -128,9 +189,9 @@ else
     FAIL=$((FAIL + 1))
 fi
 
-# Test 4: Duplicate code against existing DB record
+# Test 6: Duplicate code against existing DB record
 echo ""
-echo "--- Test 4: Duplicate code conflicts with existing employee ---"
+echo "--- Test 6: Duplicate code conflicts with existing employee ---"
 # Create an employee first with a known code
 curl -s -X POST "$EMP_URL" \
     -H "Content-Type: application/json" \
@@ -158,9 +219,9 @@ else
     FAIL=$((FAIL + 1))
 fi
 
-# Test 5: Empty file (header only) → 0 rows
+# Test 7: Empty file (header only) → an explicit data error
 echo ""
-echo "--- Test 5: Empty file (header only) ---"
+echo "--- Test 7: Empty file (header only) ---"
 resp=$(curl -s -w "\n%{http_code}" \
     -X POST "$EMP_URL/import" \
     -H "Authorization: Bearer $ADMIN_TOKEN" \
@@ -169,8 +230,8 @@ body=$(echo "$resp" | head -n -1)
 status=$(echo "$resp" | tail -n 1)
 if [ "$status" -eq 200 ]; then
     total=$(echo "$body" | grep -o '"totalRows":[0-9]*' | cut -d: -f2 || true)
-    if [ "$total" = "0" ]; then
-        echo "PASS: Empty file (totalRows=0)"
+    if [ "$total" = "0" ] && echo "$body" | grep -q 'File chưa có dòng dữ liệu nhân viên'; then
+        echo "PASS: Empty file reports totalRows=0 and an actionable error"
         PASS=$((PASS + 1))
     else
         echo "FAIL: Empty file — totalRows=$total"
@@ -181,9 +242,9 @@ else
     FAIL=$((FAIL + 1))
 fi
 
-# Test 6: Unauthenticated → 401
+# Test 8: Unauthenticated → 401
 echo ""
-echo "--- Test 6: Unauthenticated ---"
+echo "--- Test 8: Unauthenticated ---"
 actual=$(curl -s -o /dev/null -w "%{http_code}" \
     -X POST "$EMP_URL/import" \
     -F "file=@$FIXTURES/valid_employees.xlsx")
@@ -195,25 +256,11 @@ else
     FAIL=$((FAIL + 1))
 fi
 
-# Test 7: No permission → 403
+# Test 9: No permission → 403
 echo ""
-echo "--- Test 7: Forbidden ---"
-reg_resp=$(curl -s -w "\n%{http_code}" \
-    -X POST "$BASE_URL/api/v1/auth/register" \
-    -H "Content-Type: application/json" \
-    -d "{\"email\":\"noperm.import.${TS}@fams.com\",\"password\":\"Regular@1234\",\"displayName\":\"No Perm\"}")
-reg_status=$(echo "$reg_resp" | tail -n 1)
-reg_body=$(echo "$reg_resp" | head -n -1)
-if [ "$reg_status" -eq 201 ]; then
-    NO_PERM_TOKEN=$(echo "$reg_body" | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4 || true)
-elif [ "$reg_status" -eq 409 ]; then
-    l2=$(curl -s -X POST "$BASE_URL/api/v1/auth/login" \
-        -H "Content-Type: application/json" \
-        -d "{\"identifier\":\"noperm.import.${TS}@fams.com\",\"password\":\"Regular@1234\"}")
-    NO_PERM_TOKEN=$(echo "$l2" | grep -o '"accessToken":"[^"]*"' | head -1 | cut -d'"' -f4 || true)
-else
-    NO_PERM_TOKEN=""
-fi
+echo "--- Test 9: Forbidden ---"
+NO_PERM_EMAIL="noperm.import.${TS}.$$@fams.test"
+NO_PERM_TOKEN=$(register_verified_test_user_token "$BASE_URL" "No Import Permission" "$NO_PERM_EMAIL")
 if [ -n "$NO_PERM_TOKEN" ]; then
     actual=$(curl -s -o /dev/null -w "%{http_code}" \
         -X POST "$EMP_URL/import" \

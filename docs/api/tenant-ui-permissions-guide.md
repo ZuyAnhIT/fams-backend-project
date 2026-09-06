@@ -116,4 +116,7 @@ MOBILE APP (fams-front-app-project)
 
 - **`maxStorageGb` chưa được enforce ở backend** — dựng UI hiển thị giới hạn này là được (đọc từ API bình thường), nhưng **đừng dựa vào nó để tự tin rằng hệ thống sẽ chặn khi khách vượt dung lượng** — hiện tại không có gì chặn cả. Xem chi tiết kỹ thuật ở `tenant-api.md` mục 3.6.
 - **Mobile App hiện chưa đọc `dateFormat`/`timeFormat`/màu brand của công ty** — API `GET /tenants/{id}/settings` đã mở cho mọi thành viên tenant (không chỉ owner) nên về mặt quyền, app gọi được ngay nếu sau này cần đồng bộ giao diện app theo từng công ty. Đây là quyết định sản phẩm cần bạn xác nhận, không tự ý thêm vào scope app.
-- Owner đã có luồng tự mua/gia hạn qua PayOS. Phạm vi MVP chưa gồm tự động trừ tiền định kỳ, prorate, hoàn tiền và hóa đơn điện tử.
+- Owner đã có luồng tự mua/gia hạn qua PayOS. Phạm vi MVP chưa gồm tự động trừ tiền định kỳ,
+  prorate, hoàn tiền và phát hành hóa đơn điện tử qua nhà cung cấp hợp pháp. Hệ thống đã hiển thị
+  chi tiết giao dịch, phiếu xác nhận thanh toán nội bộ cho đơn `PAID` và trạng thái chờ phát hành
+  hóa đơn; phiếu nội bộ không được gọi hoặc sử dụng thay hóa đơn VAT.
