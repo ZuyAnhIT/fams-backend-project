@@ -33,7 +33,7 @@ public class AiServiceClient {
         this.secret = secret;
         SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
         factory.setConnectTimeout(Duration.ofSeconds(3));
-        factory.setReadTimeout(Duration.ofSeconds(30));
+        factory.setReadTimeout(Duration.ofMinutes(10));
         this.restClient = RestClient.builder()
                 .baseUrl(baseUrl)
                 .requestFactory(factory)

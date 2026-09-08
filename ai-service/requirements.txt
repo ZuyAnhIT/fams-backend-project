@@ -1,6 +1,5 @@
 fastapi==0.111.0
 uvicorn[standard]==0.29.0
-deepface==0.0.93
 # Face detection (SCRFD) + recognition (ArcFace) + 106/68-point landmarks + head pose, replacing
 # the old dlib-based face_recognition pipeline entirely (2026-07-31) — see
 # docs/api/face-id-management-api.md for why (dlib 6-point + solvePnP had a systematic pose bias
@@ -32,10 +31,9 @@ requests
 # compatibility explicitly rather than assuming this pin still holds.
 numpy==1.26.4
 Pillow==10.3.0
-# opencv-python-headless conflicts with deepface's opencv-python dependency.
-# deepface manages opencv; libglib2.0-0/libsm6/libxext6 in Dockerfile provide runtime libs.
-# insightface also needs cv2 — the same opencv-python install satisfies it, no separate
-# opencv-contrib-python needed (verified: insightface only uses core cv2 APIs already present).
+deepface==0.0.93
+# opencv-python is a transitive dependency of deepface — installed automatically.
+# libglib2.0-0/libsm6/libxext6/libgl1 in Dockerfile provide the required runtime shared libraries.
 psycopg2-binary==2.9.9
 redis==5.0.4
 httpx==0.27.0
