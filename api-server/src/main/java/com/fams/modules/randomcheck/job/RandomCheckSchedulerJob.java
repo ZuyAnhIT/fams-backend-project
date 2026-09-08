@@ -6,7 +6,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
-import java.time.LocalDate;
+import java.time.OffsetDateTime;
 
 @Slf4j
 @Component
@@ -23,22 +23,21 @@ public class RandomCheckSchedulerJob {
         this.jobMonitor = jobMonitor;
     }
 
-    /**
-     * Generates scheduled random checks for all active assignments each day.
-     * Runs at 00:01 AM every day so checks are ready before any shift begins.
-     * The generation is idempotent — re-running on the same day is safe.
-     */
-    @Scheduled(cron = "${fams.randomcheck.scheduler.cron:0 1 0 * * *}")
+    /** Continuously ensures schedules exist. The initial delay repairs a missed daily run after
+     * every restart; the fixed delay also picks up same-day assignment/configuration changes. */
+    @Scheduled(fixedDelayString = "${fams.randomcheck.scheduler.fixed-delay-ms:60000}",
+            initialDelayString = "${fams.randomcheck.scheduler.initial-delay-ms:5000}")
     public void generateDailyChecks() {
         long startedAt = System.currentTimeMillis();
-        LocalDate today = LocalDate.now();
-        log.info("RandomCheckSchedulerJob — generating checks for {}", today);
+        OffsetDateTime now = OffsetDateTime.now();
         try {
-            int count = generatorService.generateForDate(today);
-            log.info("RandomCheckSchedulerJob — created {} scheduled checks for {}", count, today);
+            int count = generatorService.ensureSchedulesForCurrentLocalDates(now);
+            if (count > 0) {
+                log.info("RandomCheckSchedulerJob — created {} missing scheduled check(s)", count);
+            }
             jobMonitor.recordSuccess(JOB_NAME, System.currentTimeMillis() - startedAt);
         } catch (Exception e) {
-            log.error("RandomCheckSchedulerJob — failed for {}: {}", today, e.getMessage(), e);
+            log.error("RandomCheckSchedulerJob failed: {}", e.getMessage(), e);
             jobMonitor.recordFailure(JOB_NAME, System.currentTimeMillis() - startedAt, e);
         }
     }

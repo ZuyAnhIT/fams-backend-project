@@ -34,7 +34,8 @@ public class CreateSiteRequest {
     @DecimalMax(value = "180.0",  message = "Longitude must be between -180 and 180")
     private Double longitude;
 
-    @Schema(description = "Timezone for the site (IANA tz name, default: UTC)", example = "Asia/Ho_Chi_Minh")
+    @Schema(description = "Vietnam business timezone (fixed)", example = "Asia/Ho_Chi_Minh",
+            defaultValue = "Asia/Ho_Chi_Minh", allowableValues = {"Asia/Ho_Chi_Minh"})
     @Size(max = 50, message = "Timezone must be 50 characters or fewer")
     private String timezone;
 

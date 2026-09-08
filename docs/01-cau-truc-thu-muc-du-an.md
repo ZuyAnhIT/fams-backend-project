@@ -90,7 +90,8 @@ fams-backend-project/
 │   ├── dev-start.sh, dev-stop.sh
 │   ├── migrate.sh
 │   ├── seed.sh                          # Seed qua API + SQL fallback
-│   └── seed_historical.sql
+│   ├── seed_demo.sql
+│   └── verify_demo_seed.sql
 ├── tests/                               # Integration/API test bằng Bash + curl
 │   ├── attendance/                      # 9 test
 │   ├── audit/                           # 1 test

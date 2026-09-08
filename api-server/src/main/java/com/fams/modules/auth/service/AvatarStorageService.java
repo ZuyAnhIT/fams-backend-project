@@ -109,6 +109,9 @@ public class AvatarStorageService {
         // to do this: many real S3 accounts have ACLs disabled entirely ("Bucket owner
         // enforced"), and MinIO doesn't honor the `public-read` canned ACL either, so a
         // policy is what actually works on both.
+        // Covers logos/* too (#08): TenantLogoStorageService shares this bucket and also
+        // (re)asserts this same combined policy, so the two ApplicationReadyEvent listeners
+        // converge regardless of which runs last.
         String policy = """
                 {
                   "Version": "2012-10-17",
@@ -116,10 +119,10 @@ public class AvatarStorageService {
                     "Effect": "Allow",
                     "Principal": "*",
                     "Action": "s3:GetObject",
-                    "Resource": "arn:aws:s3:::%s/%s*"
+                    "Resource": ["arn:aws:s3:::%s/avatars*", "arn:aws:s3:::%s/logos*"]
                   }]
                 }
-                """.formatted(bucket, KEY_PREFIX);
+                """.formatted(bucket, bucket);
         s3Client.putBucketPolicy(PutBucketPolicyRequest.builder().bucket(bucket).policy(policy).build());
     }
 

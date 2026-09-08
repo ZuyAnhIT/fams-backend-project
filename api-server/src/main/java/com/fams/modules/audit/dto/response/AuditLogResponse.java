@@ -25,11 +25,21 @@ public class AuditLogResponse {
   @Schema(description = "Email of the actor at time of action", example = "admin@acme.com")
   private String actorEmail;
 
+  @Schema(description = "Display name of the actor, resolved from actorId at read time — null if "
+      + "the actor account was deleted or the action had no actor (system job). (#audit-readability)",
+      example = "Nguyễn Văn An")
+  private String actorName;
+
   @Schema(description = "Type of entity affected", example = "Employee")
   private String entityType;
 
   @Schema(description = "ID of the affected entity", example = "550e8400-e29b-41d4-a716-446655440000")
   private String entityId;
+
+  @Schema(description = "Human-readable name of the affected entity, resolved at read time (employee "
+      + "name, site name, …) — null when the entity can't be named (e.g. AccessControl rows) or was "
+      + "deleted. (#audit-readability)", example = "Công trình Quận 1")
+  private String entityName;
 
   @Schema(description = "Action performed", example = "UPDATE")
   private String action;

@@ -90,6 +90,22 @@ public final class NotificationEventTypeCatalog {
                     true,
                     "high"),
             new NotificationEventTypeInfo(
+                    // Must match com.fams.modules.assignment.constant.AssignmentEventTypes.ASSIGNMENT_CREATED_EMPLOYEE
+                    "ASSIGNMENT_CREATED_EMPLOYEE",
+                    "Được phân công công trình",
+                    "Gửi khi bạn được phân công vào một công trình/ca làm mới.",
+                    true,
+                    true,
+                    "normal"),
+            new NotificationEventTypeInfo(
+                    // Must match com.fams.modules.assignment.constant.AssignmentEventTypes.ASSIGNMENT_CANCELLED_EMPLOYEE
+                    "ASSIGNMENT_CANCELLED_EMPLOYEE",
+                    "Phân công công trình kết thúc",
+                    "Gửi khi một phân công công trình/ca làm của bạn bị hủy.",
+                    true,
+                    true,
+                    "high"),
+            new NotificationEventTypeInfo(
                     // Must match com.fams.modules.attendance.constant.AttendanceEventTypes.MISSING_CHECKOUT_EMPLOYEE
                     "MISSING_CHECKOUT_EMPLOYEE",
                     "Quên check-out",

@@ -25,16 +25,16 @@ public class CreatePlanRequest {
     @Size(max = 2000, message = "Description must be at most 2000 characters")
     private String description;
 
-    @Schema(description = "Monthly price (non-negative, max 8 integer digits + 2 decimal places)", example = "49.99")
+    @Schema(description = "Monthly price in whole VND", example = "20000")
     @NotNull(message = "Monthly price is required")
     @DecimalMin(value = "0.00", message = "Monthly price must be non-negative")
-    @Digits(integer = 8, fraction = 2, message = "Monthly price must have at most 8 integer digits and 2 decimal places")
+    @Digits(integer = 8, fraction = 0, message = "Monthly price must be a whole VND amount")
     private BigDecimal priceMonthly;
 
-    @Schema(description = "Yearly price (non-negative)", example = "499.99")
+    @Schema(description = "Yearly price in whole VND", example = "200000")
     @NotNull(message = "Yearly price is required")
     @DecimalMin(value = "0.00", message = "Yearly price must be non-negative")
-    @Digits(integer = 8, fraction = 2, message = "Yearly price must have at most 8 integer digits and 2 decimal places")
+    @Digits(integer = 8, fraction = 0, message = "Yearly price must be a whole VND amount")
     private BigDecimal priceYearly;
 
     @Schema(description = "Display sort order (ascending), 0 by default", example = "2")

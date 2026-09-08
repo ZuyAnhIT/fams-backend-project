@@ -55,6 +55,24 @@ public class CheckinDetailResponse {
     @Schema(description = "Check-out timestamp (null if not yet checked out)")
     private OffsetDateTime checkOutAt;
 
+    @Schema(description = "Logical session end; set without checkOutAt for a missing checkout")
+    private OffsetDateTime sessionClosedAt;
+
+    @Schema(description = "checkout | missing_checkout | admin_closed")
+    private String sessionCloseReason;
+
+    @Schema(description = "Absolute checkout deadline calculated at check-in")
+    private OffsetDateTime sessionExpiresAt;
+
+    @Schema(description = "Absolute scheduled shift-end instant")
+    private OffsetDateTime shiftEndsAt;
+
+    @Schema(description = "Whether the session permits overtime after shift end")
+    private boolean overtimeAllowed;
+
+    @Schema(description = "Whether this session can still be checked out")
+    private boolean sessionOpen;
+
     @Schema(description = "Check-out latitude (null if not yet checked out)")
     private Double checkOutLat;
 

@@ -52,6 +52,9 @@ public class TenantDetailResponse {
 
     // --- Subscription ---
 
+    @Schema(description = "Subscription plan UUID")
+    private UUID planId;
+
     @Schema(description = "Internal plan key", example = "pro")
     private String planName;
 

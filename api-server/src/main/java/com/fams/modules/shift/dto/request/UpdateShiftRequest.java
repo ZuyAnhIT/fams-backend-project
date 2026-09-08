@@ -44,6 +44,14 @@ public class UpdateShiftRequest {
     @Schema(description = "Set to true to explicitly clear the override and inherit the site's policy again")
     private boolean clearCheckinPolicyOverride;
 
+    @Schema(allowableValues = {"inherit", "enabled", "disabled"})
+    @Pattern(regexp = "inherit|enabled|disabled")
+    private String randomCheckPolicy;
+
+    @Schema(allowableValues = {"inherit", "enabled", "disabled"})
+    @Pattern(regexp = "inherit|enabled|disabled")
+    private String manualCheckPolicy;
+
     // See CreateShiftRequest for why this isn't named isDefault directly.
     @JsonProperty("isDefault")
     @Schema(description = "Set as the default shift for this site (clears the previous default, if any) "

@@ -61,7 +61,7 @@ Bổ sung `POST /api/v1/platform/attendance/backfill?from=...&to=...` (PLATFORM_
 
 Bản vá lần 1 (mục 2) làm cho `adjustmentReason != null` bảo vệ vĩnh viễn 1 bản ghi khỏi bị recompute tự động ghi đè — đúng mục tiêu chống mất quyết định của HR, nhưng chưa có đường nào để HR **chủ động** gỡ bảo vệ đó khi dữ liệu mới hợp lệ đến muộn (ví dụ: 1 checkin đồng bộ offline trễ vài ngày, hoặc HR duyệt lại 1 phiên `pending_review` sau khi đã lỡ điều chỉnh tay).
 
-Bổ sung `POST /attendance/{summaryId}/unlock-and-recompute` (quyền `attendance:list`, cùng site-scope check với `/adjust`), body bắt buộc `{"reason": "..."}`:
+Bổ sung `POST /attendance/{summaryId}/unlock-and-recompute` (quyền `attendance:adjust`, cùng site-scope check với `/adjust`), body bắt buộc `{"reason": "..."}`:
 
 1. Xóa `adjustmentReason` (gỡ khóa).
 2. Gọi lại `recompute()` chuẩn cho đúng employee/site/ngày đó.
@@ -185,8 +185,8 @@ Cả 2 field có mặt trên `AttendanceSummaryResponse` (theo ngày) và rollup
 | `/attendance/me` | GET | Nhân viên (tự động) | như trên |
 | `/attendance/monthly` | GET | HR (`attendance:list`) | `daysWithPendingReview`, `daysWithRejectedSession` |
 | `/attendance/me/monthly` | GET | Nhân viên (tự động) | như trên + `dailySummaries[]` có field mới |
-| `/attendance/{id}/adjust` | PATCH | HR (`attendance:list`) | Không đổi request; giờ được **bảo vệ** khỏi bị ghi đè tự động |
-| `/attendance/recompute` | POST | HR (`attendance:list`) | Không đổi; giờ tôn trọng bản ghi đã adjust |
+| `/attendance/{id}/adjust` | PATCH | HR (`attendance:adjust`) | Không đổi request; giờ được **bảo vệ** khỏi bị ghi đè tự động |
+| `/attendance/recompute` | POST | HR (`attendance:adjust`) | Không đổi; giờ tôn trọng bản ghi đã adjust |
 
 Migration `V79__attendance_summary_status_filtering_and_adjustment_protection.sql` — thêm 2 cột `has_pending_review_session`, `has_rejected_session` vào `attendance_summaries` (mặc định `false`, không phá dữ liệu cũ).
 

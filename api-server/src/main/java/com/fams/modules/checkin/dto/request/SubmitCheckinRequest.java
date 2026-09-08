@@ -12,6 +12,13 @@ import java.util.UUID;
 @Schema(description = "GPS check-in submission payload")
 public class SubmitCheckinRequest {
 
+    @Schema(description = "Exact assignment selected from GET .../checkin/available-sites. "
+            + "New app versions must send this field. It is temporarily optional for rolling "
+            + "upgrades; the server only infers it when exactly one assignment is currently "
+            + "eligible at the selected site.",
+            example = "3fa85f64-5717-4562-b3fc-2c963f66afa6", nullable = true)
+    private UUID assignmentId;
+
     @Schema(description = "Site to check in at", example = "3fa85f64-5717-4562-b3fc-2c963f66afa6")
     @NotNull(message = "siteId is required")
     private UUID siteId;

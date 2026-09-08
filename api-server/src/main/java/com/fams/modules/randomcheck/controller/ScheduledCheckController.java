@@ -5,6 +5,7 @@ import com.fams.modules.randomcheck.dto.request.ManualCheckRequest;
 import com.fams.modules.randomcheck.dto.request.SubmitCheckResponseRequest;
 import com.fams.modules.randomcheck.dto.response.CheckResponseDto;
 import com.fams.modules.randomcheck.dto.response.EmployeePendingCheckResponse;
+import com.fams.modules.randomcheck.dto.response.ManualCheckCandidateResponse;
 import com.fams.modules.randomcheck.dto.response.ScheduledCheckDetailResponse;
 import com.fams.modules.randomcheck.dto.response.ScheduledCheckResponse;
 import com.fams.modules.randomcheck.entity.CheckResponse;
@@ -688,10 +689,31 @@ public class ScheduledCheckController {
     }
 
     @Operation(
+        summary = "List employees eligible for an immediate manual random check",
+        description = "Returns only active employees with a non-expired open check-in at the requested site "
+                + "whose effective shift/config policy allows a manual check."
+    )
+    @PreAuthorize("hasAuthority('randomchecks:configure')")
+    @GetMapping("/manual-candidates")
+    public ResponseEntity<ApiResponse<List<ManualCheckCandidateResponse>>> listManualCheckCandidates(
+            @Parameter(description = "Tenant UUID") @PathVariable UUID tenantId,
+            @RequestParam UUID siteId,
+            @AuthenticationPrincipal FamsUserDetails userDetails) {
+        checkPermission(userDetails.getUserId(), tenantId, userDetails.isPlatformAdmin());
+        if (!siteScopeService.isSiteAllowed(userDetails.getUserId(), tenantId, siteId,
+                userDetails.isPlatformAdmin())) {
+            throw new AccessDeniedException(
+                    "You do not have permission to trigger random checks for this site");
+        }
+        return ResponseEntity.ok(ApiResponse.success(
+                manualCheckService.listEligibleCandidates(tenantId, siteId)));
+    }
+
+    @Operation(
         summary = "Trigger an immediate manual random check for an employee",
         description = "HR/Supervisor sends an on-demand random check directly to an employee at a site. " +
                       "The check is created with status 'sent' and expires after the configured " +
-                      "responseWindowSeconds. The employee must have an active assignment at the site today. " +
+                      "responseWindowSeconds. The employee must have a non-expired open check-in at the site. " +
                       "Bypasses the config's applicableRoles population filter by design (targeting one " +
                       "specific employee is an explicit override) — a reason is required for audit trail. " +
                       "Requires randomchecks:configure permission."
@@ -702,7 +724,8 @@ public class ScheduledCheckController {
             description = "Manual check created and sent to the employee"),
         @io.swagger.v3.oas.annotations.responses.ApiResponse(
             responseCode = "400",
-            description = "Employee has no active assignment at site, or no config exists, or invalid checkMode"),
+            description = "Employee has no eligible open check-in at site, policy disallows manual checks, "
+                    + "no config exists, or checkMode is invalid"),
         @io.swagger.v3.oas.annotations.responses.ApiResponse(
             responseCode = "404",
             description = "Site not found"),

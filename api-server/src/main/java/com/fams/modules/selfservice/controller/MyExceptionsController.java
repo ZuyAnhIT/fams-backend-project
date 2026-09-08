@@ -2,6 +2,7 @@ package com.fams.modules.selfservice.controller;
 
 import com.fams.modules.checkin.dto.response.CheckinResponse;
 import com.fams.modules.checkin.service.CheckinService;
+import com.fams.modules.employee.repository.EmployeeRepository;
 import com.fams.modules.selfservice.dto.response.MyExceptionItemResponse;
 import com.fams.modules.violation.dto.response.ViolationListResponse;
 import com.fams.modules.violation.service.ViolationService;
@@ -44,10 +45,13 @@ public class MyExceptionsController {
 
     private final CheckinService checkinService;
     private final ViolationService violationService;
+    private final EmployeeRepository employeeRepository;
 
-    public MyExceptionsController(CheckinService checkinService, ViolationService violationService) {
+    public MyExceptionsController(CheckinService checkinService, ViolationService violationService,
+                                  EmployeeRepository employeeRepository) {
         this.checkinService = checkinService;
         this.violationService = violationService;
+        this.employeeRepository = employeeRepository;
     }
 
     @Operation(
@@ -64,6 +68,18 @@ public class MyExceptionsController {
             @AuthenticationPrincipal FamsUserDetails userDetails) {
         int cappedSize = Math.min(size, MAX_SIZE);
         UUID userId = userDetails.getUserId();
+
+        // "Cần giải thích" is in the customer nav for every tenant member (tenant_admin,
+        // hr_manager, supervisor, employee) — but only accounts with an actual employee profile
+        // can have pending_review check-ins or violations. A pure tenant_admin / HR account with
+        // no profile genuinely has nothing to explain: return an empty inbox (200), not the 404
+        // that the underlying getCheckinHistory / listMyViolations throw on a missing profile
+        // (which surfaced as a dead-end red "Không thể tải hộp thư" error on Web + App — #19).
+        if (!employeeRepository.existsByTenantIdAndUserIdAndDeletedAtIsNull(tenantId, userId)) {
+            log.info("Merged exceptions inbox: tenantId={} userId={} has no employee profile — empty inbox",
+                    tenantId, userId);
+            return ResponseEntity.ok(ApiResponse.success(List.of()));
+        }
 
         List<CheckinResponse> pendingCheckins = checkinService
                 .getCheckinHistory(tenantId, userId, null, "pending_review", null, null, 0, cappedSize)

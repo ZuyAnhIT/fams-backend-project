@@ -13,6 +13,11 @@ public interface ScheduledCheckRepository extends JpaRepository<ScheduledCheck, 
 
     boolean existsByAssignmentIdAndCheckDateAndDeletedAtIsNull(UUID assignmentId, LocalDate checkDate);
 
+    /** Automatic checks use positive indices; manual checks use zero/negative indices and must
+     * not suppress the automatic schedule for the same assignment/date. */
+    boolean existsByAssignmentIdAndCheckDateAndCheckIndexGreaterThanAndDeletedAtIsNull(
+            UUID assignmentId, LocalDate checkDate, int checkIndex);
+
     /** Used by AttendanceSummaryService.recompute() to set hasRandomCheckFailure — true if this
      *  employee/site/date had >=1 random check that ended in no_response, or was responded to
      *  with outcome='fail' (location/face/liveness/face_verify_timeout). Read-only signal, never

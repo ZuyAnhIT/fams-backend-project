@@ -100,10 +100,16 @@ public class EmployeeDashboardResponse {
         @Schema(description = "When the employee checked out (null if session still open)")
         private OffsetDateTime checkOutAt;
 
+        @Schema(description = "Logical closure reason when no checkout evidence exists")
+        private String sessionCloseReason;
+
+        @Schema(description = "Immutable deadline after which checkout is no longer accepted")
+        private OffsetDateTime sessionExpiresAt;
+
         @Schema(description = "Total work minutes for this session (null if session still open)")
         private Integer workMinutes;
 
-        @Schema(description = "True while the check-in session is still open (no checkout)")
+        @Schema(description = "True only while the session has no checkout/closure and its deadline is still in the future")
         private boolean open;
     }
 

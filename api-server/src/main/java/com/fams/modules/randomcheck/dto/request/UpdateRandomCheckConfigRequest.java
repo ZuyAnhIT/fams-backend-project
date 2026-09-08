@@ -27,6 +27,10 @@ public class UpdateRandomCheckConfigRequest {
     @Schema(description = "Latest time a check may be sent (HH:mm)", example = "17:00")
     private LocalTime allowedEndTime;
 
+    @Schema(allowableValues = {"full_shift", "custom_window"})
+    @Pattern(regexp = "full_shift|custom_window", message = "window_mode must be full_shift or custom_window")
+    private String windowMode;
+
     @Schema(
         description = "Verification mode",
         example = "location_only",
@@ -55,4 +59,6 @@ public class UpdateRandomCheckConfigRequest {
             + "\"exceeds threshold\" on the HR monthly attendance report", example = "3")
     @Min(value = 1, message = "failure_escalation_threshold must be at least 1")
     private Integer failureEscalationThreshold;
+
+    private Boolean manualChecksAllowed;
 }

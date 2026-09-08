@@ -43,9 +43,11 @@ EYE_OPEN_THRESHOLD = 0.16
 def estimate_head_pose(face) -> tuple[float, float, float] | None:
     """Returns (pitch, yaw, roll) in degrees from an InsightFace Face object, or None if this
     face has no pose (only present when the landmark_3d_68 model ran, which buffalo_l always
-    includes). pitch > 0 ~ looking up, pitch < 0 ~ looking down; yaw > 0 / < 0 ~ turned to one
-    side vs the other — same sign convention as before, InsightFace's own pose[0]=pitch,
-    pose[1]=yaw, pose[2]=roll (see insightface/model_zoo/landmark.py)."""
+    includes). pitch > 0 ~ looking up, pitch < 0 ~ looking down. yaw sign, verified by
+    real-device QA on non-mirrored selfie frames: yaw < 0 ~ user turned to their OWN right,
+    yaw > 0 ~ user turned to their OWN left (see classify_frame for how this maps to actions).
+    InsightFace's own pose[0]=pitch, pose[1]=yaw, pose[2]=roll (see
+    insightface/model_zoo/landmark.py)."""
     pose = getattr(face, "pose", None)
     if pose is None:
         return None
@@ -100,9 +102,16 @@ def classify_frame(face, baseline_pitch: float = 0.0, baseline_yaw: float = 0.0)
         yaw_delta = yaw - baseline_yaw
         if abs(yaw_delta) <= CENTER_MAX_DEVIATION_DEG and abs(pitch_delta) <= CENTER_MAX_DEVIATION_DEG:
             satisfied.add("center")
-        if yaw_delta >= YAW_THRESHOLD_DEG:
+        # Direction mapping fixed after real-device QA (2026-09-03): the challenge instruction
+        # ("quay đầu sang phải/trái") means the user's OWN right/left. Frames are captured from
+        # the selfie camera WITHOUT mirroring (FaceLivenessCamera uses mirror={false}), i.e. the
+        # image is oriented the way another person sees the user. In that orientation InsightFace
+        # reports a NEGATIVE yaw when the user turns to their own right and a POSITIVE yaw when
+        # they turn to their own left — the opposite of the sign this code originally assumed,
+        # which made every turn step reject the correct motion and accept the reversed one.
+        if yaw_delta <= -YAW_THRESHOLD_DEG:
             satisfied.add("turn_right")
-        elif yaw_delta <= -YAW_THRESHOLD_DEG:
+        elif yaw_delta >= YAW_THRESHOLD_DEG:
             satisfied.add("turn_left")
         if pitch_delta >= PITCH_THRESHOLD_DEG:
             satisfied.add("look_up")

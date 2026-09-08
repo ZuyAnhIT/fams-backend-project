@@ -38,6 +38,9 @@ public class RandomCheckConfig {
     @Column(name = "allowed_end_time", nullable = false)
     private LocalTime allowedEndTime;
 
+    @Column(name = "window_mode", nullable = false, length = 20)
+    private String windowMode;
+
     @Column(name = "check_mode", nullable = false, length = 30)
     private String checkMode;
 
@@ -55,6 +58,9 @@ public class RandomCheckConfig {
 
     @Column(name = "is_active", nullable = false)
     private boolean isActive;
+
+    @Column(name = "manual_checks_allowed", nullable = false)
+    private boolean manualChecksAllowed;
 
     @Column(name = "created_by", nullable = false)
     private UUID createdBy;
@@ -74,9 +80,9 @@ public class RandomCheckConfig {
         if (createdAt == null) createdAt = now;
         if (updatedAt == null) updatedAt = now;
         if (checkMode == null) checkMode = "location_only";
+        if (windowMode == null) windowMode = "full_shift";
         if (applicableRoles == null) applicableRoles = "";
         if (failureEscalationThreshold <= 0) failureEscalationThreshold = 3;
-        isActive = true;
     }
 
     @PreUpdate

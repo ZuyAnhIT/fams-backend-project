@@ -151,6 +151,12 @@ public class UserRoleService {
      */
     @Transactional
     public void selfHealOwnerRoles(UUID userId) {
+        User owner = userRepository.findByIdAndDeletedAtIsNull(userId).orElse(null);
+        if (owner == null || owner.isPlatformAdmin()) {
+            // Platform administration and company membership are separate security scopes.
+            // Never recreate a tenant role for an internal admin account from legacy data.
+            return;
+        }
         List<Tenant> ownedTenants = tenantRepository.findAllByOwnerIdAndDeletedAtIsNull(userId);
         if (ownedTenants.isEmpty()) {
             return;
@@ -343,8 +349,13 @@ public class UserRoleService {
             }
         }
 
-        userRepository.findByIdAndDeletedAtIsNull(targetUserId)
+        User targetUser = userRepository.findByIdAndDeletedAtIsNull(targetUserId)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found: " + targetUserId));
+        if (targetUser.isPlatformAdmin()) {
+            throw new IllegalArgumentException(
+                    "A Platform Admin account cannot be assigned a company role. "
+                            + "Use a separate company user account.");
+        }
 
         Role role = roleRepository.findByIdAndDeletedAtIsNull(roleId)
                 .orElseThrow(() -> new ResourceNotFoundException("Role not found: " + roleId));
@@ -387,7 +398,8 @@ public class UserRoleService {
             UserRole latest = existing.get(0);
             if (latest.getDeletedAt() == null) {
                 throw new DuplicateResourceException(
-                        "User " + targetUserId + " already has role " + role.getName() + " in this tenant");
+                        "Nhân viên đã có vai trò \"" + roleDisplayName(role.getName())
+                                + "\" trong công ty này.");
             }
             // Reactivate the soft-deleted assignment — treat this as a fresh grant, so the
             // site scope reflects what was just requested rather than whatever it was before.
@@ -431,6 +443,24 @@ public class UserRoleService {
                 "Bạn được gán vai trò mới",
                 "Bạn vừa được gán vai trò \"" + roleName + "\" trong " + tenantName + ".",
                 metadata);
+    }
+
+    /**
+     * System role names are implementation identifiers, not user-facing Vietnamese copy.
+     * Keep this mapping at the API boundary so every client (Web/App or a future integration)
+     * receives the same safe message and never has to display an employee UUID.
+     */
+    private static String roleDisplayName(String roleName) {
+        if (roleName == null || roleName.isBlank()) return "không xác định";
+        return switch (roleName) {
+            case "TENANT_ADMIN" -> "Quản trị công ty";
+            case "HR_MANAGER" -> "Quản lý nhân sự";
+            case "SITE_SUPERVISOR" -> "Giám sát công trường";
+            case "EMPLOYEE" -> "Nhân viên";
+            case "PLATFORM_ADMIN" -> "Quản trị nền tảng";
+            case "PLATFORM_STAFF" -> "Nhân sự nền tảng";
+            default -> roleName;
+        };
     }
 
     /**

@@ -19,14 +19,14 @@ public class UpdatePlanRequest {
     @Size(max = 2000, message = "Description must be at most 2000 characters")
     private String description;
 
-    @Schema(description = "New monthly price", example = "59.99")
+    @Schema(description = "New monthly price in whole VND", example = "30000")
     @DecimalMin(value = "0.00", message = "Monthly price must be non-negative")
-    @Digits(integer = 8, fraction = 2, message = "Monthly price must have at most 8 integer digits and 2 decimal places")
+    @Digits(integer = 8, fraction = 0, message = "Monthly price must be a whole VND amount")
     private BigDecimal priceMonthly;
 
-    @Schema(description = "New yearly price", example = "599.99")
+    @Schema(description = "New yearly price in whole VND", example = "300000")
     @DecimalMin(value = "0.00", message = "Yearly price must be non-negative")
-    @Digits(integer = 8, fraction = 2, message = "Yearly price must have at most 8 integer digits and 2 decimal places")
+    @Digits(integer = 8, fraction = 0, message = "Yearly price must be a whole VND amount")
     private BigDecimal priceYearly;
 
     @Schema(description = "New sort order", example = "3")

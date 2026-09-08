@@ -173,8 +173,10 @@ public class AuthService {
         userRoleService.selfHealOwnerRoles(user.getId());
         List<UserRole> roles = userRoleRepository.findAllActiveByUserId(user.getId());
         UserRole primary = com.fams.modules.rbac.util.PrimaryRoleResolver.pickPrimary(roles);
-        UUID primaryTenantId = primary == null ? null : primary.getTenantId();
-        String primaryRole   = primary == null ? null : primary.getRole().getName();
+        // Platform administration is a separate workspace. Even if legacy/test data leaves a
+        // company role behind, it must never leak a tenant context into a Platform Admin token.
+        UUID primaryTenantId = user.isPlatformAdmin() || primary == null ? null : primary.getTenantId();
+        String primaryRole   = user.isPlatformAdmin() || primary == null ? null : primary.getRole().getName();
 
         // ── 8. Block nếu primary tenant bị suspend ──────────────────────────────
         if (!user.isPlatformAdmin() && primaryTenantId != null) {
@@ -319,6 +321,11 @@ public class AuthService {
         User user = userRepository.findByIdAndDeletedAtIsNull(callerUserId)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found"));
 
+        if (user.isPlatformAdmin()) {
+            throw new AccessDeniedException(
+                    "Platform Admin accounts cannot enter a company workspace. Use a separate company account.");
+        }
+
         String hash = jwtProvider.hashToken(rawRefreshToken);
         RefreshToken stored = refreshTokenRepository.findByTokenHash(hash)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid refresh token"));
@@ -336,7 +343,14 @@ public class AuthService {
         if (targetRoles.isEmpty()) {
             throw new AccessDeniedException("You do not have a role in this company");
         }
-        String targetRole = targetRoles.get(0).getRole().getName();
+        // Resolve the same way login and refresh-token do (PrimaryRoleResolver) instead of
+        // taking whichever row the DB returned first: a user holding two roles in the target
+        // tenant (e.g. HR_MANAGER + a narrow custom role) would otherwise land on a JWT `role`
+        // claim picked at random after switching, sending the web dashboard to the wrong view.
+        UserRole targetPrimary = com.fams.modules.rbac.util.PrimaryRoleResolver
+                .pickPrimaryForTenant(targetRoles, targetTenantId);
+        String targetRole = (targetPrimary != null ? targetPrimary : targetRoles.get(0))
+                .getRole().getName();
 
         tenantRepository.findByIdAndDeletedAtIsNull(targetTenantId).ifPresentOrElse(tenant -> {
             if ("suspended".equals(tenant.getStatus())) throw new TenantSuspendedException();

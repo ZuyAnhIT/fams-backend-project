@@ -316,12 +316,11 @@ if [ "$FIXTURE_AVAILABLE" = "true" ]; then
         "SELECT status FROM liveness_challenges WHERE id='$CHALLENGE_ID';" | tr -d ' \n')
     check_val "Challenge consumed after use" "$challenge_status" "consumed"
 
-    # Poll for the async face-match result. Note: liveness_verified is expected to STAY NULL for
-    # the challenge path — the worker sets requires_liveness=false when a challenge_id is present
-    # (publishFromChallenge), since liveness was already proven by the passed active challenge
-    # itself; re-running the passive single-frame check on top would be redundant. This exactly
-    # mirrors check-in's identical behavior after a gps_face_liveness challenge (verified via
-    # FaceResultCallbackController — same callback code path, sourceType='check_response').
+    # Poll for the async face-match result. The worker does not re-run passive single-frame
+    # liveness for the challenge path: the active challenge already proved liveness. It must,
+    # however, preserve that proof as liveness_verified=true in the callback instead of NULL,
+    # because clients correctly interpret NULL as verification still pending. This mirrors
+    # check-in's identical callback path after a gps_face_liveness challenge.
     RESP4_ID=$(echo "$r4_body" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
     if [ -n "$RESP4_ID" ]; then
         echo "Polling for face-match result (via challenge frame)..."
@@ -347,7 +346,7 @@ if [ "$FIXTURE_AVAILABLE" = "true" ]; then
 
         lv_final=$(docker exec fams-postgres psql -U fams_user -d fams_db -t -c \
             "SELECT liveness_verified FROM check_responses WHERE id='$RESP4_ID';" | tr -d ' \n')
-        check_val "liveness_verified stays NULL (proven via challenge, not re-checked passively)" "$lv_final" ""
+        check_val "liveness_verified=true (proven via active challenge)" "$lv_final" "t"
 
         outcome4=$(docker exec fams-postgres psql -U fams_user -d fams_db -t -c \
             "SELECT outcome FROM check_responses WHERE id='$RESP4_ID';" | tr -d ' \n')

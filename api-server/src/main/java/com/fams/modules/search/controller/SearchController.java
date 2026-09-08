@@ -12,6 +12,7 @@ import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.UUID;
@@ -29,9 +30,10 @@ public class SearchController {
 
     @Operation(
         summary = "Global quick search (HR/Admin)",
-        description = "Searches employees (by name, email, employee code, position, department), " +
+        description = "Searches employees (by full name, email, employee code, position, department), " +
                       "sites (by name, code, address, description), and returns recent check-ins for " +
-                      "matched employees — all in a single request. The query must be at least 2 characters. " +
+                      "matched employees/sites — all in a single request. Internal UUIDs are not searchable. " +
+                      "The query must be at least 2 characters. " +
                       "Results are capped at `limit` per category (default 5, max 20). " +
                       "Requires employees:list permission."
     )
@@ -50,6 +52,7 @@ public class SearchController {
             responseCode = "403",
             description = "Forbidden — employees:list permission required")
     })
+    @PreAuthorize("hasAuthority('employees:list')")
     @GetMapping
     public ResponseEntity<ApiResponse<GlobalSearchResponse>> search(
             @PathVariable UUID tenantId,

@@ -2,6 +2,14 @@
 
 > Cập nhật theo code đang chạy ngày 29/07/2026 (đã gộp phản hồi Web/App round 2 — mục 9), bổ sung bản vá 2026-08-05 (mục 9.7). Base path: `/api/v1/tenants/{tenantId}/checkin`.
 
+## 9.8 [MỚI, 2026-09-06] Bộ lọc drill-down báo cáo
+
+`GET /api/v1/tenants/{tenantId}/checkin` nhận thêm `workspaceId` và `shiftId`, bên cạnh `employeeId`, `siteId`, `status`, `from`, `to`. Các điều kiện được kết hợp bằng AND và vẫn áp dụng site scope của người gọi.
+
+Dashboard điều hành truyền đầy đủ khoảng ngày/công trình/workspace/ca/nhân viên khi người dùng bấm vào biểu đồ hoặc “Xem chấm công”. Màn lịch sử đọc lại các tham số từ URL, hiển thị chúng trong bộ lọc và gửi nguyên vẹn tới API. `from`/`to` được chuẩn hóa thành đầu/cuối ngày trước khi gọi endpoint `OffsetDateTime`.
+
+Kiểm thử API thật xác nhận một tổ hợp đúng trả đúng bản ghi mục tiêu; đổi riêng `workspaceId` sang phòng ban khác trả `totalElements=0`.
+
 ## 9.7 [MỚI, 2026-08-05] `CheckinResponse.message` giờ luôn tiếng Việt
 
 Trước đây field `message` (mô tả kết quả chấm công hiện cho nhân viên, ví dụ "Check-in recorded successfully.") là **tiếng Anh**, trong khi mọi thông báo lỗi khác trong cùng luồng chấm công (403/422/409...) đều đã là tiếng Việt (`userMessage`) — một sự thiếu nhất quán thật trên đúng màn hình nhân viên thấy mỗi ngày. Đã dịch toàn bộ 4 nhánh (`valid`/`pending_review`/`rejected`/khác) sang tiếng Việt, không đổi field/kiểu dữ liệu — chỉ đổi **nội dung chuỗi**. Nếu FE có hardcode/so khớp chuỗi cũ theo `message` (không nên làm, nhưng kiểm tra lại nếu có) thì cần cập nhật; khuyến nghị luôn là hiển thị `message` nguyên văn, không tự dịch/không so khớp logic theo nội dung — dùng `status` (`valid`/`pending_review`/`rejected`) để quyết định logic hiển thị.
@@ -246,3 +254,7 @@ Sau khi sửa: `test_available_sites.sh` (6/6 pass), `test_basic_checkin.sh` (11
 - `multipart/form-data`: `note` + file `photo` (JPEG/PNG/WEBP, tối đa 5MB, kiểm tra magic bytes).
 
 Ảnh được lưu private trong S3/MinIO. `CheckinDetailResponse` giờ trả thêm `employeeNote` và `employeePhotoUrl`; URL ảnh là endpoint có xác thực `GET .../checkin/{checkinId}/explanation-photo`, quyền `checkins:list`, không phải public object URL.
+
+> Từ migration V124, xem danh sách và ra quyết định là hai trách nhiệm riêng: `checkins:list`
+> chỉ đọc danh sách/chi tiết; `PATCH .../{checkinId}/override` bắt buộc `checkins:review` và vẫn
+> kiểm tra site-scope. Role hệ thống `EMPLOYEE` không được cấp hai quyền quản trị này.

@@ -435,6 +435,8 @@ POST /api/v1/user-roles/platform
 
 ## 9. Checklist bàn giao frontend
 
+> Khi gán trùng vai trò trong công ty, API trả thông báo tiếng Việt dạng `Nhân viên đã có vai trò "Nhân viên" trong công ty này.`; không trả UUID người dùng hoặc tên mã hệ thống như `EMPLOYEE` ra giao diện. Bulk assign giữ cùng thông báo trong từng phần tử lỗi để UI hiển thị trực tiếp.
+
 - [ ] Màn "Quản lý vai trò" (company admin) chỉ hiện role của công ty mình + role hệ thống (read-only, không có nút sửa/xóa role hệ thống).
 - [ ] Nút "Sửa"/"Xóa"/"Vô hiệu hóa" ẩn hoàn toàn với role hệ thống (`isSystem=true`) — kể cả với Platform Admin.
 - [ ] Form tạo/sửa role: chọn permission từ `GET /permissions` (đã nhóm sẵn theo resource, dựng UI dạng checklist theo nhóm).

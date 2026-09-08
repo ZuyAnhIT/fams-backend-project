@@ -23,20 +23,26 @@ public class CreateRandomCheckConfigRequest {
     @NotNull
     private Integer minIntervalMinutes;
 
-    @Schema(description = "Earliest time a check may be sent (HH:mm)", example = "08:00")
-    @NotNull(message = "allowed_start_time is required")
+    @Schema(description = "Earliest custom-window time (HH:mm); required only for custom_window",
+            example = "08:00")
     private LocalTime allowedStartTime;
 
-    @Schema(description = "Latest time a check may be sent (HH:mm)", example = "17:00")
-    @NotNull(message = "allowed_end_time is required")
+    @Schema(description = "Latest custom-window time (HH:mm); required only for custom_window",
+            example = "17:00")
     private LocalTime allowedEndTime;
+
+    @Schema(description = "full_shift uses each shift's complete interval; custom_window intersects "
+            + "allowedStartTime/allowedEndTime with every applicable shift", example = "full_shift",
+            allowableValues = {"full_shift", "custom_window"})
+    @Pattern(regexp = "full_shift|custom_window", message = "window_mode must be full_shift or custom_window")
+    private String windowMode = "full_shift";
 
     @Schema(
         description = "Verification mode for random checks. " +
                       "location_only: GPS geofence check only. " +
                       "location_face: GPS + async AI face match (requires employee to have an enrolled Face ID; " +
-                      "employees without an enrolled profile will automatically receive a face_fail violation). " +
-                      "location_face_liveness: GPS + face match + liveness anti-spoofing (same enrollment requirement).",
+                      "automatic checks downgrade to GPS-only when no approved profile exists). " +
+                      "location_face_liveness: GPS + face match + liveness anti-spoofing (same safe downgrade).",
         example = "location_only",
         allowableValues = {"location_only", "location_face", "location_face_liveness"}
     )
@@ -64,4 +70,8 @@ public class CreateRandomCheckConfigRequest {
             + "only, never auto-adjusts pay. Defaults to 3 if omitted.", example = "3")
     @Min(value = 1, message = "failure_escalation_threshold must be at least 1")
     private Integer failureEscalationThreshold;
+
+    @Schema(description = "Whether HR may send an immediate targeted check independently of automatic scheduling",
+            example = "true", defaultValue = "true")
+    private Boolean manualChecksAllowed = true;
 }

@@ -1,6 +1,7 @@
 package com.fams.modules.shift.dto.request;
 
 import io.swagger.v3.oas.annotations.media.Schema;
+import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import lombok.Data;
 
@@ -18,9 +19,12 @@ public class ConfigureShiftOtRequest {
     @Min(value = 0, message = "earlyCheckinMinutes must be 0 or greater")
     private Integer earlyCheckinMinutes;
 
-    @Schema(description = "Minutes after endTime that a checkout is accepted. " +
-                          "Omit to keep the current setting.", example = "30")
+    @Schema(description = "Finite checkout window after endTime (maximum 24 hours). When OT is "
+                          + "disabled this is only an exit grace and extra minutes are not counted; "
+                          + "when OT is enabled this is the maximum period in which OT checkout remains open. "
+                          + "Omit to keep the current setting.", example = "30")
     @Min(value = 0, message = "lateCheckoutMinutes must be 0 or greater")
+    @Max(value = 1440, message = "lateCheckoutMinutes must not exceed 1440 minutes")
     private Integer lateCheckoutMinutes;
 
     @Schema(description = "#81 gap fix (2026-08-17): minutes of tolerance before a late first "

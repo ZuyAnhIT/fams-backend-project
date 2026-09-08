@@ -103,42 +103,25 @@ After seeding, the following data is available:
 | Email | `admin@fams.com` |
 | Password | `Admin@1234` |
 
-**Demo tenants** (Vietnamese dataset)
+**Demo tenants** (curated Vietnamese dataset)
 
-| Tenant | Slug | Plan | Sites | Employees |
+| Tenant | Slug | Plan | Sites | Members |
 |---|---|---|---|---|
-| Công ty CP Xây dựng Hoàng Long | `acme-corp` | Pro | 3 | 12 (Nguyễn Văn An, Trần Thị Bình, Lê Văn Cường…) |
-| Công ty TNHH Sản xuất Bình Minh | `beta-industries` | Basic | 2 | 10 (Đỗ Thị Xuân, Nguyễn Văn Yên, Phạm Thị Dung…) |
-| Công ty CP Logistics Phương Nam | `gamma-logistics` | Enterprise | 3 | 12 (Trịnh Văn Quang, Lý Thị Hồng, Trương Văn Đạt…) |
-| Công ty Khởi nghiệp Tia Sáng | `tia-sang-startup` | Trial | 1 | 5 — sits exactly at the trial plan's employee limit |
-| Công ty TNHH Đông Á | `dong-a-jsc` | Basic | 1 | 4 — **suspended** via the real `/suspend` API at the end of seeding |
+| Công ty CP Xây dựng An Phát | `demo-an-phat` | Enterprise | 4 | 15 verified accounts covering every company role |
+| Công ty TNHH Logistics Minh Long | `demo-minh-long` | Starter | 0 | Lightweight owner account only |
+| Công ty TNHH Dịch vụ Sao Việt | `demo-sao-viet` | Starter | 0 | Lightweight owner account only |
 
-**Multi-tenant people** — same login, two different tenants/roles, to model someone who works at more than one company:
+An Phát contains 1 Tenant Admin, 2 HR Managers, 4 site-scoped Site Supervisors and
+8 Employees. It has five departments, coherent assignments and September 2026 examples for
+normal attendance, lateness, early leave, OT, missing checkout and random-check violations.
 
-| Shared login (password `Admin@1234`) | Tenant A | Role A | Tenant B | Role B |
-|---|---|---|---|---|
-| `dung.pham.hr@gmail.com` (Phạm Thị Dung) | Hoàng Long | HR_MANAGER | Bình Minh | SITE_SUPERVISOR |
-| `truong.van.dat@gmail.com` (Trương Văn Đạt) | Phương Nam | EMPLOYEE | Tia Sáng | EMPLOYEE |
+Every demo login is active and email-verified. Platform Admin is explicitly prevented from
+owning, joining or having an employee profile in a company.
 
-**Historical data (past 30 days, across all 5 tenants)**
-
-| Table | Notes |
-|---|---|
-| `checkins` | valid + pending_review; GPS coords, work minutes |
-| `attendance_summaries` | late flags, OT minutes, missing-checkout cases |
-| `scheduled_checks` | responded + no_response statuses |
-| `check_responses` | GPS + outcome |
-| `violations` | no_response + location_fail; ~60% resolved (confirmed/dismissed) |
-| `face_profiles` | enrolled (with demo embedding vector) / pending / revoked / not_enrolled |
-| `face_verify_requests` | ad-hoc pending/pass/fail face verification requests |
-| `notifications` | 13 Vietnamese event types × 5 tenants |
-| `notification_templates` | vi + en templates per event type |
-| `user_notification_settings` / `user_devices` / `notification_delivery_logs` | per-user channel prefs, FCM tokens, delivery attempts incl. retry-after-failure |
-| `audit_logs` | 11 action types × 5 tenants |
-| `tenant_settings` | branding + employee-code prefix per tenant |
-| `employee_invitations` | pending, accepted, cancelled (via API) + expired (backfilled) |
-
-Run `bash scripts/seed.sh` to (re)populate; it calls the API for anything reachable through it (tenants, sites, shifts, employees, departments, invitations, IP whitelist, workspaces/members, tenant suspend) and falls back to direct SQL (`scripts/seed_historical.sql`) only for what the API doesn't expose or can't backdate. The seed script is fully idempotent — safe to run multiple times.
+Run `bash scripts/seed.sh` to reconcile the deterministic dataset. The command is idempotent and
+finishes by running database-level integrity assertions from `scripts/verify_demo_seed.sql`.
+See [`docs/testing/demo-seed-data.md`](docs/testing/demo-seed-data.md) for all accounts and the
+complete relationship map.
 
 To reset and re-seed from scratch:
 

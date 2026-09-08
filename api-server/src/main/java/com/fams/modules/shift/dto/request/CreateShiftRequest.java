@@ -6,6 +6,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
 
@@ -39,6 +40,16 @@ public class CreateShiftRequest {
             + "site). Omit/null to inherit the site's policy.", nullable = true,
             allowableValues = {"gps_only", "gps_face", "gps_face_liveness"})
     private String checkinPolicyOverride;
+
+    @Schema(description = "Automatic random-check policy for this shift", defaultValue = "inherit",
+            allowableValues = {"inherit", "enabled", "disabled"})
+    @Pattern(regexp = "inherit|enabled|disabled")
+    private String randomCheckPolicy = "inherit";
+
+    @Schema(description = "Immediate manual-check policy for this shift", defaultValue = "inherit",
+            allowableValues = {"inherit", "enabled", "disabled"})
+    @Pattern(regexp = "inherit|enabled|disabled")
+    private String manualCheckPolicy = "inherit";
 
     @Schema(description = "Minutes of tolerance before a late first check-in is flagged late "
             + "(AttendanceSummary.isLate/lateMinutes). Arriving within this window still records "

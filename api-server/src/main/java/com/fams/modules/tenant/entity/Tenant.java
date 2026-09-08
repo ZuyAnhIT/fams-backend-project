@@ -6,6 +6,8 @@ import lombok.*;
 import java.time.OffsetDateTime;
 import java.util.UUID;
 
+import com.fams.shared.time.VietnamTime;
+
 @Getter
 @Setter
 @Builder
@@ -74,13 +76,13 @@ public class Tenant {
             updatedAt = now;
         }
         if (timezone == null) {
-            timezone = "UTC";
+            timezone = VietnamTime.ID;
         }
         if (locale == null) {
             locale = "en";
         }
         if (currencyCode == null) {
-            currencyCode = "USD";
+            currencyCode = "VND";
         }
         if (status == null) {
             status = "trial";

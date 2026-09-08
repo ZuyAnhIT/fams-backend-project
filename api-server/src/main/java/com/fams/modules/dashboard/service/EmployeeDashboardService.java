@@ -163,8 +163,13 @@ public class EmployeeDashboardService {
                 .status(latest.getStatus())
                 .checkInAt(latest.getCheckInAt())
                 .checkOutAt(latest.getCheckOutAt())
+                .sessionCloseReason(latest.getSessionCloseReason())
+                .sessionExpiresAt(latest.getSessionExpiresAt())
                 .workMinutes(latest.getWorkMinutes())
-                .open(latest.getCheckOutAt() == null)
+                .open(latest.getCheckOutAt() == null
+                        && latest.getSessionClosedAt() == null
+                        && (latest.getSessionExpiresAt() == null
+                            || OffsetDateTime.now().isBefore(latest.getSessionExpiresAt())))
                 .build();
     }
 

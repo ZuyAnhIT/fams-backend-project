@@ -1,6 +1,7 @@
 # Lightweight one-shot seeding container for the dev stack.
-# Waits for fams-api to become healthy (via compose depends_on), then runs
-# scripts/seed.sh against it. Not used by production compose files.
+# Waits for fams-api/Flyway to become healthy (via compose depends_on), then
+# reconciles the curated SQL dataset and its integrity checks. Not used by
+# production compose files.
 FROM python:3.12-slim
 
 RUN apt-get update -qq \

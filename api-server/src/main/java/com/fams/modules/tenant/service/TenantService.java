@@ -24,6 +24,7 @@ import com.fams.shared.exception.DuplicateResourceException;
 import com.fams.shared.exception.ResourceNotFoundException;
 import com.fams.shared.pagination.PageResponse;
 import com.fams.shared.security.HttpRequestUtils;
+import com.fams.shared.time.VietnamTime;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.security.access.AccessDeniedException;
 import lombok.extern.slf4j.Slf4j;
@@ -57,6 +58,7 @@ public class TenantService {
     private final StringRedisTemplate redis;
     private final AuditLogService auditLogService;
     private final com.fams.modules.notification.service.NotificationService notificationService;
+    private final TenantLogoStorageService logoStorageService;
 
     public TenantService(TenantRepository tenantRepository, UserRepository userRepository,
                          PlanRepository planRepository,
@@ -66,7 +68,8 @@ public class TenantService {
                          StringRedisTemplate redis,
                          AuditLogService auditLogService,
                          @org.springframework.context.annotation.Lazy
-                         com.fams.modules.notification.service.NotificationService notificationService) {
+                         com.fams.modules.notification.service.NotificationService notificationService,
+                         TenantLogoStorageService logoStorageService) {
         this.tenantRepository = tenantRepository;
         this.userRepository = userRepository;
         this.planRepository = planRepository;
@@ -76,6 +79,53 @@ public class TenantService {
         this.redis = redis;
         this.auditLogService = auditLogService;
         this.notificationService = notificationService;
+        this.logoStorageService = logoStorageService;
+    }
+
+    /**
+     * #08: upload an actual image file as this tenant's logo (replacing any previous one).
+     * Owner-only, same as {@link #updateTenant} — Platform Admin bypasses. Mirrors the user
+     * avatar upload flow.
+     */
+    @Transactional
+    public TenantResponse updateLogoFile(UUID tenantId, UUID callerUserId, boolean callerIsPlatformAdmin,
+                                          org.springframework.web.multipart.MultipartFile file) {
+        Tenant tenant = tenantRepository.findByIdAndDeletedAtIsNull(tenantId)
+                .orElseThrow(() -> new ResourceNotFoundException("Tenant not found: " + tenantId));
+        if (!callerIsPlatformAdmin && !callerUserId.equals(tenant.getOwnerId())) {
+            throw new AccessDeniedException("Only this tenant's owner may change its logo");
+        }
+
+        Map<String, Object> before = tenantAuditSnapshot(tenant);
+        String previousUrl = tenant.getLogoUrl();
+        String newUrl = logoStorageService.store(tenantId, file);
+        tenant.setLogoUrl(newUrl);
+        tenantRepository.save(tenant);
+        logoStorageService.deleteIfManaged(previousUrl);
+
+        log.info("Tenant logo uploaded: id={} by userId={}", tenantId, callerUserId);
+        recordTenantAudit(tenantId, callerUserId, "tenant_updated", before, tenantAuditSnapshot(tenant));
+        return toResponse(tenant);
+    }
+
+    /** #08: clear the tenant logo and best-effort delete the stored file. Owner-only. */
+    @Transactional
+    public TenantResponse deleteLogoFile(UUID tenantId, UUID callerUserId, boolean callerIsPlatformAdmin) {
+        Tenant tenant = tenantRepository.findByIdAndDeletedAtIsNull(tenantId)
+                .orElseThrow(() -> new ResourceNotFoundException("Tenant not found: " + tenantId));
+        if (!callerIsPlatformAdmin && !callerUserId.equals(tenant.getOwnerId())) {
+            throw new AccessDeniedException("Only this tenant's owner may change its logo");
+        }
+
+        Map<String, Object> before = tenantAuditSnapshot(tenant);
+        String previousUrl = tenant.getLogoUrl();
+        tenant.setLogoUrl(null);
+        tenantRepository.save(tenant);
+        logoStorageService.deleteIfManaged(previousUrl);
+
+        log.info("Tenant logo removed: id={} by userId={}", tenantId, callerUserId);
+        recordTenantAudit(tenantId, callerUserId, "tenant_updated", before, tenantAuditSnapshot(tenant));
+        return toResponse(tenant);
     }
 
     /** #31 (docs/api/backend-feature-audit-2026-08-07.md): tenant lifecycle actions are
@@ -130,9 +180,8 @@ public class TenantService {
      * assignment, not an invitation, because the person is required to already have an
      * account. The tenant starts {@code active} (not trial). Every tenant — self-service or
      * platform-provisioned — is always assigned the lowest-cost/default (trial) plan at
-     * creation; online payment isn't built yet, so no creation path may pick a paid plan.
-     * Upgrading a tenant to a paid plan is a separate, deliberate action via
-     * {@code PATCH /tenants/{id}/subscription}. The provisioning caller is NOT made a
+     * creation. Upgrading is a separate, deliberate action through the billing/PayOS flow.
+     * The provisioning caller is NOT made a
      * member of the tenant themselves and, per product decision, loses the ability to edit
      * the tenant's profile once created — see {@link #updateTenant} — ongoing management
      * belongs solely to the assigned owner.
@@ -155,7 +204,9 @@ public class TenantService {
                 throw new IllegalArgumentException(
                         "ownerUserId or ownerEmail is required — the assigned owner must already have a FAMS account");
             }
-            ownerId = resolveExistingOwner(request).getId();
+            User owner = resolveExistingOwner(request);
+            assertEligibleTenantOwner(owner);
+            ownerId = owner.getId();
         } else {
             if (request.getOwnerUserId() != null || StringUtils.hasText(request.getOwnerEmail())) {
                 throw new AccessDeniedException(
@@ -164,15 +215,16 @@ public class TenantService {
             ownerId = createdByUserId;
         }
 
+        validateVietnamTimezone(request.getTimezone());
         Tenant tenant = Tenant.builder()
                 .name(request.getName())
                 .slug(request.getSlug())
                 .domain(StringUtils.hasText(request.getDomain()) ? request.getDomain() : null)
                 .industry(request.getIndustry())
                 .countryCode(request.getCountryCode())
-                .timezone(StringUtils.hasText(request.getTimezone()) ? request.getTimezone() : "UTC")
+                .timezone(VietnamTime.ID)
                 .locale(StringUtils.hasText(request.getLocale()) ? request.getLocale() : "en")
-                .currencyCode(StringUtils.hasText(request.getCurrencyCode()) ? request.getCurrencyCode() : "USD")
+                .currencyCode(StringUtils.hasText(request.getCurrencyCode()) ? request.getCurrencyCode() : "VND")
                 .status(canProvisionForOthers ? "active" : "trial")
                 .ownerId(ownerId)
                 .build();
@@ -231,6 +283,13 @@ public class TenantService {
                         "No existing account found for owner email '" + email + "' — the owner must already be registered"));
     }
 
+    private void assertEligibleTenantOwner(User owner) {
+        if (owner.isPlatformAdmin()) {
+            throw new IllegalArgumentException(
+                    "A Platform Admin account cannot own a company. Assign a separate company owner account.");
+        }
+    }
+
     /**
      * Owner-only by default. Whoever provisioned the tenant (see {@link #createTenant}) can
      * set its initial basic info and assign the owner/plan, but does not retain edit rights
@@ -266,7 +325,10 @@ public class TenantService {
         if (request.getLogoUrl() != null)                  tenant.setLogoUrl(request.getLogoUrl().isBlank() ? null : request.getLogoUrl());
         if (StringUtils.hasText(request.getIndustry()))    tenant.setIndustry(request.getIndustry());
         if (StringUtils.hasText(request.getCountryCode())) tenant.setCountryCode(request.getCountryCode());
-        if (StringUtils.hasText(request.getTimezone()))    tenant.setTimezone(request.getTimezone());
+        if (StringUtils.hasText(request.getTimezone())) {
+            validateVietnamTimezone(request.getTimezone());
+            tenant.setTimezone(VietnamTime.ID);
+        }
         if (StringUtils.hasText(request.getLocale()))      tenant.setLocale(request.getLocale());
         if (StringUtils.hasText(request.getCurrencyCode())) tenant.setCurrencyCode(request.getCurrencyCode());
 
@@ -311,6 +373,8 @@ public class TenantService {
                 : userRepository.findByEmailAndDeletedAtIsNull(request.getNewOwnerEmail().trim().toLowerCase())
                         .orElseThrow(() -> new ResourceNotFoundException(
                                 "No existing account found for email '" + request.getNewOwnerEmail() + "'"));
+
+        assertEligibleTenantOwner(newOwner);
 
         if (newOwner.getId().equals(tenant.getOwnerId())) {
             throw new IllegalArgumentException("This user is already the owner of this tenant");
@@ -464,6 +528,31 @@ public class TenantService {
         return toResponse(tenant);
     }
 
+    /** Keeps tenant lifecycle and subscription lifecycle consistent after a verified payment. */
+    @Transactional
+    public void activateTenantAfterPayment(UUID tenantId) {
+        Tenant tenant = tenantRepository.findByIdAndDeletedAtIsNull(tenantId)
+                .orElseThrow(() -> new ResourceNotFoundException("Tenant not found: " + tenantId));
+        if ("cancelled".equals(tenant.getStatus())) {
+            throw new IllegalStateException("A cancelled tenant cannot be reactivated by payment");
+        }
+        if ("active".equals(tenant.getStatus())) return;
+
+        String previousStatus = tenant.getStatus();
+        tenant.setStatus("active");
+        tenant.setPreSuspensionStatus(null);
+        tenantRepository.save(tenant);
+        redis.delete(TENANT_SUSPENDED_PREFIX + tenantId);
+        recordTenantAudit(tenantId, null, "tenant_activated_after_payment",
+                Map.of("status", previousStatus), Map.of("status", "active"));
+        if ("suspended".equals(previousStatus)) {
+            notifyOwner(tenant, com.fams.modules.tenant.constant.TenantEventTypes.TENANT_REACTIVATED_OWNER,
+                    "Công ty đã được mở lại",
+                    "Thanh toán đã được xác nhận. Công ty \"" + tenant.getName()
+                            + "\" đã được mở lại và có thể hoạt động bình thường.");
+        }
+    }
+
     /** #133 (2026-08-19): AC calls for a notification on suspend/reactivate — entirely absent
      *  before. Best-effort, matching every other notification call site in this codebase (e.g.
      *  ViolationNotificationService): a notification failure must never roll back the real
@@ -510,5 +599,12 @@ public class TenantService {
                 .createdAt(tenant.getCreatedAt())
                 .updatedAt(tenant.getUpdatedAt())
                 .build();
+    }
+
+    private void validateVietnamTimezone(String timezone) {
+        if (StringUtils.hasText(timezone) && !VietnamTime.ID.equals(timezone.trim())) {
+            throw new IllegalArgumentException(
+                    "Hệ thống hiện chỉ hỗ trợ múi giờ " + VietnamTime.ID + ".");
+        }
     }
 }

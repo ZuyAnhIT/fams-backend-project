@@ -6,7 +6,8 @@
 # changes without rebuilding the image.
 #
 # This file also adds a one-shot `fams-seed` service: it waits for fams-api
-# to report healthy, then runs scripts/seed.sh against it. This means any
+# to report healthy (and therefore finish Flyway), then runs the deterministic
+# scripts/seed.sh dataset directly against PostgreSQL. This means any
 # dev who clones the repo and runs `make dev-d` (or plain `docker compose
 # -f docker-compose.yml -f docker-compose.dev.yml up`) ends up with the same
 # Vietnamese demo dataset automatically — no separate manual step needed.

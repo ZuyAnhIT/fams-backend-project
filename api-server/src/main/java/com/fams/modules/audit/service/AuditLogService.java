@@ -32,10 +32,13 @@ public class AuditLogService {
 
   private final AuditLogRepository auditLogRepository;
   private final UserRoleRepository userRoleRepository;
+  private final AuditLogEnricher enricher;
 
-  public AuditLogService(AuditLogRepository auditLogRepository, UserRoleRepository userRoleRepository) {
+  public AuditLogService(AuditLogRepository auditLogRepository, UserRoleRepository userRoleRepository,
+                         AuditLogEnricher enricher) {
     this.auditLogRepository = auditLogRepository;
     this.userRoleRepository = userRoleRepository;
+    this.enricher = enricher;
   }
 
   /**
@@ -100,7 +103,8 @@ public class AuditLogService {
         auditLogRepository.findAll(
             AuditLogSpecification.withFilters(effectiveTenantId, actorId, entityType, entityId, action, from, to),
             PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt")));
-    return PageResponse.from(result.map(this::toResponse));
+    AuditLogEnricher.Names names = enricher.resolve(result.getContent());
+    return PageResponse.from(result.map(a -> toResponse(a, names)));
   }
 
   @Transactional(readOnly = true)
@@ -116,7 +120,7 @@ public class AuditLogService {
         throw new ResourceNotFoundException("Audit log not found: " + id);
       }
     }
-    return toResponse(log);
+    return toResponse(log, enricher.resolve(List.of(log)));
   }
 
   @Transactional(readOnly = true)
@@ -128,7 +132,8 @@ public class AuditLogService {
           .filter(e -> e.getTenantId() != null && allowed.contains(e.getTenantId()))
           .collect(Collectors.toList());
     }
-    return entries.stream().map(this::toResponse).collect(Collectors.toList());
+    AuditLogEnricher.Names names = enricher.resolve(entries);
+    return entries.stream().map(e -> toResponse(e, names)).collect(Collectors.toList());
   }
 
   /** REQUIRES_NEW (found via audit, 2026-08-18): callers occasionally run in a read-only
@@ -166,7 +171,7 @@ public class AuditLogService {
     AuditLog saved = auditLogRepository.save(entry);
     HttpRequestUtils.markAuditWritten();
     log.debug("Audit recorded action={} entity={}/{} actor={}", action, entityType, entityId, actorEmail);
-    return toResponse(saved);
+    return toResponse(saved, enricher.resolve(List.of(saved)));
   }
 
   /** #138 (2026-08-19 follow-up): called by RequestIdFilter after the response completes, once
@@ -178,14 +183,16 @@ public class AuditLogService {
     auditLogRepository.backfillHttpStatusByRequestId(requestId, httpStatus);
   }
 
-  private AuditLogResponse toResponse(AuditLog a) {
+  private AuditLogResponse toResponse(AuditLog a, AuditLogEnricher.Names names) {
     return AuditLogResponse.builder()
         .id(a.getId())
         .tenantId(a.getTenantId())
         .actorId(a.getActorId())
         .actorEmail(a.getActorEmail())
+        .actorName(a.getActorId() != null ? names.actorNames().get(a.getActorId()) : null)
         .entityType(a.getEntityType())
         .entityId(a.getEntityId())
+        .entityName(names.entityName(a.getEntityType(), a.getEntityId()))
         .action(a.getAction())
         .oldValue(a.getOldValue())
         .newValue(a.getNewValue())

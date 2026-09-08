@@ -9,6 +9,7 @@ import com.fams.modules.subscription.entity.TenantSubscription.SubscriptionStatu
 import com.fams.modules.subscription.repository.PlanRepository;
 import com.fams.modules.subscription.repository.TenantSubscriptionRepository;
 import com.fams.modules.tenant.repository.TenantRepository;
+import com.fams.modules.tenant.service.TenantService;
 import com.fams.modules.audit.service.AuditLogService;
 import com.fams.shared.exception.DuplicateResourceException;
 import com.fams.shared.exception.ResourceNotFoundException;
@@ -31,15 +32,18 @@ public class TenantSubscriptionService {
     private final PlanRepository planRepository;
     private final TenantSubscriptionRepository subscriptionRepository;
     private final AuditLogService auditLogService;
+    private final TenantService tenantService;
 
     public TenantSubscriptionService(TenantRepository tenantRepository,
                                      PlanRepository planRepository,
                                      TenantSubscriptionRepository subscriptionRepository,
-                                     AuditLogService auditLogService) {
+                                     AuditLogService auditLogService,
+                                     TenantService tenantService) {
         this.tenantRepository = tenantRepository;
         this.planRepository = planRepository;
         this.subscriptionRepository = subscriptionRepository;
         this.auditLogService = auditLogService;
+        this.tenantService = tenantService;
     }
 
     /** #31 (docs/api/backend-feature-audit-2026-08-07.md): which plan a tenant is on and its
@@ -137,6 +141,58 @@ public class TenantSubscriptionService {
         log.info("Subscription updated: tenantId={}", tenantId);
         recordSubscriptionAudit(tenantId, callerUserId, "subscription_updated", before, subscriptionAuditSnapshot(sub));
         Plan plan = getPlan(sub.getPlanId());
+        return toResponse(sub, plan);
+    }
+
+    /**
+     * Applies one paid billing period. Repeated delivery of the same webhook is guarded by the
+     * billing-order row; this method owns only the subscription period calculation.
+     *
+     * <p>Renewing the same active plan preserves already-paid remaining time. Changing plan,
+     * recovering an expired subscription, or leaving trial starts a fresh period at payment time.
+     * Downgrades/proration are deliberately outside the online-payment MVP.</p>
+     */
+    @Transactional
+    public SubscriptionResponse activateFromPayment(UUID tenantId, UUID planId,
+                                                      TenantSubscription.BillingCycle billingCycle,
+                                                      OffsetDateTime paidAt, UUID billingOrderId) {
+        assertTenantExists(tenantId);
+        Plan plan = getPlan(planId);
+        // The plan is validated as active before checkout is created. A later deactivation must
+        // not make a verified, already-created payment lose the service the customer purchased.
+
+        TenantSubscription sub = subscriptionRepository.findByTenantId(tenantId).orElse(null);
+        Map<String, Object> before = sub != null ? subscriptionAuditSnapshot(sub) : null;
+        boolean renewableSamePlan = sub != null
+                && planId.equals(sub.getPlanId())
+                && sub.getStatus() == SubscriptionStatus.ACTIVE
+                && sub.getExpiresAt() != null
+                && sub.getExpiresAt().isAfter(paidAt);
+        OffsetDateTime periodStart = renewableSamePlan ? sub.getExpiresAt() : paidAt;
+        OffsetDateTime periodEnd = billingCycle == TenantSubscription.BillingCycle.YEARLY
+                ? periodStart.plusYears(1)
+                : periodStart.plusMonths(1);
+
+        if (sub == null) {
+            sub = TenantSubscription.builder()
+                    .tenantId(tenantId)
+                    .planId(planId)
+                    .startedAt(paidAt)
+                    .build();
+        } else if (!renewableSamePlan) {
+            sub.setStartedAt(paidAt);
+        }
+        sub.setPlanId(planId);
+        sub.setBillingCycle(billingCycle);
+        sub.setStatus(SubscriptionStatus.ACTIVE);
+        sub.setExpiresAt(periodEnd);
+        sub.setCancelledAt(null);
+        subscriptionRepository.save(sub);
+
+        Map<String, Object> after = subscriptionAuditSnapshot(sub);
+        after.put("billingOrderId", billingOrderId.toString());
+        recordSubscriptionAudit(tenantId, null, "subscription_payment_activated", before, after);
+        tenantService.activateTenantAfterPayment(tenantId);
         return toResponse(sub, plan);
     }
 

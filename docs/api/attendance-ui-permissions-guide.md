@@ -60,8 +60,8 @@ Khi hiển thị "Tổng giờ làm: X, trong đó OT: Y" — **X đã bao gồm
 |---|---|---|---|
 | Xem danh sách/chi tiết check-in toàn tenant | ✅ (`attendance:list`/`attendance:read`) | ✅ (chỉ site được giao) | ❌ |
 | Xem bảng công tổng hợp tháng | ✅ | ✅ (chỉ site được giao) | ❌ |
-| Điều chỉnh bảng công | ✅ | ✅ nếu có `attendance:list` + site được giao | ❌ |
-| Trigger tính lại (`/recompute`) | ✅ | ✅ nếu có `attendance:list` | ❌ |
+| Điều chỉnh bảng công | ✅ | ✅ nếu có `attendance:adjust` + site được giao | ❌ |
+| Trigger tính lại (`/recompute`) | ✅ | ✅ nếu có `attendance:adjust` | ❌ |
 | Xem bảng công/lịch sử của chính mình | ✅ (nếu có hồ sơ nhân viên) | ✅ | ✅ |
 
 **Lưu ý site-scope**: nếu SITE_SUPERVISOR được giao **nhiều site**, `GET .../attendance` (danh sách theo ngày) và `GET .../attendance/monthly` yêu cầu chỉ định `siteId` cụ thể — không tự gộp nhiều site. Web nên hiện dropdown chọn site trước khi tải danh sách nếu người dùng thuộc nhiều site.
@@ -147,7 +147,8 @@ Trên modal chi tiết 1 bản ghi đã bị khóa (`adjustmentReason != null`, 
 - Bắt buộc nhập `reason` (lý do mở khóa) trước khi xác nhận — backend từ chối `400` nếu thiếu.
 - Sau khi gọi thành công, response trả về bản ghi ĐÃ TÍNH LẠI (`adjustmentReason=null`, số liệu mới) — Web cập nhật UI ngay từ response này, không cần gọi lại API riêng.
 - Hành động này được ghi vào audit log hệ thống (ai mở khóa, khi nào, lý do, số liệu trước/sau) — nếu Web có màn xem lịch sử audit, có thể hiển thị action `attendance_summary_unlock_and_recompute` cho bản ghi đó.
-- Dùng cùng quyền `attendance:list` + site-scope như "Điều chỉnh" — không cần quyền riêng.
+- Dùng quyền ghi riêng `attendance:adjust` + site-scope như "Điều chỉnh". Quyền
+  `attendance:list` chỉ cho phép xem danh sách, không còn cho phép sửa dữ liệu tính công.
 
 ### 4.5 [MỚI] Modal "Điều chỉnh bảng công" (`PATCH /attendance/{id}/adjust`)
 

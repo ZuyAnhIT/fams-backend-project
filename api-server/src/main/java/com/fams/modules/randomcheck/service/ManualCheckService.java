@@ -2,15 +2,22 @@ package com.fams.modules.randomcheck.service;
 
 import com.fams.modules.assignment.entity.Assignment;
 import com.fams.modules.assignment.repository.AssignmentRepository;
-import com.fams.modules.assignment.util.DayOfWeekBitmask;
 import com.fams.modules.audit.service.AuditLogService;
+import com.fams.modules.checkin.entity.CheckinRecord;
+import com.fams.modules.checkin.repository.CheckinRepository;
 import com.fams.modules.employee.repository.FaceProfileRepository;
+import com.fams.modules.employee.entity.Employee;
+import com.fams.modules.employee.repository.EmployeeRepository;
 import com.fams.modules.randomcheck.dto.request.ManualCheckRequest;
+import com.fams.modules.randomcheck.dto.response.ManualCheckCandidateResponse;
 import com.fams.modules.randomcheck.entity.RandomCheckConfig;
 import com.fams.modules.randomcheck.entity.ScheduledCheck;
 import com.fams.modules.randomcheck.repository.RandomCheckConfigRepository;
 import com.fams.modules.randomcheck.repository.ScheduledCheckRepository;
 import com.fams.modules.site.repository.SiteRepository;
+import com.fams.modules.site.entity.Site;
+import com.fams.modules.shift.entity.Shift;
+import com.fams.modules.shift.repository.ShiftRepository;
 import com.fams.modules.subscription.service.PlanLimitEnforcementService;
 import com.fams.shared.exception.ResourceNotFoundException;
 import lombok.extern.slf4j.Slf4j;
@@ -20,9 +27,14 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.time.ZoneId;
+import java.util.Comparator;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -39,6 +51,9 @@ public class ManualCheckService {
     private final RandomCheckDispatchService randomCheckDispatchService;
     private final FaceProfileRepository faceProfileRepository;
     private final AuditLogService auditLogService;
+    private final CheckinRepository checkinRepository;
+    private final ShiftRepository shiftRepository;
+    private final EmployeeRepository employeeRepository;
 
     public ManualCheckService(AssignmentRepository assignmentRepository,
                               RandomCheckConfigRepository configRepository,
@@ -47,7 +62,10 @@ public class ManualCheckService {
                               PlanLimitEnforcementService planLimitEnforcementService,
                               @Lazy RandomCheckDispatchService randomCheckDispatchService,
                               FaceProfileRepository faceProfileRepository,
-                              AuditLogService auditLogService) {
+                              AuditLogService auditLogService,
+                              CheckinRepository checkinRepository,
+                              ShiftRepository shiftRepository,
+                              EmployeeRepository employeeRepository) {
         this.assignmentRepository = assignmentRepository;
         this.configRepository = configRepository;
         this.scheduledCheckRepository = scheduledCheckRepository;
@@ -56,6 +74,64 @@ public class ManualCheckService {
         this.randomCheckDispatchService = randomCheckDispatchService;
         this.faceProfileRepository = faceProfileRepository;
         this.auditLogService = auditLogService;
+        this.checkinRepository = checkinRepository;
+        this.shiftRepository = shiftRepository;
+        this.employeeRepository = employeeRepository;
+    }
+
+    /** Returns only employees who can pass the same session/policy guards used by trigger(). */
+    @Transactional(readOnly = true)
+    public List<ManualCheckCandidateResponse> listEligibleCandidates(UUID tenantId, UUID siteId) {
+        Site site = siteRepository.findByIdAndTenantIdAndDeletedAtIsNull(siteId, tenantId)
+                .orElseThrow(() -> new ResourceNotFoundException("Site not found: " + siteId));
+        OffsetDateTime now = OffsetDateTime.now(safeZone(site.getTimezone()));
+
+        Optional<RandomCheckConfig> configOpt = configRepository.findBySite(tenantId, siteId);
+        if (configOpt.isEmpty()) configOpt = configRepository.findTenantDefault(tenantId);
+        if (configOpt.isEmpty()) return List.of();
+        RandomCheckConfig config = configOpt.get();
+
+        List<CheckinRecord> sessions = checkinRepository
+                .findUnexpiredOpenSessionsBySite(tenantId, siteId, now)
+                .stream()
+                .filter(session -> isManualAllowed(session.getShiftId(), config))
+                .toList();
+        if (sessions.isEmpty()) return List.of();
+
+        Map<UUID, Employee> employees = employeeRepository
+                .findAllByTenantIdAndIdInAndDeletedAtIsNull(
+                        tenantId, sessions.stream().map(CheckinRecord::getEmployeeId).collect(Collectors.toSet()))
+                .stream()
+                .collect(Collectors.toMap(Employee::getId, Function.identity()));
+
+        return sessions.stream()
+                .map(session -> {
+                    Employee employee = employees.get(session.getEmployeeId());
+                    if (employee == null || !"active".equals(employee.getStatus())) return null;
+                    Shift shift = shiftRepository.findById(session.getShiftId()).orElse(null);
+                    return ManualCheckCandidateResponse.builder()
+                            .employeeId(employee.getId())
+                            .employeeName((employee.getLastName() + " " + employee.getFirstName()).trim())
+                            .employeeCode(employee.getEmployeeCode())
+                            .checkinId(session.getId())
+                            .checkInAt(session.getCheckInAt())
+                            .shiftId(session.getShiftId())
+                            .shiftName(shift == null ? null : shift.getName())
+                            .build();
+                })
+                .filter(java.util.Objects::nonNull)
+                .sorted(Comparator.comparing(ManualCheckCandidateResponse::getEmployeeName,
+                        String.CASE_INSENSITIVE_ORDER))
+                .toList();
+    }
+
+    private boolean isManualAllowed(UUID shiftId, RandomCheckConfig config) {
+        if (shiftId == null) return false;
+        return shiftRepository.findById(shiftId)
+                .map(shift -> "enabled".equals(shift.getManualCheckPolicy())
+                        || (!"disabled".equals(shift.getManualCheckPolicy())
+                        && config.isManualChecksAllowed()))
+                .orElse(false);
     }
 
     /** Manual triggers are never rate-limited (audit 2026-08-03 — see the repository query's
@@ -75,7 +151,7 @@ public class ManualCheckService {
      * based on the configured responseWindowSeconds.
      *
      * Validations:
-     *  - Employee must have an active assignment at the specified site today.
+     *  - Employee must have a non-expired open check-in at the specified site.
      *  - A random check config must exist (site override or tenant default).
      *  - checkMode override (if provided) must be a valid value.
      */
@@ -83,18 +159,31 @@ public class ManualCheckService {
     public ScheduledCheck trigger(UUID tenantId, ManualCheckRequest request, UUID triggeredBy) {
         UUID siteId = request.getSiteId();
         UUID employeeId = request.getEmployeeId();
-        LocalDate today = LocalDate.now();
-
-        // Validate site belongs to tenant
-        siteRepository.findByIdAndTenantIdAndDeletedAtIsNull(siteId, tenantId)
+        Site site = siteRepository.findByIdAndTenantIdAndDeletedAtIsNull(siteId, tenantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Site not found: " + siteId));
+        ZoneId zone = safeZone(site.getTimezone());
+        OffsetDateTime now = OffsetDateTime.now(zone);
+        LocalDate today = now.toLocalDate();
 
-        // Validate employee has an active assignment at this site today
-        Assignment assignment = assignmentRepository
-                .findActiveAssignmentByEmployeeAndSite(tenantId, siteId, employeeId, today,
-                        DayOfWeekBitmask.bitForDate(today))
+        // A targeted presence check only makes business sense while the employee is actually
+        // checked in. An active assignment alone used to allow HR to notify absent/off-shift staff.
+        CheckinRecord openSession = checkinRepository
+                .findByTenantIdAndEmployeeIdAndCheckOutAtIsNullAndSessionClosedAtIsNullAndDeletedAtIsNull(
+                        tenantId, employeeId)
                 .orElseThrow(() -> new IllegalArgumentException(
-                        "Employee " + employeeId + " has no active assignment at site " + siteId + " today"));
+                        "Employee is not currently checked in; an immediate random check cannot be sent"));
+        if (!siteId.equals(openSession.getSiteId())) {
+            throw new IllegalArgumentException("Employee is currently checked in at a different site");
+        }
+        if (openSession.getSessionExpiresAt() != null && !openSession.getSessionExpiresAt().isAfter(now)) {
+            throw new IllegalArgumentException("Employee's check-in session has already expired");
+        }
+        Assignment assignment = assignmentRepository.findById(openSession.getAssignmentId())
+                .filter(a -> tenantId.equals(a.getTenantId()) && siteId.equals(a.getSiteId())
+                        && employeeId.equals(a.getEmployeeId()))
+                .orElseThrow(() -> new IllegalArgumentException("Open check-in has no valid assignment"));
+        Shift shift = shiftRepository.findById(assignment.getShiftId())
+                .orElseThrow(() -> new IllegalArgumentException("Assignment has no valid shift"));
 
         // Resolve config: site override → tenant default
         Optional<RandomCheckConfig> configOpt = configRepository.findBySite(tenantId, siteId);
@@ -102,6 +191,12 @@ public class ManualCheckService {
         RandomCheckConfig config = configOpt
                 .orElseThrow(() -> new IllegalArgumentException(
                         "No random check config found for tenant " + tenantId));
+
+        boolean manualAllowed = "enabled".equals(shift.getManualCheckPolicy())
+                || (!"disabled".equals(shift.getManualCheckPolicy()) && config.isManualChecksAllowed());
+        if (!manualAllowed) {
+            throw new IllegalArgumentException("Manual random checks are disabled for this shift/site policy");
+        }
 
         // Enforce monthly random check quota
         planLimitEnforcementService.assertRandomCheckLimit(tenantId, triggeredBy);
@@ -131,7 +226,6 @@ public class ManualCheckService {
         // Build config snapshot (same format as ScheduledCheckGeneratorService)
         String snapshot = buildSnapshot(config, checkMode);
 
-        OffsetDateTime now = OffsetDateTime.now();
         OffsetDateTime expiresAt = now.plusSeconds(config.getResponseWindowSeconds());
 
         // Use check_index = 0 as a sentinel for manual checks.
@@ -205,9 +299,20 @@ public class ManualCheckService {
         return String.format(
                 "{\"configId\":\"%s\",\"checkMode\":\"%s\",\"checksPerShift\":%d," +
                 "\"minIntervalMinutes\":%d,\"allowedStartTime\":\"%s\"," +
-                "\"allowedEndTime\":\"%s\",\"responseWindowSeconds\":%d,\"manual\":true}",
+                "\"allowedEndTime\":\"%s\",\"windowMode\":\"%s\"," +
+                "\"responseWindowSeconds\":%d,\"manual\":true}",
                 c.getId(), checkMode, c.getChecksPerShift(),
                 c.getMinIntervalMinutes(), c.getAllowedStartTime(), c.getAllowedEndTime(),
+                c.getWindowMode(),
                 c.getResponseWindowSeconds());
+    }
+
+    private ZoneId safeZone(String timezone) {
+        try {
+            return ZoneId.of(timezone == null || timezone.isBlank() ? "UTC" : timezone);
+        } catch (Exception ex) {
+            log.warn("Invalid site timezone '{}', falling back to UTC", timezone);
+            return ZoneId.of("UTC");
+        }
     }
 }

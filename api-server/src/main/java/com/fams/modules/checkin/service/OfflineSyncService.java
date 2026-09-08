@@ -40,7 +40,7 @@ import java.util.stream.Collectors;
  * Offline check-in sync — same business rules as {@link CheckinService#submitCheckin}, applied
  * to a PAST timestamp instead of "now". This is a genuinely separate code path (not a thin
  * wrapper around submitCheckin) because a past, already-recorded moment can't go through
- * "now"-relative resolution like {@code AssignmentService.resolveAvailableAssignmentForSiteNow}
+ * "now"-relative resolution like {@code AssignmentService.resolveAvailableAssignmentNow}
  * or a live active-liveness challenge — but every rule that CAN apply retroactively (employee/
  * site active, day-of-week + early-checkin window, duplicate-open-session, Face ID policy,
  * shift-time snapshot) must still be enforced here. This file was originally written before
@@ -284,6 +284,17 @@ public class OfflineSyncService {
                 .effectiveCheckinPolicy(policy)
                 .source("offline")
                 .build();
+
+        // Offline sync is another check-in creation path and must carry the same immutable
+        // session deadline as an online check-in. If the device only reconnects after that
+        // deadline, preserve the check-in evidence but close it immediately as missing checkout
+        // instead of creating a stale "currently working" session for up to another job cycle.
+        OffsetDateTime sessionCutoff = CheckinService.calculateSessionCutoff(record, siteZone);
+        record.setSessionExpiresAt(sessionCutoff);
+        if (!OffsetDateTime.now().isBefore(sessionCutoff)) {
+            record.setSessionClosedAt(sessionCutoff);
+            record.setSessionCloseReason("missing_checkout");
+        }
 
         try {
             checkinRepository.save(record);

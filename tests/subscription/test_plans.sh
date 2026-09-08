@@ -193,7 +193,7 @@ if [ -n "$NEW_PLAN_ID" ]; then
         -X PATCH "$BASE_URL/api/v1/plans/$NEW_PLAN_ID" \
         -H "Content-Type: application/json" \
         -H "Authorization: Bearer $ADMIN_TOKEN" \
-        -d '{"displayName":"Custom Plan Updated","priceMonthly":59.99,"isActive":false}')
+        -d '{"displayName":"Custom Plan Updated","priceMonthly":60000,"isActive":false}')
     upd_body=$(echo "$upd_response" | head -n -1)
     upd_status=$(echo "$upd_response" | tail -n 1)
 
@@ -241,16 +241,16 @@ if [ -n "$NEW_PLAN_ID" ]; then
         -d '{"displayName":"Hacked"}'
 fi
 
-# Test 11: Unauthenticated — all endpoints require auth
+# Test 11: Public catalogue reads; write endpoints still require auth
 echo ""
-echo "--- Test 11: Unauthenticated ---"
-run_test "Unauthenticated list" 401 \
+echo "--- Test 11: Public reads / protected writes ---"
+run_test "Public plan list" 200 \
     -X GET "$BASE_URL/api/v1/plans"
 
-run_test "Unauthenticated get" 401 \
+run_test "Public plan get returns not found" 404 \
     -X GET "$BASE_URL/api/v1/plans/00000000-0000-0000-0000-000000000000"
 
-run_test "Unauthenticated create" 401 \
+run_test "Unauthenticated create is rejected" 401 \
     -X POST "$BASE_URL/api/v1/plans" \
     -H "Content-Type: application/json" \
     -d '{"name":"ghost","displayName":"Ghost","priceMonthly":0,"priceYearly":0}'

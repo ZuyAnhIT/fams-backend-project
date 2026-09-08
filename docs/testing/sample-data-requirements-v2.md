@@ -8,7 +8,9 @@
 >
 > **Bộ dữ liệu hiệu năng (mục 20.4)**: đã build `scripts/seed_perf.sql` (+ `scripts/seed_perf_cleanup.sql` để dọn riêng) — test chạy thật cho ra **150 tenant, 9.455 user, 797 site, 23.302 nhân viên (2 mega tenant 2.500 nhân viên/mỗi, đúng khoảng 1.000-5.000/1 công ty), 1.111.986 dòng checkins** (~1.1 triệu, đạt "hàng triệu" ở cận dưới — có thể tăng bằng cách sửa hằng số `mega_checkin_days`/`normal_checkin_days` trong file nếu cần nhiều hơn). Đã chạy thử + dọn sạch lại, KHÔNG để lẫn vào bộ demo 18-tenant chính. Xem hướng dẫn chạy ở đầu `scripts/seed_perf.sql`.
 
-# TÀI LIỆU YÊU CẦU XÂY DỰNG BỘ DỮ LIỆU MẪU PHỤC VỤ KIỂM THỬ HỆ THỐNG (v2)
+# TÀI LIỆU YÊU CẦU DỮ LIỆU MẪU LỊCH SỬ (v2 — đã thay thế)
+
+> **Không còn là đặc tả seed đang chạy.** Tài liệu này được giữ lại để truy vết quyết định cũ về bộ dữ liệu tải lớn. Bộ seed chức năng hiện hành được mô tả tại `docs/testing/demo-seed-data.md`: 3 tenant, một tenant chính có 15 thành viên và dữ liệu bắt đầu từ tháng 09/2026.
 
 > Viết lại từ bộ yêu cầu bạn cung cấp (22 mục), **đối chiếu từng dòng với schema database thật (43 bảng) và business logic thật đã audit** (`docs/api/backend-feature-audit-2026-08-01.md`), không chỉ chép lại nguyên văn. Nguyên tắc xử lý: mục nào hệ thống **có** đúng khái niệm tương ứng → giữ lại, đổi tên đúng thuật ngữ hệ thống đang dùng, gắn field/entity thật. Mục nào hệ thống **không có** entity/cột dữ liệu tương ứng → đánh dấu rõ **[KHÔNG HỖ TRỢ]**, không bịa dữ liệu giả cho khái niệm không tồn tại (làm vậy sẽ tạo ra dữ liệu "ma" không ai dùng được, và có thể khiến người test hiểu nhầm là tính năng đã có). Mục nào hệ thống có nhưng **khác cách hoạt động** so với mô tả gốc → ghi chú "thực tế hệ thống hoạt động như sau" để không mô tả sai lệch nghiệp vụ.
 

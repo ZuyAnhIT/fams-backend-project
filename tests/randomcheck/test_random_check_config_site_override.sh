@@ -95,6 +95,43 @@ CONFIG_ID=$(echo "$create_body" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -
 echo "Config ID: $CONFIG_ID"
 echo ""
 
+echo "--- #91-92 (2026-08-22): allowed window must overlap the site's actual shift hours ---"
+# Found via support case: a tenant set allowedStartTime/allowedEndTime to a window that never
+# overlapped their only shift's hours — no error anywhere, random checks silently never generated.
+sh_resp=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v1/tenants/$TENANT_ID/sites/$SITE_ID/shifts" \
+    -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" \
+    -d '{"name":"Ca ngan","startTime":"14:25","endTime":"14:35"}')
+[ "$(echo "$sh_resp" | tail -n 1)" -ne 201 ] && { echo "SETUP FAILED: shift"; exit 1; }
+
+overlap_resp=$(curl -s -w "\n%{http_code}" -X PUT "$BASE_URL/api/v1/tenants/$TENANT_ID/random-check-configs/$CONFIG_ID" \
+    -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" \
+    -d '{"allowedStartTime":"15:00:00","allowedEndTime":"17:00:00"}')
+overlap_status=$(echo "$overlap_resp" | tail -n 1)
+overlap_body=$(echo "$overlap_resp" | head -n -1)
+if [ "$overlap_status" -eq 400 ] && echo "$overlap_body" | grep -q "does not overlap any active shift"; then
+    echo "PASS: Window with zero overlap vs the site's only shift is rejected (400)"
+    PASS=$((PASS + 1))
+else
+    echo "FAIL: Window with zero overlap — expected 400 with overlap message, got $overlap_status: $overlap_body"
+    FAIL=$((FAIL + 1))
+fi
+
+# 13:00-15:00 (120 min) overlaps the 14:25-14:35 shift AND still satisfies this config's own
+# checksPerShift=3/minIntervalMinutes=45 feasibility floor (needs >=90 min) — isolates the new
+# overlap check from the pre-existing feasibility check tested elsewhere in this file.
+run_test "Window overlapping the shift is accepted (200)" 200 \
+    -X PUT "$BASE_URL/api/v1/tenants/$TENANT_ID/random-check-configs/$CONFIG_ID" \
+    -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" \
+    -d '{"allowedStartTime":"13:00:00","allowedEndTime":"15:00:00"}'
+
+# Restore the wide original window — later tests (e.g. Test 9 bumps checksPerShift to 5, which
+# needs a much wider window to stay feasible) assume VALID_PAYLOAD's original 07:00-18:00 range.
+run_test "Restore original wide window" 200 \
+    -X PUT "$BASE_URL/api/v1/tenants/$TENANT_ID/random-check-configs/$CONFIG_ID" \
+    -H "Content-Type: application/json" -H "Authorization: Bearer $ADMIN_TOKEN" \
+    -d '{"allowedStartTime":"07:00:00","allowedEndTime":"18:00:00"}'
+echo ""
+
 echo "--- Test 2: Duplicate site override — should return 409 ---"
 run_test "Duplicate site override returns 409" 409 \
     -X POST "$BASE_URL/api/v1/tenants/$TENANT_ID/random-check-configs/sites/$SITE_ID" \
