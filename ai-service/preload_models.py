@@ -1,21 +1,27 @@
 """
-Runs during Docker build to pre-download model weights into the image layer.
-A blank image always fails face detection — that is expected; we only care that
-the weights are fetched and cached before the container starts.
+Pre-downloads all model weights into the image at build time.
+Runs during 'docker build' only — never at runtime.
 """
 import numpy as np
+
+# ── Step 1: trigger deepface to download MiniFASNet weights ───────────────────
+print("Pre-baking deepface MiniFASNet liveness models...")
 from deepface import DeepFace
 
-img = np.zeros((100, 100, 3), dtype=np.uint8)
-print("Downloading FasNet liveness weights...")
+_blank = np.zeros((100, 100, 3), dtype=np.uint8)
 try:
-    DeepFace.extract_faces(img_path=img, anti_spoofing=True, enforce_detection=False)
+    DeepFace.extract_faces(img_path=_blank, anti_spoofing=True, enforce_detection=False)
 except Exception as e:
-    print(f"Weights cached (expected on blank image): {type(e).__name__}")
-print("Liveness model pre-download complete.")
+    print(f"  Expected failure on blank image: {type(e).__name__}")
 
-print("Downloading InsightFace buffalo_l pack (SCRFD + ArcFace + landmarks, ~280MB)...")
+print("  deepface MiniFASNet models ready")
+
+# ── Step 2: pre-bake InsightFace buffalo_l ────────────────────────────────────
+print("Pre-baking InsightFace buffalo_l (SCRFD + ArcFace + landmarks)...")
 import insightface
-app = insightface.app.FaceAnalysis(name="buffalo_l", providers=["CPUExecutionProvider"])
-app.prepare(ctx_id=-1, det_size=(640, 640))
-print("InsightFace model pre-download complete.")
+
+_iface = insightface.app.FaceAnalysis(name="buffalo_l", providers=["CPUExecutionProvider"])
+_iface.prepare(ctx_id=-1, det_size=(640, 640))
+print("  buffalo_l ready")
+
+print("\nAll model weights pre-baked successfully.")

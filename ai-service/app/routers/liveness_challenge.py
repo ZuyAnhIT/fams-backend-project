@@ -14,6 +14,7 @@ from app.dependencies import verify_internal_secret
 from app.services import face_service, storage_service
 from app.services.head_pose_service import classify_frame, estimate_baseline_pose
 from app.services.liveness_service import check_liveness
+from app.services.warmup import cache_warmup_image
 
 logger = logging.getLogger(__name__)
 
@@ -114,8 +115,9 @@ async def submit_frames(
     # match how a phone is actually held, causing systematic false-rejects. Falls back to (0, 0)
     # if the center frame is unreadable.
     baseline_pitch, baseline_yaw = 0.0, 0.0
+    center_idx = actions.index("center")  # always present — start_challenge always prepends it
+    center_face = None
     try:
-        center_idx = actions.index("center")
         center_face = face_service.detect_single_face(frame_bytes_list[center_idx])
         baseline = estimate_baseline_pose(center_face)
         if baseline is not None:
@@ -131,7 +133,13 @@ async def submit_frames(
 
     for i, (data, expected_action) in enumerate(zip(frame_bytes_list, actions)):
         try:
-            face = face_service.detect_single_face(data)
+            # Reuse the face already detected during baseline-pose estimation instead of running
+            # a second, identical InsightFace pass on the same bytes. On a cold container the
+            # detector alone is ~10-15s per call, so this halves the effective center-frame cost.
+            if i == center_idx and center_face is not None:
+                face = center_face
+            else:
+                face = face_service.detect_single_face(data)
         except ValueError as exc:
             steps.append({"action": expected_action, "passed": False, "reason": str(exc)})
             failure_reason = failure_reason or f"frame {i + 1}: {exc}"
@@ -183,6 +191,10 @@ async def submit_frames(
 
     avg_embedding = face_service.average_embeddings(embeddings)
     frame_path = storage_service.save_challenge_frame(tenant_id, challenge_id, center_frame_bytes)
+    # A center frame that passed detection + pose + anti-spoof + cross-frame-identity is exactly
+    # the kind of clean, well-lit real face we want the periodic warmer to feed the models. Only
+    # the first passing frame ever wins — subsequent calls are no-ops (see cache_warmup_image).
+    cache_warmup_image(center_frame_bytes)
     _finish(challenge_id, "passed", {"steps": steps}, embedding=avg_embedding, center_frame_path=frame_path)
     logger.info("Liveness challenge passed: id=%s employee_id=%s", challenge_id, employee_id)
     return {"status": "passed", "steps": steps}

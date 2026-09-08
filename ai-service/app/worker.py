@@ -17,16 +17,20 @@ logger = logging.getLogger(__name__)
 QUEUE_KEY = "fams:ai:face_verify_jobs"
 
 
-def _load_challenge_frame(challenge_id: str, tenant_id: str, employee_id: str) -> bytes | None:
-    """Active-liveness path: load the already-verified center frame from disk instead of
-    receiving fresh base64 bytes in the job payload."""
+def _load_challenge_frame_and_embedding(
+    challenge_id: str, tenant_id: str, employee_id: str,
+) -> tuple[bytes, list[float] | None] | None:
+    """Active-liveness path: load the already-verified center frame from disk AND the averaged
+    embedding the challenge itself computed. Returning both lets the worker skip a second
+    ArcFace extraction — the challenge already ran detect+embed on every frame and stored the
+    average in liveness_challenges.embedding."""
     from app.services.storage_service import read_photo
 
     conn = get_conn()
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT center_frame_path, status FROM liveness_challenges "
+                "SELECT center_frame_path, status, embedding FROM liveness_challenges "
                 "WHERE id = %s::uuid AND tenant_id = %s::uuid AND employee_id = %s::uuid",
                 (challenge_id, tenant_id, employee_id),
             )
@@ -36,7 +40,7 @@ def _load_challenge_frame(challenge_id: str, tenant_id: str, employee_id: str) -
 
     if row is None or row[1] != "passed" or not row[0]:
         return None
-    return read_photo(row[0])
+    return read_photo(row[0]), row[2]
 
 
 def _process_job(job_data: dict) -> None:
@@ -47,11 +51,13 @@ def _process_job(job_data: dict) -> None:
     requires_liveness: bool = job_data.get("requires_liveness", False)
 
     challenge_id = job_data.get("challenge_id")
+    preverified_embedding: list[float] | None = None
     if challenge_id:
-        image_bytes = _load_challenge_frame(challenge_id, tenant_id, employee_id)
-        if image_bytes is None:
+        loaded = _load_challenge_frame_and_embedding(challenge_id, tenant_id, employee_id)
+        if loaded is None:
             send_face_result(source_id, tenant_id, source_type, False, None, None, "challenge_not_found")
             return
+        image_bytes, preverified_embedding = loaded
     else:
         try:
             image_bytes = base64.b64decode(job_data["face_image_base64"])
@@ -101,15 +107,22 @@ def _process_job(job_data: dict) -> None:
 
     stored_embedding: list[float] = row[0]
 
-    try:
-        checkin_embedding = extract_embedding(image_bytes)
-    except ValueError as e:
-        send_face_result(source_id, tenant_id, source_type, False, liveness_verified, None, str(e))
-        return
-    except Exception as e:
-        logger.error("Embedding extraction failed for sourceId=%s: %s", source_id, e)
-        send_face_result(source_id, tenant_id, source_type, False, liveness_verified, None, "extraction_error")
-        return
+    # Challenge flow already computed and stored the averaged embedding across all 3 frames —
+    # re-running detect+embed here on just the center frame would be strictly worse (single frame
+    # vs 3-frame average) AND cost another ~10-15s cold. Reuse it. Plain-photo flow still runs
+    # extraction as before.
+    if preverified_embedding is not None:
+        checkin_embedding = preverified_embedding
+    else:
+        try:
+            checkin_embedding = extract_embedding(image_bytes)
+        except ValueError as e:
+            send_face_result(source_id, tenant_id, source_type, False, liveness_verified, None, str(e))
+            return
+        except Exception as e:
+            logger.error("Embedding extraction failed for sourceId=%s: %s", source_id, e)
+            send_face_result(source_id, tenant_id, source_type, False, liveness_verified, None, "extraction_error")
+            return
 
     try:
         score = cosine_similarity(stored_embedding, checkin_embedding)
